@@ -110,6 +110,17 @@ export const updateShowtime = async (showtimeId, payload) => {
   return await api.patch(`/admin/showtimes/${showtimeId}`, payload);
 };
 
+/**
+ * ยกเลิกทั้งรอบ — ปิดทุกการจอง ใบที่จ่ายแล้วเข้าคิวคืนเงิน และแจ้งเตือนลูกค้าทุกคน
+ * ยังมีสลิปรอตรวจในรอบนั้นจะได้ 409 SHOWTIME_HAS_PENDING_SLIPS (ต้องตรวจให้จบก่อน)
+ * คืน { showtime, cancelledBookings, refundsQueued }
+ */
+export const cancelShowtime = async (showtimeId, reason) => {
+  return await api.post(`/admin/showtimes/${showtimeId}/cancel`, {
+    ...(reason && { reason }),
+  });
+};
+
 export const deleteShowtime = async (showtimeId) => {
   return await api.delete(`/admin/showtimes/${showtimeId}`);
 };

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Ban, Pencil, Plus, Trash2 } from 'lucide-react';
+import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
 import {
+  cancelShowtime,
   createShowtime,
   deleteShowtime,
   getShowtimeAvailability,
@@ -12,11 +14,14 @@ import {
 } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import Button from '../../components/ui/Button.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
 import Select from '../../components/ui/Select.jsx';
+import Textarea from '../../components/ui/Textarea.jsx';
+import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import { bangkokDateKey, formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
@@ -46,6 +51,18 @@ const AdminShowtimesPage = () => {
   const [availability, setAvailability] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  // ยกเลิกรอบที่มีคนจ่ายแล้ว = งานคืนเงินเพิ่ม ป้ายบนเมนูต้องขยับตามทันที
+  const refreshCounts = useAdminQueueStore((store) => store.refresh);
+
+  // โรงที่ปิดใช้งานลงรอบใหม่ไม่ได้ แต่ตอนแก้รอบเดิมที่อยู่ในโรงนั้นต้องยังเห็นโรงเดิมในรายการ
+  // ไม่งั้น select จะเด้งไปโรงแรกเอง แล้วกดบันทึกกลายเป็นย้ายรอบโดยไม่ได้ตั้งใจ
+  const theatreOptions = theatres.filter(
+    (theatre) => theatre.isActive || theatre.id === form.originalTheatreId,
+  );
+  const activeTheatres = theatres.filter((theatre) => theatre.isActive);
 
   /**
    * ถามเซิร์ฟเวอร์ว่าโรงนี้ในวันนี้เหลือช่วงไหนให้ลงรอบใหม่ได้บ้าง
@@ -114,7 +131,7 @@ const AdminShowtimesPage = () => {
   const openCreate = () => {
     setForm({
       movieId: movies[0]?.id ?? '',
-      theatreId: theatres[0]?.id ?? '',
+      theatreId: activeTheatres[0]?.id ?? '',
       startsAt: `${date}T19:00`,
       basePrice: 200,
     });
@@ -157,6 +174,36 @@ const AdminShowtimesPage = () => {
     }
   };
 
+  const openCancel = (showtime) => {
+    setCancelReason('');
+    setCancelTarget(showtime);
+  };
+
+  const confirmCancel = async () => {
+    setCancelling(true);
+    try {
+      const { data } = await cancelShowtime(cancelTarget.id, cancelReason.trim());
+      toast.success(
+        t('admin.showtimeForm.cancelledToast', {
+          count: data.cancelledBookings,
+          refunds: data.refundsQueued,
+        }),
+      );
+      setCancelTarget(null);
+      load();
+      refreshCounts();
+    } catch (error) {
+      // เช่น ยังมีสลิปรอตรวจ — ข้อความจาก server บอกจำนวนและสิ่งที่ต้องทำก่อน
+      toast.error(apiError(error).message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  /** ยกเลิกได้จนกว่ารอบจะฉายจบ — รอบที่ฉายจบแล้วไม่มีอะไรให้ยกเลิก */
+  const canCancelShowtime = (showtime) =>
+    showtime.status === 'SCHEDULED' && new Date(showtime.endsAt).getTime() > Date.now();
+
   const setField = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
 
   return (
@@ -170,7 +217,7 @@ const AdminShowtimesPage = () => {
             onChange={(event) => setDate(event.target.value)}
             className="w-auto"
           />
-          <Button onClick={openCreate} disabled={movies.length === 0 || theatres.length === 0}>
+          <Button onClick={openCreate} disabled={movies.length === 0 || activeTheatres.length === 0}>
             <Plus size={16} /> {t('common.create')}
           </Button>
         </div>
@@ -201,9 +248,22 @@ const AdminShowtimesPage = () => {
                 </tr>
               )}
               {showtimes.map((showtime) => (
-                <tr key={showtime.id} className="border-b border-line/60 last:border-0">
+                <tr
+                  key={showtime.id}
+                  className={clsx(
+                    'border-b border-line/60 last:border-0',
+                    showtime.status === 'CANCELLED' && 'text-muted',
+                  )}
+                >
                   <td className="px-4 py-3 font-semibold">
                     {formatTime(showtime.startsAt, lang)} – {formatTime(showtime.endsAt, lang)}
+                    {showtime.status === 'CANCELLED' && (
+                      <StatusBadge
+                        status="CANCELLED"
+                        label={t('admin.showtimeForm.statusCancelled')}
+                        className="ml-2 align-middle"
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {lang === 'en' ? showtime.movie.titleEn : showtime.movie.titleTh}
@@ -226,22 +286,41 @@ const AdminShowtimesPage = () => {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
+                      {showtime.status === 'SCHEDULED' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={t('common.edit')}
+                          onClick={() => {
+                            setForm({
+                              movieId: showtime.movieId,
+                              theatreId: showtime.theatre.id,
+                              originalTheatreId: showtime.theatre.id,
+                              startsAt: toLocalInputValue(showtime.startsAt),
+                              basePrice: showtime.basePrice,
+                            });
+                            setEditing(showtime.id);
+                          }}
+                        >
+                          <Pencil size={14} />
+                        </Button>
+                      )}
+                      {canCancelShowtime(showtime) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={t('admin.showtimeForm.cancelAction')}
+                          onClick={() => openCancel(showtime)}
+                        >
+                          <Ban size={14} className="text-accent" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          setForm({
-                            movieId: showtime.movieId,
-                            theatreId: showtime.theatre.id,
-                            startsAt: toLocalInputValue(showtime.startsAt),
-                            basePrice: showtime.basePrice,
-                          });
-                          setEditing(showtime.id);
-                        }}
+                        title={t('common.delete')}
+                        onClick={() => setDeleteTarget(showtime)}
                       >
-                        <Pencil size={14} />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(showtime)}>
                         <Trash2 size={14} className="text-danger" />
                       </Button>
                     </div>
@@ -285,9 +364,10 @@ const AdminShowtimesPage = () => {
 
           <Field label={t('admin.showtimeForm.theatre')} required>
             <Select value={form.theatreId} onChange={setField('theatreId')} required>
-              {theatres.map((theatre) => (
+              {theatreOptions.map((theatre) => (
                 <option key={theatre.id} value={theatre.id}>
                   {theatre.name} · {theatre.seatCount} {t('common.seat')}
+                  {!theatre.isActive && ` (${t('admin.showtimeForm.theatreInactive')})`}
                 </option>
               ))}
             </Select>
@@ -398,6 +478,46 @@ const AdminShowtimesPage = () => {
               theatre: deleteTarget.theatre.name,
             })}
           </p>
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(cancelTarget)}
+        onClose={() => setCancelTarget(null)}
+        title={t('admin.showtimeForm.cancelTitle')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCancelTarget(null)}>
+              {t('common.back')}
+            </Button>
+            <Button variant="danger" loading={cancelling} onClick={confirmCancel}>
+              {t('admin.showtimeForm.cancelConfirm')}
+            </Button>
+          </>
+        }
+      >
+        {cancelTarget && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm font-medium">
+              {t('admin.showtimeForm.cancelBody', {
+                time: formatDateTime(cancelTarget.startsAt, lang),
+                movie: lang === 'en' ? cancelTarget.movie.titleEn : cancelTarget.movie.titleTh,
+                theatre: cancelTarget.theatre.name,
+              })}
+            </p>
+            <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {t('admin.showtimeForm.cancelEffects')}
+            </p>
+            <Field label={t('admin.showtimeForm.cancelReason')}>
+              <Textarea
+                value={cancelReason}
+                maxLength={200}
+                placeholder={t('admin.showtimeForm.cancelReasonPlaceholder')}
+                onChange={(event) => setCancelReason(event.target.value)}
+              />
+            </Field>
+          </div>
         )}
       </Modal>
     </div>

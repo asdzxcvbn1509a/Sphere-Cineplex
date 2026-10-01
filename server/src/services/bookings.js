@@ -1,11 +1,12 @@
 import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { env } from '../config/env.js';
-import { addMinutes, bangkokDayRange } from '../utils/datetime.js';
+import { addMinutes, bangkokDayRange, formatBangkokShort } from '../utils/datetime.js';
 import { generateBookingCode, generatePaymentReference } from '../utils/codes.js';
 import { priceSeats, toPriceMap } from '../utils/pricing.js';
 import { createPromptPayPayload } from '../utils/promptpay.js';
-import { notify } from './notifications.js';
+import { buildNotification, notify } from './notifications.js';
+import { getShowtimeById } from './showtimes.js';
 
 const bookingInclude = {
   showtime: {
@@ -137,6 +138,14 @@ export const createBooking = async ({ userId, showtimeId, seatIds }) => {
 
   try {
     const created = await prisma.$transaction(async (tx) => {
+      // ล็อกแถวรอบฉายแบบแชร์ไว้จนจบ transaction — ถ้าผู้ดูแลกำลังยกเลิกรอบนี้อยู่ ตรงนี้จะรอจนเขาเสร็จ
+      // แล้วเห็นสถานะใหม่ ไม่งั้นการจองที่เข้ามาพอดีจังหวะจะหลุดไปค้างอยู่ในรอบที่ถูกยกเลิกแล้ว
+      const [live] = await tx.$queryRaw`
+        SELECT "status" FROM "Showtime" WHERE "id" = ${showtimeId} FOR SHARE`;
+      if (live?.status !== 'SCHEDULED') {
+        throw ApiError.badRequest('SHOWTIME_CANCELLED', 'รอบฉายนี้ถูกยกเลิกแล้ว');
+      }
+
       const booking = await tx.booking.create({
         data: {
           code: generateBookingCode(),
@@ -317,6 +326,37 @@ export const cancelBooking = async ({
 };
 
 /**
+ * ลูกค้าแจ้ง (หรือแก้) บัญชีรับเงินคืนเอง ใช้ได้ตลอดที่ใบนั้นยังรอโอนคืนอยู่
+ *
+ * ใบที่ผู้ดูแลยกเลิกแทน — ยกเลิกทั้งรอบ หรือลูกค้าโทรมาให้ยกเลิก — ไม่มีบัญชีติดมาด้วย
+ * ถ้าไม่มีช่องให้ลูกค้ากรอกเอง ผู้ดูแลต้องไล่โทรถามทีละคน ซึ่งยกเลิกทั้งรอบทีอาจเป็นร้อยสาย
+ */
+export const updateRefundAccount = async ({ bookingId, userId, bankName, accountNo }) => {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { userId: true },
+  });
+  if (!booking) throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
+  if (booking.userId !== userId) {
+    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์แก้ไขรายการจองนี้');
+  }
+
+  // เงื่อนไขสถานะอยู่ใน where เลย — ถ้าผู้ดูแลเพิ่งกดว่าโอนคืนแล้ว บัญชีที่ใช้โอนไปต้องไม่ถูกเขียนทับ
+  const { count } = await prisma.payment.updateMany({
+    where: { bookingId, status: 'REFUND_PENDING' },
+    data: { refundBankName: bankName.trim(), refundAccountNo: accountNo },
+  });
+  if (count === 0) {
+    throw ApiError.conflict(
+      'REFUND_NOT_PENDING',
+      'รายการนี้ไม่ได้รอคืนเงินอยู่แล้ว จึงแก้บัญชีรับเงินคืนไม่ได้',
+    );
+  }
+
+  return getBookingById(bookingId, { userId });
+};
+
+/**
  * ปล่อยที่นั่งของการจองที่หมดเวลาชำระเงิน — เรียกจาก background job
  * นับเฉพาะ PENDING_PAYMENT เท่านั้น การจองที่รอ admin ตรวจสลิปมี holdExpiresAt = null จึงไม่โดน
  */
@@ -370,6 +410,117 @@ export const getTicket = async ({ bookingId, userId }) => {
 };
 
 // ---------- ฝั่ง Admin ----------
+
+const pendingSlipsError = (count) => {
+  return ApiError.conflict(
+    'SHOWTIME_HAS_PENDING_SLIPS',
+    `รอบนี้มีสลิปรอตรวจ ${count} รายการ กรุณาอนุมัติหรือปฏิเสธให้เสร็จก่อนจึงจะยกเลิกรอบได้`,
+    { count },
+  );
+};
+
+/**
+ * ยกเลิกทั้งรอบ (เครื่องฉายเสีย โรงปิดซ่อม ฯลฯ) — ปิดทุกการจองของรอบนี้ในคราวเดียว
+ *
+ * ใบที่จ่ายแล้วเข้าคิวคืนเงินเหมือนตอนลูกค้ายกเลิกเอง ใบที่ยังไม่จ่ายถูกปิดและคืนที่นั่ง
+ * ส่วนสลิปที่ยังรอตรวจต้องให้ผู้ดูแลตัดสินก่อน เพราะยังไม่รู้ว่าเงินเข้าจริงไหม
+ * ถ้ายกเลิกทับไปเลย ใบนั้นจะไม่มีทางไปต่อ — จะคืนเงินก็ไม่รู้ว่ามีเงินให้คืนหรือเปล่า
+ *
+ * ทำทั้งหมดใน transaction เดียวด้วยคำสั่งแบบกลุ่ม จำนวน query จึงคงที่ไม่ว่ารอบนั้นจะมีกี่การจอง
+ */
+export const cancelShowtime = async ({ showtimeId, reason }) => {
+  const showtime = await prisma.showtime.findUnique({
+    where: { id: showtimeId },
+    include: { movie: { select: { titleTh: true, titleEn: true } } },
+  });
+  if (!showtime) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
+  if (showtime.status === 'CANCELLED') {
+    throw ApiError.conflict('SHOWTIME_ALREADY_CANCELLED', 'รอบนี้ถูกยกเลิกไปแล้ว');
+  }
+  if (showtime.endsAt <= new Date()) {
+    throw ApiError.conflict('SHOWTIME_ENDED', 'รอบนี้ฉายจบไปแล้ว ยกเลิกย้อนหลังไม่ได้');
+  }
+
+  const pendingSlips = await prisma.booking.count({
+    where: { showtimeId, status: 'PENDING_VERIFICATION' },
+  });
+  if (pendingSlips > 0) throw pendingSlipsError(pendingSlips);
+
+  const note = reason?.trim() || null;
+  const cancelReason = note ? `รอบฉายถูกยกเลิก: ${note}` : 'รอบฉายถูกยกเลิก';
+  const context = {
+    movieTh: showtime.movie.titleTh,
+    movieEn: showtime.movie.titleEn,
+    whenTh: formatBangkokShort(showtime.startsAt, 'th'),
+    whenEn: formatBangkokShort(showtime.startsAt, 'en'),
+    reason: note,
+  };
+
+  const result = await prisma.$transaction(async (tx) => {
+    // เปลี่ยนสถานะรอบก่อน — การจองใหม่ที่กำลังเข้ามาจะรอล็อกแถวนี้ แล้วเห็นว่ารอบถูกยกเลิก
+    const closed = await tx.showtime.updateMany({
+      where: { id: showtimeId, status: 'SCHEDULED' },
+      data: { status: 'CANCELLED' },
+    });
+    if (closed.count === 0) {
+      throw ApiError.conflict('SHOWTIME_ALREADY_CANCELLED', 'รอบนี้ถูกยกเลิกไปแล้ว');
+    }
+
+    const bookings = await tx.booking.findMany({
+      where: { showtimeId, status: { in: ['PENDING_PAYMENT', 'PAID'] } },
+      select: { id: true, code: true, userId: true, status: true },
+    });
+    const ids = bookings.map((booking) => booking.id);
+    const now = new Date();
+
+    if (ids.length > 0) {
+      const updated = await tx.booking.updateMany({
+        where: { id: { in: ids }, status: { in: ['PENDING_PAYMENT', 'PAID'] } },
+        data: { status: 'CANCELLED', cancelledAt: now, holdExpiresAt: null, cancelReason },
+      });
+      // มีใบไหนเปลี่ยนสถานะไประหว่างทาง (ส่งสลิปพอดี หมดเวลาพอดี) — ยกเลิกทั้งชุด ให้ผู้ดูแลกดใหม่
+      if (updated.count !== ids.length) {
+        throw ApiError.conflict(
+          'BOOKING_STATE_CHANGED',
+          'มีการจองในรอบนี้เปลี่ยนสถานะระหว่างยกเลิก กรุณาลองใหม่อีกครั้ง',
+        );
+      }
+    }
+
+    // สลิปที่ส่งเข้ามาหลังเช็กรอบแรก — ต้องให้ผู้ดูแลตรวจก่อนเหมือนกัน
+    const slipsArrived = await tx.booking.count({
+      where: { showtimeId, status: 'PENDING_VERIFICATION' },
+    });
+    if (slipsArrived > 0) throw pendingSlipsError(slipsArrived);
+
+    if (ids.length === 0) return { cancelledBookings: 0, refundsQueued: 0 };
+
+    await tx.bookingSeat.deleteMany({ where: { bookingId: { in: ids } } });
+    await tx.payment.updateMany({
+      where: { bookingId: { in: ids }, status: { in: ['AWAITING_SLIP', 'REJECTED'] } },
+      data: { status: 'REJECTED', rejectReason: cancelReason },
+    });
+    // ไม่มีบัญชีปลายทางติดมา ลูกค้าแจ้งเองได้ที่หน้าการจองของฉัน (updateRefundAccount)
+    const refunds = await tx.payment.updateMany({
+      where: { bookingId: { in: ids }, status: 'APPROVED' },
+      data: { status: 'REFUND_PENDING', refundDueAt: now },
+    });
+    await tx.notification.createMany({
+      data: bookings.map((booking) =>
+        buildNotification({
+          userId: booking.userId,
+          type: 'SHOWTIME_CANCELLED',
+          context: { ...context, code: booking.code, refund: booking.status === 'PAID' },
+          data: { bookingId: booking.id, showtimeId },
+        }),
+      ),
+    });
+
+    return { cancelledBookings: ids.length, refundsQueued: refunds.count };
+  });
+
+  return { showtime: await getShowtimeById(showtimeId), ...result };
+};
 
 export const listAllBookings = async ({ status, date, q, take = 100 } = {}) => {
   const where = {};

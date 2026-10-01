@@ -12,7 +12,8 @@ export const sendShowtimeReminders = async () => {
     where: {
       status: 'PAID',
       reminderSentAt: null,
-      showtime: { startsAt: { gt: now, lte: until } },
+      // รอบที่ถูกยกเลิกต้องไม่ไปเตือนว่า "ใกล้ถึงเวลาฉาย"
+      showtime: { status: 'SCHEDULED', startsAt: { gt: now, lte: until } },
     },
     include: {
       showtime: {

@@ -40,3 +40,14 @@ export const cancelBooking = async (
     ...(refundAccountNo && { refundAccountNo }),
   });
 };
+
+/**
+ * แจ้ง/แก้บัญชีรับเงินคืน — ใช้กับใบที่รอโอนคืนอยู่ (เช่น ผู้ดูแลยกเลิกรอบแทน)
+ * ใบที่ไม่ได้รอคืนเงินแล้วจะได้ 409 REFUND_NOT_PENDING
+ */
+export const updateRefundAccount = async (bookingId, { refundBankName, refundAccountNo }) => {
+  return await api.patch(`/bookings/${bookingId}/refund-account`, {
+    refundBankName,
+    refundAccountNo,
+  });
+};

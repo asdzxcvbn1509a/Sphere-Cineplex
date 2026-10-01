@@ -67,6 +67,33 @@ export const deleteMovie = async (id, { force = false } = {}) => {
     );
   }
 
+  // ลบถาวรได้แค่เมื่อทุกอย่างจบแล้ว — ยังมีตั๋วรอบที่ยังไม่ฉาย สลิปรอตรวจ หรือเงินรอโอนคืน
+  // ลบไปตอนนี้ลูกค้าจะเสียตั๋ว/เงินโดยไม่มีอะไรเหลือให้ตามเรื่องได้เลย
+  if (bookingCount > 0) {
+    const [activeBookings, openPayments] = await Promise.all([
+      prisma.booking.count({
+        where: {
+          status: { in: ['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID'] },
+          showtime: { movieId: id, endsAt: { gt: new Date() } },
+        },
+      }),
+      prisma.payment.count({
+        where: {
+          status: { in: ['PENDING_VERIFICATION', 'REFUND_PENDING'] },
+          booking: { showtime: { movieId: id } },
+        },
+      }),
+    ]);
+    if (activeBookings > 0 || openPayments > 0) {
+      throw ApiError.conflict(
+        'MOVIE_HAS_OPEN_BOOKINGS',
+        `ยังลบถาวรไม่ได้ — มีการจองที่ยังไม่จบ ${activeBookings} รายการ และสลิปรอตรวจ/เงินรอโอนคืน ${openPayments} รายการ ` +
+          'ยกเลิกรอบฉายและคืนเงินให้เสร็จก่อน หรือเก็บเข้าคลังแทน',
+        { activeBookings, openPayments },
+      );
+    }
+  }
+
   // ลบแล้วรอบฉาย การจอง ที่นั่งที่จอง และรายการชำระเงินจะถูกลบตามไปด้วย (cascade ใน schema)
   await prisma.movie.delete({ where: { id } });
   return { deleted: true, bookingCount, showtimeCount };

@@ -19,6 +19,7 @@ import {
   getShowtimeAvailability,
   createShowtime,
   updateShowtime,
+  cancelShowtime,
   deleteShowtime,
   listAllBookings,
   cancelBooking,
@@ -101,11 +102,16 @@ const showtimeCreateSchema = z.object({
   basePrice: z.coerce.number().int().min(1).max(5000),
 });
 
+// ไม่มี status — การยกเลิกรอบต้องผ่าน /showtimes/:id/cancel ที่ปิดการจองและเข้าคิวคืนเงินให้ด้วย
+// ถ้ายอมให้ PATCH เปลี่ยนสถานะตรง ๆ ตั๋วที่จ่ายแล้วจะค้างอยู่ในรอบที่ถูกยกเลิกโดยไม่มีใครคืนเงิน
 const showtimeUpdateSchema = z.object({
   theatreId: z.string().min(1).optional(),
   startsAt: z.coerce.date().optional(),
   basePrice: z.coerce.number().int().min(1).max(5000).optional(),
-  status: z.enum(['SCHEDULED', 'CANCELLED']).optional(),
+});
+
+const showtimeCancelSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
 });
 
 const showtimeListQuery = z.object({
@@ -196,6 +202,8 @@ router.get('/showtimes', validate({ query: showtimeListQuery }), listShowtimes);
 router.get('/showtimes/availability', validate({ query: availabilityQuery }), getShowtimeAvailability);
 router.post('/showtimes', validate({ body: showtimeCreateSchema }), createShowtime);
 router.patch('/showtimes/:id', validate({ body: showtimeUpdateSchema }), updateShowtime);
+// @ENDPOINT http://localhost:4000/api/admin/showtimes/:id/cancel
+router.post('/showtimes/:id/cancel', validate({ body: showtimeCancelSchema }), cancelShowtime);
 router.delete('/showtimes/:id', deleteShowtime);
 
 // ---------- การจองทั้งหมด ----------

@@ -229,7 +229,13 @@
     "refundTo": "Refund to {{bank}} {{account}}",
     "viewRefundSlip": "Refund slip",
     "refundSlipTitle": "Proof of refund transfer",
-    "refundedAt": "Transferred on {{at}}"
+    "refundedAt": "Transferred on {{at}}",
+    "refundAccountAdd": "Add refund account",
+    "refundAccountEdit": "Edit refund account",
+    "refundAccountTitle": "Refund account",
+    "refundAccountLater": "We will transfer the refund for booking {{code}} to this account. Please double-check the account number before saving.",
+    "refundAccountSaved": "Refund account saved",
+    "refundAccountMissing": "No refund account yet"
   },
   "notifications": {
     "title": "Notifications",
@@ -308,7 +314,10 @@
       "resizeWarning": "Changing the grid size regenerates every seat",
       "deleteTitle": "Delete theatre",
       "deleteBody": "Delete \"{{name}}\" from the system?",
-      "deleteShowtimesNote": "Its {{count}} showtime(s) will be deleted too."
+      "deleteShowtimesNote": "Its {{count}} showtime(s) will be deleted too.",
+      "isActive": "Open for new showtimes",
+      "isActiveHint": "Turn off while under repair or retired — theatres with booking history can't be deleted, deactivate them instead",
+      "inactiveBadge": "Inactive"
     },
     "showtimeForm": {
       "movie": "Movie",
@@ -324,7 +333,17 @@
       "noFreeSlot": "No room left for this film today. Try another date or theatre.",
       "conflictWith": "Clashes with \"{{movie}}\" ({{from}}-{{to}})",
       "deleteTitle": "Delete showtime",
-      "deleteBody": "Delete the {{time}} showing of \"{{movie}}\" ({{theatre}})?"
+      "deleteBody": "Delete the {{time}} showing of \"{{movie}}\" ({{theatre}})?",
+      "cancelAction": "Cancel showtime",
+      "cancelTitle": "Cancel this showtime?",
+      "cancelBody": "Cancel the {{time}} showing of \"{{movie}}\" ({{theatre}})",
+      "cancelEffects": "Every booking for this showtime will be cancelled and its seats released, paid bookings go to the refund queue, and every customer is notified. This cannot be undone.",
+      "cancelReason": "Reason (shown to customers)",
+      "cancelReasonPlaceholder": "e.g. Projector failure",
+      "cancelConfirm": "Cancel showtime",
+      "cancelledToast": "Showtime cancelled — {{count}} bookings closed, {{refunds}} refunds queued",
+      "statusCancelled": "Cancelled",
+      "theatreInactive": "inactive"
     },
     "paymentQueue": {
       "empty": "No slips waiting for review",

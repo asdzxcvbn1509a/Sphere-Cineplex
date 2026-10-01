@@ -41,17 +41,34 @@ const templates = {
     bodyTh: `"${ctx.movieTh}" รอบ ${ctx.timeText} ที่ ${ctx.theatre} — เตรียม E-Ticket ให้พร้อมนะ`,
     bodyEn: `"${ctx.movieEn}" at ${ctx.timeText}, ${ctx.theatre} — have your e-ticket ready.`,
   }),
+  SHOWTIME_CANCELLED: (ctx) => ({
+    titleTh: 'รอบฉายถูกยกเลิก',
+    titleEn: 'Showtime cancelled',
+    bodyTh:
+      `รอบ "${ctx.movieTh}" ${ctx.whenTh} ถูกยกเลิก${ctx.reason ? ` (${ctx.reason})` : ''} ` +
+      `การจอง ${ctx.code} จึงถูกยกเลิกด้วย` +
+      (ctx.refund ? ' เราจะโอนเงินคืนให้ กรุณาแจ้งบัญชีรับเงินคืนที่หน้า "การจองของฉัน"' : ''),
+    bodyEn:
+      `The "${ctx.movieEn}" showtime on ${ctx.whenEn} was cancelled${ctx.reason ? ` (${ctx.reason})` : ''}, ` +
+      `so booking ${ctx.code} was cancelled too.` +
+      (ctx.refund ? ' We will refund you — please add your bank account on the "My bookings" page.' : ''),
+  }),
+};
+
+/**
+ * ข้อมูลหนึ่งแถวของการแจ้งเตือน (ยังไม่บันทึก) — แยกออกมาให้ทั้ง notify ทีละใบ
+ * และ createMany ตอนแจ้งหลายคนพร้อมกัน (เช่น ยกเลิกทั้งรอบ) ใช้ข้อความชุดเดียวกัน
+ */
+export const buildNotification = ({ userId, type, context = {}, data = null }) => {
+  return { userId, type, ...templates[type](context), data };
 };
 
 /**
  * สร้างการแจ้งเตือน — ส่ง `client` เป็น tx ได้เมื่อเรียกจากใน transaction
- * @param {'PAYMENT_APPROVED'|'PAYMENT_REJECTED'|'BOOKING_CANCELLED'|'BOOKING_EXPIRED'|'SHOWTIME_REMINDER'} type
+ * @param {keyof typeof templates} type
  */
-export const notify = ({ userId, type, context = {}, data = null }, client = prisma) => {
-  const content = templates[type](context);
-  return client.notification.create({
-    data: { userId, type, ...content, data },
-  });
+export const notify = (notification, client = prisma) => {
+  return client.notification.create({ data: buildNotification(notification) });
 };
 
 export const listNotifications = async (userId, { unreadOnly = false, limit = 50 } = {}) => {

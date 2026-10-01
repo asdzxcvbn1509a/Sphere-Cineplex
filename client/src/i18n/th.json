@@ -229,7 +229,13 @@
     "refundTo": "คืนเงินเข้าบัญชี {{bank}} {{account}}",
     "viewRefundSlip": "ดูสลิปคืนเงิน",
     "refundSlipTitle": "หลักฐานการโอนเงินคืน",
-    "refundedAt": "โอนคืนเมื่อ {{at}}"
+    "refundedAt": "โอนคืนเมื่อ {{at}}",
+    "refundAccountAdd": "แจ้งบัญชีรับเงินคืน",
+    "refundAccountEdit": "แก้ไขบัญชีรับเงินคืน",
+    "refundAccountTitle": "บัญชีรับเงินคืน",
+    "refundAccountLater": "ผู้ดูแลจะโอนเงินคืนของการจอง {{code}} เข้าบัญชีนี้ ตรวจเลขบัญชีให้ถูกต้องก่อนบันทึก",
+    "refundAccountSaved": "บันทึกบัญชีรับเงินคืนแล้ว",
+    "refundAccountMissing": "ยังไม่ได้แจ้งบัญชีรับเงินคืน"
   },
   "notifications": {
     "title": "การแจ้งเตือน",
@@ -308,7 +314,10 @@
       "resizeWarning": "การเปลี่ยนขนาดผังจะสร้างที่นั่งใหม่ทั้งหมด",
       "deleteTitle": "ยืนยันการลบโรงภาพยนตร์",
       "deleteBody": "ต้องการลบ \"{{name}}\" ออกจากระบบใช่หรือไม่?",
-      "deleteShowtimesNote": "รอบฉาย {{count}} รอบของโรงนี้จะถูกลบไปด้วย"
+      "deleteShowtimesNote": "รอบฉาย {{count}} รอบของโรงนี้จะถูกลบไปด้วย",
+      "isActive": "เปิดให้ลงรอบฉาย",
+      "isActiveHint": "ปิดไว้เมื่อโรงซ่อมหรือเลิกใช้ — โรงที่เคยมีการจองลบไม่ได้ ให้ปิดใช้งานแทน",
+      "inactiveBadge": "ปิดใช้งาน"
     },
     "showtimeForm": {
       "movie": "ภาพยนตร์",
@@ -324,7 +333,17 @@
       "noFreeSlot": "วันนี้ไม่เหลือเวลาว่างสำหรับหนังเรื่องนี้แล้ว ลองเปลี่ยนวันหรือโรง",
       "conflictWith": "ชนกับรอบของ \"{{movie}}\" ({{from}}-{{to}})",
       "deleteTitle": "ยืนยันการลบรอบฉาย",
-      "deleteBody": "ต้องการลบรอบ {{time}} ของ \"{{movie}}\" ({{theatre}}) ใช่หรือไม่?"
+      "deleteBody": "ต้องการลบรอบ {{time}} ของ \"{{movie}}\" ({{theatre}}) ใช่หรือไม่?",
+      "cancelAction": "ยกเลิกรอบ",
+      "cancelTitle": "ยืนยันการยกเลิกรอบฉาย",
+      "cancelBody": "ยกเลิกรอบ {{time}} ของ \"{{movie}}\" ({{theatre}})",
+      "cancelEffects": "การจองทั้งหมดของรอบนี้จะถูกยกเลิกและคืนที่นั่ง ใบที่ชำระเงินแล้วจะเข้าคิวคืนเงิน และลูกค้าทุกคนจะได้รับแจ้งเตือน — ย้อนกลับไม่ได้",
+      "cancelReason": "เหตุผล (ลูกค้าจะเห็นในแจ้งเตือน)",
+      "cancelReasonPlaceholder": "เช่น เครื่องฉายขัดข้อง",
+      "cancelConfirm": "ยกเลิกรอบนี้",
+      "cancelledToast": "ยกเลิกรอบแล้ว — ปิดการจอง {{count}} รายการ เข้าคิวคืนเงิน {{refunds}} รายการ",
+      "statusCancelled": "ยกเลิกแล้ว",
+      "theatreInactive": "ปิดใช้งาน"
     },
     "paymentQueue": {
       "empty": "ไม่มีสลิปรอตรวจสอบ",

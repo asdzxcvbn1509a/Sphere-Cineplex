@@ -63,3 +63,19 @@ export const cancelBooking = async (req, res, next) => {
     next(error);
   }
 };
+
+/** แจ้ง/แก้บัญชีรับเงินคืน สำหรับใบที่รอโอนคืนอยู่ */
+// @ENDPOINT PATCH http://localhost:4000/api/bookings/:id/refund-account
+export const updateRefundAccount = async (req, res, next) => {
+  try {
+    const booking = await bookingService.updateRefundAccount({
+      bookingId: req.params.id,
+      userId: req.user.id,
+      bankName: req.body.refundBankName,
+      accountNo: req.body.refundAccountNo,
+    });
+    res.json({ booking });
+  } catch (error) {
+    next(error);
+  }
+};

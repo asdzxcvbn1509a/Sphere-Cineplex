@@ -26,6 +26,17 @@ export const upcomingDateKeys = (days = 7, from = new Date()) => {
   return keys;
 };
 
+/** วันเวลาแบบสั้นตามเวลาไทย ใช้ในข้อความแจ้งเตือน เช่น "2 ต.ค. 19:00" / "2 Oct, 19:00" */
+export const formatBangkokShort = (date, lang = 'th') => {
+  return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date));
+};
+
 export const addMinutes = (date, minutes) => {
   return new Date(new Date(date).getTime() + minutes * 60 * 1000);
 };

@@ -1,22 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CreditCard, ReceiptText, Ticket, TicketX } from 'lucide-react';
+import { CreditCard, Landmark, ReceiptText, Ticket, TicketX } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
-import { cancelBooking, listMyBookings } from '../api/bookings.js';
+import { cancelBooking, listMyBookings, updateRefundAccount } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
-import {
-  BANKS,
-  OTHER_BANK,
-  bankNameByCode,
-  isValidAccountNo,
-  normalizeAccountNo,
-} from '../utils/banks.js';
+import { EMPTY_REFUND_FORM, readRefundAccountForm, refundFormFromAccount } from '../utils/banks.js';
+import RefundAccountFields from '../components/booking/RefundAccountFields.jsx';
 import Button from '../components/ui/Button.jsx';
-import Field from '../components/ui/Field.jsx';
-import Input from '../components/ui/Input.jsx';
-import Select from '../components/ui/Select.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import SlipImage from '../components/ui/SlipImage.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
@@ -26,7 +18,6 @@ import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { formatDate, formatDateTime, formatMoney, formatTime } from '../utils/format.js';
 
 const TABS = ['upcoming', 'history'];
-const EMPTY_REFUND_FORM = { bankCode: '', customBank: '', accountNo: '' };
 
 /** ใบที่จ่ายเงินไปแล้วเท่านั้นที่ต้องบอกบัญชีรับเงินคืน ใบที่ยังไม่จ่ายไม่ต้องถาม */
 const needsRefundAccount = (booking) => booking?.payment?.status === 'APPROVED';
@@ -42,6 +33,11 @@ const MyBookingsPage = () => {
   const [refundForm, setRefundForm] = useState(EMPTY_REFUND_FORM);
   const [formError, setFormError] = useState({});
   const [slipTarget, setSlipTarget] = useState(null);
+  // แจ้ง/แก้บัญชีรับเงินคืนภายหลัง — ใบที่ผู้ดูแลยกเลิกแทนไม่มีบัญชีติดมา
+  const [accountTarget, setAccountTarget] = useState(null);
+  const [accountForm, setAccountForm] = useState(EMPTY_REFUND_FORM);
+  const [accountErrors, setAccountErrors] = useState({});
+  const [savingAccount, setSavingAccount] = useState(false);
 
   const load = useCallback(() => {
     setState({ loading: true, error: null });
@@ -73,18 +69,35 @@ const MyBookingsPage = () => {
   /** คืนบัญชีที่กรอกไว้ถ้าครบ — ถ้าไม่ครบจะโชว์ error ใต้ช่องแล้วคืน null */
   const readRefundAccount = () => {
     if (!needsRefundAccount(cancelTarget)) return {};
-
-    const bankName =
-      refundForm.bankCode === OTHER_BANK
-        ? refundForm.customBank.trim()
-        : bankNameByCode(refundForm.bankCode);
-    const errors = {};
-    if (!bankName) errors.bank = t('bookings.bankRequired');
-    if (!isValidAccountNo(refundForm.accountNo)) errors.accountNo = t('bookings.accountNoInvalid');
-
+    const { value, errors } = readRefundAccountForm(refundForm, t);
     setFormError(errors);
-    if (Object.keys(errors).length > 0) return null;
-    return { refundBankName: bankName, refundAccountNo: normalizeAccountNo(refundForm.accountNo) };
+    return value;
+  };
+
+  const openAccount = (booking) => {
+    setAccountForm(
+      refundFormFromAccount(booking.payment?.refundBankName, booking.payment?.refundAccountNo),
+    );
+    setAccountErrors({});
+    setAccountTarget(booking);
+  };
+
+  const saveAccount = async () => {
+    const { value, errors } = readRefundAccountForm(accountForm, t);
+    setAccountErrors(errors);
+    if (!value) return;
+
+    setSavingAccount(true);
+    try {
+      await updateRefundAccount(accountTarget.id, value);
+      toast.success(t('bookings.refundAccountSaved'));
+      setAccountTarget(null);
+      load();
+    } catch (error) {
+      toast.error(apiError(error).message);
+    } finally {
+      setSavingAccount(false);
+    }
   };
 
   const confirmCancel = async () => {
@@ -215,6 +228,20 @@ const MyBookingsPage = () => {
                   })}
                 </span>
               )}
+              {booking.payment?.status === 'REFUND_PENDING' && !booking.payment.refundAccountNo && (
+                <span className="text-xs text-danger sm:text-sm">
+                  {t('bookings.refundAccountMissing')}
+                </span>
+              )}
+              {/* แก้บัญชีได้ตลอดที่ยังรอโอนคืน — พิมพ์เลขผิดไว้ตอนยกเลิกก็แก้เองได้ ไม่ต้องโทรหาผู้ดูแล */}
+              {booking.payment?.status === 'REFUND_PENDING' && (
+                <Button variant="secondary" size="sm" onClick={() => openAccount(booking)}>
+                  <Landmark size={14} />{' '}
+                  {booking.payment.refundAccountNo
+                    ? t('bookings.refundAccountEdit')
+                    : t('bookings.refundAccountAdd')}
+                </Button>
+              )}
               {booking.payment?.status === 'REFUNDED' && (
                 <span className="rounded-md border border-success/40 bg-success/10 px-2.5 py-1.5 text-xs text-success sm:text-sm">
                   {t('bookings.refunded', {
@@ -276,54 +303,33 @@ const MyBookingsPage = () => {
         {needsRefundAccount(cancelTarget) && (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/60 p-3">
             <p className="text-xs text-muted">{t('bookings.refundAccountIntro')}</p>
-
-            <Field label={t('bookings.bankName')} required error={formError.bank}>
-              <Select
-                value={refundForm.bankCode}
-                onChange={(event) =>
-                  setRefundForm((form) => ({ ...form, bankCode: event.target.value }))
-                }
-              >
-                <option value="">{t('bookings.bankPlaceholder')}</option>
-                {BANKS.map((bank) => (
-                  <option key={bank.code} value={bank.code}>
-                    {lang === 'en' ? bank.en : bank.th}
-                  </option>
-                ))}
-                <option value={OTHER_BANK}>{t('bookings.bankOther')}</option>
-              </Select>
-            </Field>
-
-            {refundForm.bankCode === OTHER_BANK && (
-              <Field label={t('bookings.bankNameCustom')} required>
-                <Input
-                  value={refundForm.customBank}
-                  maxLength={60}
-                  onChange={(event) =>
-                    setRefundForm((form) => ({ ...form, customBank: event.target.value }))
-                  }
-                />
-              </Field>
-            )}
-
-            <Field
-              label={t('bookings.accountNo')}
-              required
-              hint={t('bookings.accountNoHint')}
-              error={formError.accountNo}
-            >
-              <Input
-                value={refundForm.accountNo}
-                inputMode="numeric"
-                maxLength={20}
-                placeholder="1234567890"
-                onChange={(event) =>
-                  setRefundForm((form) => ({ ...form, accountNo: event.target.value }))
-                }
-              />
-            </Field>
+            <RefundAccountFields form={refundForm} onChange={setRefundForm} errors={formError} />
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={Boolean(accountTarget)}
+        onClose={() => setAccountTarget(null)}
+        title={t('bookings.refundAccountTitle')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAccountTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={savingAccount} onClick={saveAccount}>
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted">
+            {t('bookings.refundAccountLater', { code: accountTarget?.code })}
+          </p>
+          <RefundAccountFields form={accountForm} onChange={setAccountForm} errors={accountErrors} />
+        </div>
       </Modal>
     </div>
   );

@@ -59,6 +59,8 @@ enum NotificationType {
   BOOKING_CANCELLED
   BOOKING_EXPIRED
   SHOWTIME_REMINDER
+  /// ผู้ดูแลยกเลิกทั้งรอบ (เครื่องฉายเสีย โรงปิด ฯลฯ) — ใบที่จ่ายแล้วเข้าคิวคืนเงิน
+  SHOWTIME_CANCELLED
 }
 
 model User {

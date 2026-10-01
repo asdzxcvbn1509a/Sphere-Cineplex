@@ -39,8 +39,18 @@ const shapeShowtime = (showtime) => {
   };
 };
 
-export const listShowtimes = async ({ movieId, theatreId, date, includePast = false } = {}) => {
-  const where = { status: 'SCHEDULED' };
+/**
+ * includeCancelled ใช้ฝั่งผู้ดูแล — รอบที่ยกเลิกแล้วต้องยังเห็นในตาราง ไม่งั้นรอบจะหายไปเฉย ๆ
+ * จนไม่รู้ว่าถูกยกเลิกหรือถูกลบ ส่วนหน้าลูกค้าเห็นเฉพาะรอบที่ยังขายอยู่
+ */
+export const listShowtimes = async ({
+  movieId,
+  theatreId,
+  date,
+  includePast = false,
+  includeCancelled = false,
+} = {}) => {
+  const where = includeCancelled ? {} : { status: 'SCHEDULED' };
   if (movieId) where.movieId = movieId;
   if (theatreId) where.theatreId = theatreId;
 
@@ -230,12 +240,21 @@ export const getAvailability = async ({ theatreId, date, movieId, excludeId }) =
   };
 };
 
+/** โรงที่ผู้ดูแลปิดไว้ (ปิดซ่อม เลิกใช้) ต้องรับรอบใหม่ไม่ได้ — ทางเลือกแทนการลบโรงที่มีประวัติการจอง */
+const findActiveTheatre = async (theatreId) => {
+  const theatre = await prisma.theatre.findUnique({ where: { id: theatreId } });
+  if (!theatre) throw ApiError.notFound('THEATRE_NOT_FOUND', 'ไม่พบโรงภาพยนตร์นี้');
+  if (!theatre.isActive) {
+    throw ApiError.badRequest('THEATRE_INACTIVE', `โรง "${theatre.name}" ปิดใช้งานอยู่ ลงรอบฉายใหม่ไม่ได้`);
+  }
+  return theatre;
+};
+
 export const createShowtime = async ({ movieId, theatreId, startsAt, basePrice }) => {
   const movie = await prisma.movie.findUnique({ where: { id: movieId } });
   if (!movie) throw ApiError.notFound('MOVIE_NOT_FOUND', 'ไม่พบภาพยนตร์เรื่องนี้');
 
-  const theatre = await prisma.theatre.findUnique({ where: { id: theatreId } });
-  if (!theatre) throw ApiError.notFound('THEATRE_NOT_FOUND', 'ไม่พบโรงภาพยนตร์นี้');
+  await findActiveTheatre(theatreId);
 
   const start = new Date(startsAt);
   const end = new Date(start.getTime() + movie.durationMin * 60 * 1000);
@@ -256,23 +275,35 @@ export const createShowtime = async ({ movieId, theatreId, startsAt, basePrice }
   return shapeShowtime(showtime);
 };
 
+/**
+ * แก้รอบฉาย — ย้ายเวลา/โรง และ/หรือเปลี่ยนราคา
+ * การยกเลิกรอบไม่ได้ทำผ่านที่นี่ ต้องใช้ cancelShowtime ซึ่งปิดการจองและเข้าคิวคืนเงินให้ด้วย
+ */
 export const updateShowtime = async (id, data) => {
   const existing = await prisma.showtime.findUnique({ where: { id }, include: { movie: true } });
   if (!existing) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
-
-  const bookedCount = await prisma.bookingSeat.count({ where: { showtimeId: id } });
-  if (bookedCount > 0 && (data.startsAt || data.theatreId)) {
-    throw ApiError.conflict(
-      'SHOWTIME_HAS_BOOKINGS',
-      'รอบนี้มีการจองแล้ว ไม่สามารถย้ายเวลา/โรงได้ (ยกเลิกรอบแทนหากจำเป็น)',
-    );
+  if (existing.status === 'CANCELLED') {
+    throw ApiError.conflict('SHOWTIME_ALREADY_CANCELLED', 'รอบนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้');
   }
 
   const theatreId = data.theatreId ?? existing.theatreId;
   const start = data.startsAt ? new Date(data.startsAt) : existing.startsAt;
   const end = new Date(start.getTime() + existing.movie.durationMin * 60 * 1000);
 
-  if (data.startsAt || data.theatreId) {
+  // หน้าแก้รอบส่งเวลาและโรงมาทุกครั้งแม้ไม่ได้แตะ จึงต้องดูว่า "ค่าเปลี่ยนจริง" ไม่ใช่แค่ "มีส่งมา"
+  // ไม่งั้นรอบที่มีคนจองแล้วจะแก้ราคาไม่ได้เลย ทั้งที่ไม่ได้ย้ายเวลาหรือโรง
+  const theatreChanged = theatreId !== existing.theatreId;
+  const moving = theatreChanged || start.getTime() !== existing.startsAt.getTime();
+
+  if (moving) {
+    const bookedCount = await prisma.bookingSeat.count({ where: { showtimeId: id } });
+    if (bookedCount > 0) {
+      throw ApiError.conflict(
+        'SHOWTIME_HAS_BOOKINGS',
+        'รอบนี้มีการจองแล้ว ไม่สามารถย้ายเวลา/โรงได้ (ยกเลิกรอบแทนหากจำเป็น)',
+      );
+    }
+    if (theatreChanged) await findActiveTheatre(theatreId);
     await assertNoOverlap({ theatreId, startsAt: start, endsAt: end, excludeId: id });
   }
 
@@ -286,10 +317,8 @@ export const updateShowtime = async (id, data) => {
     return tx.showtime.update({
       where: { id },
       data: {
-        ...(data.theatreId && { theatreId }),
-        ...(data.startsAt && { startsAt: start, endsAt: end }),
+        ...(moving && { theatreId, startsAt: start, endsAt: end }),
         ...(data.basePrice !== undefined && { basePrice: data.basePrice }),
-        ...(data.status && { status: data.status }),
       },
       include: showtimeInclude,
     });
@@ -298,12 +327,20 @@ export const updateShowtime = async (id, data) => {
   return shapeShowtime(showtime);
 };
 
+/**
+ * ลบรอบได้เฉพาะรอบที่ไม่เคยมีใครจองเลย
+ *
+ * นับทุกการจองที่เคยมี ไม่ใช่แค่ที่นั่งที่ยังถูกยึด — การจองที่ยกเลิกแล้วไม่มี BookingSeat เหลือ
+ * แต่ยังผูกกับรายการชำระเงินและคิวคืนเงินอยู่ ลบรอบทีเดียวทุกอย่างถูก cascade หายตามไปเงียบ ๆ
+ * (ลูกค้าที่รอเงินคืนจะไม่ได้เงิน และไม่เหลือหลักฐานว่าเคยจ่าย) รอบที่ไม่ใช้แล้วให้ "ยกเลิกรอบ" แทน
+ */
 export const deleteShowtime = async (id) => {
-  const bookedCount = await prisma.bookingSeat.count({ where: { showtimeId: id } });
-  if (bookedCount > 0) {
+  const bookingCount = await prisma.booking.count({ where: { showtimeId: id } });
+  if (bookingCount > 0) {
     throw ApiError.conflict(
       'SHOWTIME_HAS_BOOKINGS',
-      'รอบนี้มีการจองอยู่ ไม่สามารถลบได้ — กรุณาจัดการการจองก่อน',
+      'รอบนี้มีประวัติการจอง ลบไม่ได้เพราะประวัติและรายการคืนเงินจะหายไปด้วย — ใช้ "ยกเลิกรอบ" แทน',
+      { bookingCount },
     );
   }
   await prisma.showtime.delete({ where: { id } });

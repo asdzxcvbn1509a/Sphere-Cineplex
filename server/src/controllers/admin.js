@@ -140,6 +140,8 @@ export const listShowtimes = async (req, res, next) => {
     const showtimes = await showtimeService.listShowtimes({
       ...req.validatedQuery,
       includePast: req.validatedQuery.includePast ?? true,
+      // ผู้ดูแลต้องเห็นรอบที่ยกเลิกแล้วด้วย ไม่งั้นรอบหายจากตารางจนไม่รู้ว่าเกิดอะไรขึ้น
+      includeCancelled: true,
     });
     res.json({ showtimes });
   } catch (error) {
@@ -172,6 +174,18 @@ export const updateShowtime = async (req, res, next) => {
   try {
     const showtime = await showtimeService.updateShowtime(req.params.id, req.body);
     res.json({ showtime });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** ยกเลิกทั้งรอบ — ปิดทุกการจอง ใบที่จ่ายแล้วเข้าคิวคืนเงิน และแจ้งเตือนลูกค้าทุกคน */
+// @ENDPOINT POST http://localhost:4000/api/admin/showtimes/:id/cancel
+export const cancelShowtime = async (req, res, next) => {
+  try {
+    res.json(
+      await bookingService.cancelShowtime({ showtimeId: req.params.id, reason: req.body.reason }),
+    );
   } catch (error) {
     next(error);
   }

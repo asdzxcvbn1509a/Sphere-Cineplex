@@ -8,6 +8,7 @@ import {
   getBooking,
   getTicket,
   cancelBooking,
+  updateRefundAccount,
 } from '../controllers/bookings.js';
 // middleware
 import { authenticate } from '../middleware/authenticate.js';
@@ -32,11 +33,19 @@ const accountNoSchema = z
   .transform((value) => value.replace(/[\s-]/g, ''))
   .refine((value) => /^[0-9]{10,15}$/.test(value), 'เลขที่บัญชีต้องเป็นตัวเลข 10-15 หลัก');
 
+const bankNameSchema = z.string().trim().min(2, 'กรุณาระบุธนาคาร').max(60);
+
 const cancelSchema = z.object({
   reason: z.string().trim().max(200).optional(),
   // บัญชีสำหรับรับเงินคืน — จำเป็นเฉพาะการจองที่ชำระเงินไปแล้ว (service เป็นคนบังคับ)
-  refundBankName: z.string().trim().min(2, 'กรุณาระบุธนาคาร').max(60).optional(),
+  refundBankName: bankNameSchema.optional(),
   refundAccountNo: accountNoSchema.optional(),
+});
+
+// แจ้งบัญชีภายหลัง (ใบที่ผู้ดูแลยกเลิกแทน) — มาทีหลังจึงต้องส่งครบทั้งคู่
+const refundAccountSchema = z.object({
+  refundBankName: bankNameSchema,
+  refundAccountNo: accountNoSchema,
 });
 
 // @ENDPOINT http://localhost:4000/api/bookings
@@ -48,5 +57,7 @@ router.get('/:id', getBooking);
 router.get('/:id/ticket', getTicket);
 // @ENDPOINT http://localhost:4000/api/bookings/:id/cancel
 router.post('/:id/cancel', validate({ body: cancelSchema }), cancelBooking);
+// @ENDPOINT http://localhost:4000/api/bookings/:id/refund-account
+router.patch('/:id/refund-account', validate({ body: refundAccountSchema }), updateRefundAccount);
 
 export default router;

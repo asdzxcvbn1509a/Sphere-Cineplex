@@ -118,10 +118,18 @@ export const updateTheatre = async (id, data) => {
   return getTheatreById(id);
 };
 
+/**
+ * ลบโรงได้เฉพาะโรงที่ไม่เคยมีการจองเลย — เหตุผลเดียวกับ deleteShowtime
+ * (ลบโรง = cascade ลบรอบ → การจอง → รายการชำระเงินและคิวคืนเงิน) โรงที่เลิกใช้ให้ปิดใช้งานแทน
+ */
 export const deleteTheatre = async (id) => {
-  const bookedSeats = await prisma.bookingSeat.count({ where: { seat: { theatreId: id } } });
-  if (bookedSeats > 0) {
-    throw ApiError.conflict('THEATRE_HAS_BOOKINGS', 'โรงนี้มีการจองอยู่ ไม่สามารถลบได้');
+  const bookingCount = await prisma.booking.count({ where: { showtime: { theatreId: id } } });
+  if (bookingCount > 0) {
+    throw ApiError.conflict(
+      'THEATRE_HAS_BOOKINGS',
+      'โรงนี้มีประวัติการจอง ลบไม่ได้เพราะประวัติและรายการคืนเงินจะหายไปด้วย — ปิดใช้งานโรงแทน',
+      { bookingCount },
+    );
   }
   await prisma.theatre.delete({ where: { id } });
 };

@@ -19,8 +19,9 @@ import Input from '../../components/ui/Input.jsx';
 import Select from '../../components/ui/Select.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
+import StatusBadge from '../../components/ui/StatusBadge.jsx';
 
-const emptyTheatre = { name: '', screenType: '2D', rowsCount: 8, colsCount: 12 };
+const emptyTheatre = { name: '', screenType: '2D', rowsCount: 8, colsCount: 12, isActive: true };
 
 const zoneStyle = {
   NORMAL: 'border-line',
@@ -63,6 +64,7 @@ const AdminTheatresPage = () => {
       screenType: form.screenType,
       rowsCount: Number(form.rowsCount),
       colsCount: Number(form.colsCount),
+      isActive: form.isActive,
     };
     try {
       if (editing === 'new') await createTheatre(payload);
@@ -133,10 +135,19 @@ const AdminTheatresPage = () => {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {theatres.map((theatre) => (
-          <div key={theatre.id} className="card p-4">
+          <div key={theatre.id} className={clsx('card p-4', !theatre.isActive && 'opacity-70')}>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-lg font-semibold sm:text-xl">{theatre.name}</h2>
+                <h2 className="text-lg font-semibold sm:text-xl">
+                  {theatre.name}
+                  {!theatre.isActive && (
+                    <StatusBadge
+                      status="CANCELLED"
+                      label={t('admin.theatreForm.inactiveBadge')}
+                      className="ml-2 align-middle"
+                    />
+                  )}
+                </h2>
                 <p className="text-xs text-muted">{theatre.screenType}</p>
               </div>
               <div className="flex gap-1">
@@ -149,6 +160,7 @@ const AdminTheatresPage = () => {
                       screenType: theatre.screenType,
                       rowsCount: theatre.rowsCount,
                       colsCount: theatre.colsCount,
+                      isActive: theatre.isActive,
                     });
                     setEditing(theatre.id);
                   }}
@@ -224,6 +236,18 @@ const AdminTheatresPage = () => {
             </Field>
           </div>
           <p className="text-sm text-muted">{t('admin.theatreForm.resizeWarning')}</p>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-surface-2/50 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+              checked={form.isActive}
+              onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
+            />
+            <span>
+              <span className="block text-sm font-medium">{t('admin.theatreForm.isActive')}</span>
+              <span className="mt-0.5 block text-xs text-muted">{t('admin.theatreForm.isActiveHint')}</span>
+            </span>
+          </label>
         </form>
       </Modal>
 
