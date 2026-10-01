@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { create } from 'zustand';
+import { refreshSession } from '../api/refresh.js';
 
 /**
  * สถานะการล็อกอินของทั้งแอป
@@ -8,7 +9,7 @@ import { create } from 'zustand';
  * จึงเรียก hook ไม่ได้ — zustand อ่าน/เขียน store จากที่ไหนก็ได้ผ่าน useAuthStore.getState()
  * ทำให้ไม่ต้องเก็บ access token ซ้ำสองที่และไม่ต้องมีฟังก์ชัน setter คอย sync กัน
  *
- * สอง endpoint ด้านล่างเรียกด้วย axios ตรง ๆ ไม่ผ่าน instance `api`
+ * refresh/logout เรียกด้วย axios ตรง ๆ ไม่ผ่าน instance `api`
  * เพราะยืนยันตัวตนด้วย refresh cookie ไม่ได้ใช้ access token
  * และช่วยตัดวงจร import ระหว่าง store กับ api/client.js
  */
@@ -30,10 +31,13 @@ export const useAuthStore = create((set, get) => ({
 
   clearSession: () => set({ user: null, accessToken: null, status: 'guest' }),
 
-  /** เปิดเว็บใหม่ = ยังไม่มี access token ใน memory ลองขอจาก refresh cookie ก่อน */
+  /**
+   * เปิดเว็บใหม่ = ยังไม่มี access token ใน memory ลองขอจาก refresh cookie ก่อน
+   * ผ่าน refreshSession ตัวเดียวกับ interceptor — เปิดหลายแท็บพร้อมกันจะต่อคิวกัน ไม่ชนจนโดนเตะออก
+   */
   bootstrap: async () => {
     try {
-      const { data } = await authApi.post('/refresh');
+      const { data } = await refreshSession();
       set({ user: data.user, accessToken: data.accessToken, status: 'authed' });
     } catch {
       set({ user: null, accessToken: null, status: 'guest' });

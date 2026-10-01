@@ -34,6 +34,14 @@ const holdSecondsLeft = (booking) => {
   return Math.max(0, Math.floor((booking.holdExpiresAt.getTime() - Date.now()) / 1000));
 };
 
+/** สถานะเปลี่ยนไประหว่างที่กำลังทำรายการ (อีกคนกดก่อน, หมดเวลาพอดี) — ให้ผู้ใช้รีเฟรชแล้วดูใหม่ */
+export const bookingStateChanged = () => {
+  return ApiError.conflict(
+    'BOOKING_STATE_CHANGED',
+    'สถานะการจองเปลี่ยนไประหว่างทำรายการ กรุณารีเฟรชหน้าจอแล้วลองใหม่',
+  );
+};
+
 const canCancel = (booking) => {
   if (booking.status === 'PENDING_PAYMENT') return true;
   // ส่งสลิปแล้วรอผู้ดูแลตัดสิน — ยกเลิกเองไม่ได้ ไม่งั้นเงินที่โอนมาแล้วจะหลุดออกนอกระบบ
@@ -127,6 +135,9 @@ export const createBooking = async ({ userId, showtimeId, seatIds }) => {
 
   const priceMap = toPriceMap(showtime.zonePrices, showtime.basePrice);
   const { items, total } = priceSeats(seats, priceMap);
+  // บันทึกที่นั่งเรียงตาม id เสมอ — สองคนที่จองชุดที่นั่งซ้อนกันจะชนกันที่ที่นั่งแรกเหมือนกัน
+  // แล้วคนที่ช้ากว่าได้ SEAT_TAKEN ตามปกติ ถ้าลำดับสลับกันจะรอกันเองจนเกิด deadlock (กลายเป็น 500)
+  items.sort((a, b) => (a.seatId < b.seatId ? -1 : a.seatId > b.seatId ? 1 : 0));
   const seatSnapshot = sortSeats(seats).map((seat) => ({
     id: seat.id,
     rowLabel: seat.rowLabel,
@@ -283,10 +294,12 @@ export const cancelBooking = async ({
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.bookingSeat.deleteMany({ where: { bookingId } });
     const cancelReason = reason ?? (byAdmin ? 'ยกเลิกโดยผู้ดูแลระบบ' : 'ผู้ใช้ยกเลิกเอง');
-    await tx.booking.update({
-      where: { id: bookingId },
+    // ยกเลิกได้เฉพาะเมื่อสถานะยังเป็นแบบเดียวกับที่ตรวจเงื่อนไขไว้ข้างบน — ถ้าระหว่างนี้ผู้ดูแลเพิ่งอนุมัติสลิป
+    // หรือการจองเพิ่งหมดเวลา update จะไม่โดนแถวไหน แล้ว transaction ทั้งก้อนถูกยกเลิก
+    // (เดิมเขียนทับได้เลย จนเกิดการจองที่ PAID แต่ที่นั่งถูกปล่อยให้คนอื่นจองซ้ำไปแล้ว)
+    const { count } = await tx.booking.updateMany({
+      where: { id: bookingId, status: booking.status },
       data: {
         status: 'CANCELLED',
         cancelledAt: new Date(),
@@ -294,6 +307,8 @@ export const cancelBooking = async ({
         cancelReason,
       },
     });
+    if (count === 0) throw bookingStateChanged();
+    await tx.bookingSeat.deleteMany({ where: { bookingId } });
     // ปิดใบชำระเงินที่ยังรอดำเนินการ ไม่งั้นสลิปจะค้างอยู่ในคิวตรวจของ admin ตลอดไป
     await tx.payment.updateMany({
       where: { bookingId, status: { in: ['AWAITING_SLIP', 'PENDING_VERIFICATION'] } },
@@ -357,44 +372,50 @@ export const updateRefundAccount = async ({ bookingId, userId, bankName, account
 };
 
 /**
+ * ปิดการจองหนึ่งใบที่หมดเวลาชำระเงิน — คืน true ถ้าปิดจริง
+ *
+ * เงื่อนไข "ยังรอชำระ + เลยเวลาแล้ว" อยู่ใน where ของคำสั่ง update เลย ไม่ได้อาศัยข้อมูลที่อ่านไว้ก่อน
+ * ถ้าลูกค้าส่งสลิปเข้ามาในจังหวะเดียวกัน (สถานะกลายเป็นรอตรวจแล้ว) update จะไม่โดนแถวไหน
+ * แล้วเราก็ไม่แตะอะไรต่อ — เดิม job เขียนทับเป็น EXPIRED ได้ทั้งที่สลิปเข้าคิวไปแล้ว
+ * ผลคือที่นั่งถูกปล่อย และสลิปหายจากคิวตรวจ (เงินที่โอนมาไม่มีใครเห็น)
+ */
+export const expireBooking = async ({ id, code, userId }, now = new Date()) => {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.booking.updateMany({
+      where: { id, status: 'PENDING_PAYMENT', holdExpiresAt: { lt: now } },
+      data: { status: 'EXPIRED', holdExpiresAt: null, cancelReason: 'หมดเวลาชำระเงิน' },
+    });
+    if (count === 0) return false;
+
+    await tx.bookingSeat.deleteMany({ where: { bookingId: id } });
+    await tx.payment.updateMany({
+      where: { bookingId: id, status: 'AWAITING_SLIP' },
+      data: { status: 'REJECTED', rejectReason: 'หมดเวลาชำระเงิน' },
+    });
+    await notify(
+      { userId, type: 'BOOKING_EXPIRED', context: { code }, data: { bookingId: id } },
+      tx,
+    );
+    return true;
+  });
+};
+
+/**
  * ปล่อยที่นั่งของการจองที่หมดเวลาชำระเงิน — เรียกจาก background job
  * นับเฉพาะ PENDING_PAYMENT เท่านั้น การจองที่รอ admin ตรวจสลิปมี holdExpiresAt = null จึงไม่โดน
  */
 export const releaseExpiredHolds = async () => {
-  const expired = await prisma.booking.findMany({
-    where: { status: 'PENDING_PAYMENT', holdExpiresAt: { lt: new Date() } },
+  const now = new Date();
+  const candidates = await prisma.booking.findMany({
+    where: { status: 'PENDING_PAYMENT', holdExpiresAt: { lt: now } },
     select: { id: true, code: true, userId: true },
   });
-  if (expired.length === 0) return 0;
 
-  for (const booking of expired) {
-    await prisma.$transaction(async (tx) => {
-      await tx.bookingSeat.deleteMany({ where: { bookingId: booking.id } });
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: 'EXPIRED',
-          holdExpiresAt: null,
-          cancelReason: 'หมดเวลาชำระเงิน',
-        },
-      });
-      await tx.payment.updateMany({
-        where: { bookingId: booking.id, status: 'AWAITING_SLIP' },
-        data: { status: 'REJECTED', rejectReason: 'หมดเวลาชำระเงิน' },
-      });
-      await notify(
-        {
-          userId: booking.userId,
-          type: 'BOOKING_EXPIRED',
-          context: { code: booking.code },
-          data: { bookingId: booking.id },
-        },
-        tx,
-      );
-    });
+  let released = 0;
+  for (const booking of candidates) {
+    if (await expireBooking(booking, now)) released += 1;
   }
-
-  return expired.length;
+  return released;
 };
 
 /** ข้อมูลสำหรับ E-Ticket — ออกให้เฉพาะรายการที่ชำระเงินแล้ว */
@@ -479,12 +500,7 @@ export const cancelShowtime = async ({ showtimeId, reason }) => {
         data: { status: 'CANCELLED', cancelledAt: now, holdExpiresAt: null, cancelReason },
       });
       // มีใบไหนเปลี่ยนสถานะไประหว่างทาง (ส่งสลิปพอดี หมดเวลาพอดี) — ยกเลิกทั้งชุด ให้ผู้ดูแลกดใหม่
-      if (updated.count !== ids.length) {
-        throw ApiError.conflict(
-          'BOOKING_STATE_CHANGED',
-          'มีการจองในรอบนี้เปลี่ยนสถานะระหว่างยกเลิก กรุณาลองใหม่อีกครั้ง',
-        );
-      }
+      if (updated.count !== ids.length) throw bookingStateChanged();
     }
 
     // สลิปที่ส่งเข้ามาหลังเช็กรอบแรก — ต้องให้ผู้ดูแลตรวจก่อนเหมือนกัน

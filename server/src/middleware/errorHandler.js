@@ -3,6 +3,15 @@ import multer from 'multer';
 import ApiError from '../utils/ApiError.js';
 import { isDev } from '../config/env.js';
 
+/**
+ * deadlock (40P01) / serialization failure (40001) จาก PostgreSQL
+ * Prisma ส่งมาเป็น P2034 บ้าง เป็น error ไม่ระบุชนิดที่มีรหัส Postgres อยู่ในข้อความบ้าง
+ */
+const isWriteConflict = (err) => {
+  if (err?.code === 'P2034') return true;
+  return /\b(40P01|40001)\b|deadlock detected/.test(String(err?.message ?? ''));
+};
+
 export const notFoundHandler = (req, _res, next) => {
   next(ApiError.notFound('ROUTE_NOT_FOUND', `ไม่พบเส้นทาง ${req.method} ${req.originalUrl}`));
 };
@@ -38,6 +47,12 @@ export const errorHandler = (err, req, res, _next) => {
     status = 404;
     code = 'NOT_FOUND';
     message = 'ไม่พบข้อมูลที่ต้องการ';
+  } else if (isWriteConflict(err)) {
+    // สองรายการแก้ข้อมูลชุดเดียวกันพร้อมกันจน PostgreSQL ต้องยกเลิกฝั่งหนึ่ง — ไม่ใช่ระบบพัง
+    // ลองใหม่อีกครั้งก็ผ่าน (หรือได้ 409 ที่บอกว่าสถานะเปลี่ยนไปแล้ว) จึงไม่ควรตอบเป็น 500
+    status = 409;
+    code = 'WRITE_CONFLICT';
+    message = 'มีการทำรายการเดียวกันพร้อมกัน กรุณาลองใหม่อีกครั้ง';
   }
 
   if (status >= 500) {

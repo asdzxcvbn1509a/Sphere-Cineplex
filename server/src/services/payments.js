@@ -80,23 +80,33 @@ export const uploadSlip = async ({ bookingId, userId, file }) => {
 
   const previousSlip = booking.payment.slipPath;
 
-  await prisma.$transaction([
-    prisma.payment.update({
-      where: { id: booking.payment.id },
-      data: {
-        slipPath: file.filename,
-        slipUploadedAt: new Date(),
-        status: 'PENDING_VERIFICATION',
-        rejectReason: null,
-        verifiedById: null,
-        verifiedAt: null,
-      },
-    }),
-    prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
-    }),
-  ]);
+  try {
+    await prisma.$transaction(async (tx) => {
+      // เงื่อนไขสถานะอยู่ใน update — ถ้า job หมดเวลาหรือการยกเลิกชิงเปลี่ยนสถานะไปก่อนในจังหวะเดียวกัน
+      // จะไม่โดนแถวไหนแล้วทั้ง transaction ถูกยกเลิก แทนที่จะเขียนทับสถานะที่เพิ่งเปลี่ยน
+      const { count } = await tx.booking.updateMany({
+        where: { id: bookingId, status: 'PENDING_PAYMENT' },
+        data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
+      });
+      if (count === 0) {
+        throw ApiError.conflict('BOOKING_NOT_PAYABLE', 'รายการนี้ไม่อยู่ในสถานะที่ชำระเงินได้แล้ว');
+      }
+      await tx.payment.update({
+        where: { id: booking.payment.id },
+        data: {
+          slipPath: file.filename,
+          slipUploadedAt: new Date(),
+          status: 'PENDING_VERIFICATION',
+          rejectReason: null,
+          verifiedById: null,
+          verifiedAt: null,
+        },
+      });
+    });
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 
   // ลบสลิปเก่าทิ้ง (กรณีส่งใหม่หลังถูกปฏิเสธ) หลังบันทึกสำเร็จแล้วเท่านั้น
   if (previousSlip && previousSlip !== file.filename) {
@@ -181,22 +191,40 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100
   }));
 };
 
+/**
+ * ย้ายทั้งใบชำระเงินและการจองออกจาก "รอตรวจ" พร้อมกัน — ทั้งคู่ต้องยังรอตรวจอยู่จริงตอนเขียน
+ * ไม่งั้นทั้ง transaction ถูกยกเลิก (เช่น ผู้ดูแลสองคนกดพร้อมกัน หรือมีคนกดยกเลิกการจองไปก่อนเสี้ยววินาที)
+ * เดิมเช็กจากข้อมูลที่อ่านไว้แล้วค่อยเขียนทับ จึงอนุมัติทับการจองที่เพิ่งถูกยกเลิกได้
+ * ได้การจองที่ PAID ทั้งที่ที่นั่งถูกปล่อยให้คนอื่นจองซ้ำไปแล้ว
+ *
+ * ลำดับสำคัญ: ล็อกแถว booking ก่อน payment เสมอ ให้ตรงกับการยกเลิก/ส่งสลิป/หมดเวลา
+ * ถ้าล็อกสลับลำดับกัน สองรายการที่ชนกันจะรอกันเองจนเกิด deadlock แล้วฝั่งหนึ่งได้ 500 แทน 409
+ */
+const settlePendingPayment = async (tx, payment, { paymentData, bookingData }) => {
+  const bookingMoved = await tx.booking.updateMany({
+    where: { id: payment.bookingId, status: 'PENDING_VERIFICATION' },
+    data: bookingData,
+  });
+  const paymentMoved = await tx.payment.updateMany({
+    where: { id: payment.id, status: 'PENDING_VERIFICATION' },
+    data: paymentData,
+  });
+  if (paymentMoved.count === 0 || bookingMoved.count === 0) {
+    throw ApiError.conflict(
+      'PAYMENT_NOT_PENDING',
+      'รายการนี้ถูกตรวจสอบหรือเปลี่ยนสถานะไปแล้ว กรุณารีเฟรชหน้าจอ',
+    );
+  }
+};
+
 export const approvePayment = async ({ paymentId, adminId }) => {
   const payment = await loadPendingPayment(paymentId);
 
   await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: 'APPROVED',
-        verifiedById: adminId,
-        verifiedAt: new Date(),
-        rejectReason: null,
-      },
-    });
-    await tx.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'PAID', paidAt: new Date(), holdExpiresAt: null },
+    const now = new Date();
+    await settlePendingPayment(tx, payment, {
+      paymentData: { status: 'APPROVED', verifiedById: adminId, verifiedAt: now, rejectReason: null },
+      bookingData: { status: 'PAID', paidAt: now, holdExpiresAt: null },
     });
     await notify(
       {
@@ -221,18 +249,9 @@ export const rejectPayment = async ({ paymentId, adminId, reason }) => {
   const newHold = addMinutes(new Date(), env.REJECTED_RETRY_MINUTES);
 
   await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: 'REJECTED',
-        rejectReason: reason,
-        verifiedById: adminId,
-        verifiedAt: new Date(),
-      },
-    });
-    await tx.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'PENDING_PAYMENT', holdExpiresAt: newHold },
+    await settlePendingPayment(tx, payment, {
+      paymentData: { status: 'REJECTED', rejectReason: reason, verifiedById: adminId, verifiedAt: new Date() },
+      bookingData: { status: 'PENDING_PAYMENT', holdExpiresAt: newHold },
     });
     await notify(
       {
@@ -350,29 +369,35 @@ export const completeRefund = async ({ paymentId, adminId, note, file }) => {
     );
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: 'REFUNDED',
-        refundedAt: new Date(),
-        refundedById: adminId,
-        refundNote: note ?? null,
-        refundSlipPath: file.filename,
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      // กดบันทึกซ้ำ/ผู้ดูแลสองคนกดพร้อมกัน — ครั้งที่สองต้องไม่ผ่าน ไม่งั้นลูกค้าได้แจ้งเตือนซ้ำ
+      // และสลิปใบแรกถูกเขียนทับจนกลายเป็นไฟล์กำพร้า
+      const { count } = await tx.payment.updateMany({
+        where: { id: paymentId, status: 'REFUND_PENDING' },
+        data: {
+          status: 'REFUNDED',
+          refundedAt: new Date(),
+          refundedById: adminId,
+          refundNote: note ?? null,
+          refundSlipPath: file.filename,
+        },
+      });
+      if (count === 0) throw ApiError.conflict('REFUND_NOT_PENDING', 'รายการนี้คืนเงินไปแล้ว');
+      await notify(
+        {
+          userId: payment.booking.userId,
+          type: 'REFUND_COMPLETED',
+          context: { code: payment.booking.code, amount: payment.amount },
+          data: { bookingId: payment.bookingId },
+        },
+        tx,
+      );
     });
-    await notify(
-      {
-        userId: payment.booking.userId,
-        type: 'REFUND_COMPLETED',
-        context: { code: payment.booking.code, amount: payment.amount },
-        data: { bookingId: payment.bookingId },
-      },
-      tx,
-    );
-  });
-
-  return listRefunds({ status: 'REFUND_PENDING' });
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 };
 
 /**
@@ -395,13 +420,17 @@ export const updateRefund = async ({ paymentId, note, file }) => {
     throw ApiError.conflict('REFUND_NOT_COMPLETED', 'รายการนี้ยังไม่ได้บันทึกการคืนเงิน');
   }
 
-  await prisma.payment.update({
-    where: { id: paymentId },
+  const { count } = await prisma.payment.updateMany({
+    where: { id: paymentId, status: 'REFUNDED' },
     data: {
       refundNote: note?.trim() || null,
       ...(file && { refundSlipPath: file.filename }),
     },
   });
+  if (count === 0) {
+    await cleanup();
+    throw ApiError.conflict('REFUND_NOT_COMPLETED', 'รายการนี้ยังไม่ได้บันทึกการคืนเงิน');
+  }
 
   // สลิปเก่าไม่มีใครอ้างถึงแล้ว ลบทิ้งหลังบันทึกสำเร็จเท่านั้น
   if (file && payment.refundSlipPath) {

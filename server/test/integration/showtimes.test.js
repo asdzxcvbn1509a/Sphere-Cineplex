@@ -218,3 +218,16 @@ describe('แก้ไขรอบฉาย', () => {
     );
   });
 });
+
+describe('แจ้งเตือนก่อนฉาย', () => {
+  test('job สองตัวทำงานพร้อมกัน (เช่นรันเซิร์ฟเวอร์สองเครื่อง) — ลูกค้าได้แจ้งเตือนครั้งเดียว', async () => {
+    const { showtime, seats } = await createShowtimeFixture({ startsAt: minutesFromNow(45) });
+    const [admin, user] = await Promise.all([createAdmin(), createUser()]);
+    await createPaidBooking({ user, admin, showtime, seats: [seats[0]] });
+
+    const [first, second] = await Promise.all([sendShowtimeReminders(), sendShowtimeReminders()]);
+
+    assert.equal(first + second, 1);
+    assert.equal(await prisma.notification.count({ where: { type: 'SHOWTIME_REMINDER' } }), 1);
+  });
+});

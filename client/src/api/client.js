@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore.js';
+import { refreshSession } from './refresh.js';
 
 /**
  * access token อยู่ใน authStore ที่เดียว (เก็บใน memory ไม่แตะ localStorage)
@@ -14,21 +15,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-/** ถ้ามีหลาย request เจอ 401 พร้อมกัน ให้ยิง refresh แค่ครั้งเดียวแล้วใช้ผลร่วมกัน */
-let refreshPromise = null;
-
-const refreshSession = () => {
-  if (!refreshPromise) {
-    // ใช้ axios ตรง ๆ ไม่ผ่าน instance นี้ เพื่อไม่ให้ interceptor เรียกตัวเองซ้ำ
-    refreshPromise = axios
-      .post('/api/auth/refresh', null, { withCredentials: true })
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-  return refreshPromise;
-};
-
+// ถ้ามีหลาย request เจอ 401 พร้อมกัน refreshSession ยิงจริงแค่ครั้งเดียวแล้วแชร์ผล (ดู api/refresh.js)
 api.interceptors.response.use(
   (response) => response,
   async (error) => {

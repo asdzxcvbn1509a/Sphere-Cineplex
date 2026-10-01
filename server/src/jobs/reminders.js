@@ -25,6 +25,7 @@ export const sendShowtimeReminders = async () => {
     },
   });
 
+  let sent = 0;
   for (const booking of bookings) {
     const timeText = new Intl.DateTimeFormat('th-TH', {
       timeZone: 'Asia/Bangkok',
@@ -32,7 +33,14 @@ export const sendShowtimeReminders = async () => {
       minute: '2-digit',
     }).format(booking.showtime.startsAt);
 
-    await prisma.$transaction(async (tx) => {
+    const delivered = await prisma.$transaction(async (tx) => {
+      // จองสิทธิ์ส่งก่อนค่อยสร้างแจ้งเตือน — ถ้ามีอีก process (เช่นรันเซิร์ฟเวอร์สองตัว) ส่งไปแล้ว
+      // หรือการจองเพิ่งถูกยกเลิก update จะไม่โดนแถวไหน ลูกค้าจึงไม่ได้แจ้งเตือนซ้ำ/ผิดใบ
+      const { count } = await tx.booking.updateMany({
+        where: { id: booking.id, status: 'PAID', reminderSentAt: null },
+        data: { reminderSentAt: new Date() },
+      });
+      if (count === 0) return false;
       await notify(
         {
           userId: booking.userId,
@@ -47,12 +55,10 @@ export const sendShowtimeReminders = async () => {
         },
         tx,
       );
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: { reminderSentAt: new Date() },
-      });
+      return true;
     });
+    if (delivered) sent += 1;
   }
 
-  return bookings.length;
+  return sent;
 };

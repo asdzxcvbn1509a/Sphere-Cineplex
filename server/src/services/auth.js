@@ -112,8 +112,23 @@ export const issueSession = async (user, userAgent) => {
 };
 
 /**
+ * ใบที่เพิ่งถูก rotate ไปไม่เกินเท่านี้ ถือว่าเป็นคำขอที่ชนกันจากเบราว์เซอร์เดียวกัน ไม่ใช่ token ถูกขโมย
+ * (เปิดหลายแท็บพร้อมกัน — ทุกแท็บส่ง cookie ใบเดียวกันมาต่ออายุในเสี้ยววินาทีเดียวกัน)
+ * ตั้งไว้สั้นเพราะช่วงนี้เท่ากับช่วงที่ "การใช้ซ้ำ" ไม่ถูกนับเป็นการขโมย — คำขอที่ชนกันจริงห่างกันไม่ถึงวินาที
+ */
+const REFRESH_RACE_GRACE_MS = 10 * 1000;
+
+/** ตอบให้ฝั่งเว็บรอแป๊บแล้วลองใหม่ — ถึงตอนนั้น cookie ในเบราว์เซอร์จะเป็นใบใหม่ที่อีกแท็บเพิ่งได้ไปแล้ว */
+const refreshRace = () => {
+  return ApiError.conflict('REFRESH_RACE', 'กำลังต่ออายุเซสชันจากอีกแท็บ กรุณาลองใหม่อีกครั้ง');
+};
+
+/**
  * ต่ออายุเซสชันแบบ rotate — ใบเก่าถูก revoke ทันทีที่ออกใบใหม่
  * ถ้ามีใครเอาใบที่ revoke แล้วมาใช้ซ้ำ = token ถูกขโมย → เพิกถอนทุกเซสชันของ user คนนั้น
+ *
+ * ยกเว้นใบที่เพิ่งถูก rotate ไปไม่กี่วินาที (REFRESH_RACE_GRACE_MS) ซึ่งตอบ 409 REFRESH_RACE แทน
+ * ไม่ออกเซสชันใหม่ให้ — คนที่ถือใบเก่าจึงไม่ได้อะไรไป แต่ก็ไม่เตะเจ้าของออกจากทุกอุปกรณ์เพราะเปิดหลายแท็บ
  */
 export const rotateSession = async (rawToken, userAgent) => {
   if (!rawToken) {
@@ -129,6 +144,11 @@ export const rotateSession = async (rawToken, userAgent) => {
   }
 
   if (stored.revokedAt) {
+    // มี replacedById = ถูก rotate ตามปกติ (ไม่ใช่ถูกเพิกถอนเพราะ logout/เปลี่ยนรหัส)
+    const justRotated =
+      stored.replacedById && Date.now() - stored.revokedAt.getTime() < REFRESH_RACE_GRACE_MS;
+    if (justRotated) throw refreshRace();
+
     await prisma.refreshToken.updateMany({
       where: { userId: stored.userId, revokedAt: null },
       data: { revokedAt: new Date() },
@@ -153,10 +173,13 @@ export const rotateSession = async (rawToken, userAgent) => {
         userAgent: userAgent?.slice(0, 255) ?? null,
       },
     });
-    await tx.refreshToken.update({
-      where: { id: stored.id },
+    // เพิกถอนใบเก่าได้ก็ต่อเมื่อยังไม่มีใครเพิกถอนไปก่อน — สองคำขอที่อ่านใบเดียวกันมาพร้อมกัน
+    // จะได้ใบใหม่แค่คำขอเดียว อีกคำขอได้ REFRESH_RACE (ใบใหม่ที่สร้างไว้ถูก rollback ทิ้ง)
+    const { count } = await tx.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date(), replacedById: created.id },
     });
+    if (count === 0) throw refreshRace();
   });
 
   return {

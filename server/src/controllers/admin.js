@@ -292,13 +292,14 @@ export const listRefunds = async (req, res, next) => {
 // @ENDPOINT POST http://localhost:4000/api/admin/refunds/:id/complete
 export const completeRefund = async (req, res, next) => {
   try {
-    const refunds = await paymentService.completeRefund({
+    await paymentService.completeRefund({
       paymentId: req.params.id,
       adminId: req.user.id,
       note: req.body?.note,
       file: req.file,
     });
-    res.json({ refunds });
+    // หน้าคืนเงินโหลดคิวใหม่เองหลังบันทึก (รวมถึงหน้าที่กำลังเปิดอยู่) จึงไม่ต้องส่งรายการกลับไป
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
