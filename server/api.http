@@ -1,47 +1,45 @@
 ### Theatre Reservation System — ตัวอย่างการเรียก API
 ### เปิดไฟล์นี้ใน VS Code แล้วติดตั้งส่วนขยาย "REST Client" จากนั้นกด "Send Request" เหนือแต่ละบล็อก
 ### ทำตามลำดับจากบนลงล่าง เพราะบล็อกหลัง ๆ ใช้ค่าจากบล็อกก่อนหน้า
+### บัญชีด้านล่างมาจาก npm run db:seed (ดูตาราง "บัญชีสำหรับทดลอง" ใน README)
 
 @host = http://localhost:4000/api
-@userPhone = 0891234567
-@adminPhone = 0800000000
+@userLogin = somchai@example.test
+@adminLogin = admin@cinebook.test
+@password = Password123
 
 ### ── ตรวจสถานะเซิร์ฟเวอร์ ─────────────────────────────
 GET {{host}}/health
 
-### ── 1. ขอรหัส OTP (โหมด dev จะคืน devCode มาให้เลย) ──
-# @name requestOtp
-POST {{host}}/auth/otp/request
-Content-Type: application/json
-
-{ "phone": "{{userPhone}}" }
-
-### ── 2. ยืนยัน OTP → ได้ access token + refresh cookie ─
+### ── 1. เข้าสู่ระบบ (อีเมลหรือเบอร์โทรก็ได้) → access token + refresh cookie ─
 # @name login
-POST {{host}}/auth/otp/verify
+POST {{host}}/auth/login
 Content-Type: application/json
 
-{ "phone": "{{userPhone}}", "code": "{{requestOtp.response.body.devCode}}" }
+{ "identifier": "{{userLogin}}", "password": "{{password}}" }
 
 @token = {{login.response.body.accessToken}}
 
-### ── 3. ข้อมูลตัวเอง ──────────────────────────────────
+### ── 2. ข้อมูลตัวเอง ──────────────────────────────────
 GET {{host}}/auth/me
 Authorization: Bearer {{token}}
 
-### ── 4. รายการภาพยนตร์ ────────────────────────────────
+### ── 3. รายการภาพยนตร์ ────────────────────────────────
 # @name movies
 GET {{host}}/movies
 
-### ── 5. รอบฉายของเรื่องแรก ────────────────────────────
+### ── 4. รอบฉายของเรื่องแรก ────────────────────────────
 # @name showtimes
 GET {{host}}/showtimes?movieId={{movies.response.body.movies.0.id}}
 
-### ── 6. ผังที่นั่งของรอบแรก ────────────────────────────
+### ── 5. ผังที่นั่งของรอบแรก ────────────────────────────
 # @name seatmap
 GET {{host}}/showtimes/{{showtimes.response.body.showtimes.0.id}}/seats
 
-### ── 7. จองที่นั่ง (ถ้าที่นั่งถูกจองไปแล้วจะได้ 409 SEAT_TAKEN) ──
+### ── 6. จองที่นั่ง ─────────────────────────────────────
+### 409 SEAT_TAKEN = ที่นั่งถูกจองไปแล้ว
+### 409 PENDING_BOOKING_EXISTS = มีการจองรอบนี้ที่ยังไม่จ่ายอยู่ (details.bookingId บอกใบเดิม)
+### 409 TOO_MANY_PENDING_BOOKINGS = ถือที่นั่งค้างเกิน MAX_PENDING_BOOKINGS_PER_USER รายการ
 # @name booking
 POST {{host}}/bookings
 Authorization: Bearer {{token}}
@@ -54,11 +52,13 @@ Content-Type: application/json
 
 @bookingId = {{booking.response.body.booking.id}}
 
-### ── 8. ข้อมูลชำระเงิน + PromptPay payload ────────────
+### ── 7. ข้อมูลชำระเงิน + PromptPay payload ────────────
+### canUploadSlip / lateSlipUntil บอกว่ายังส่งสลิปได้ไหม (รวมช่วงผ่อนผันหลังหมดเวลา)
 GET {{host}}/payments/{{bookingId}}
 Authorization: Bearer {{token}}
 
-### ── 9. อัปโหลดสลิป (แก้ path ให้ชี้ไฟล์รูปจริงบนเครื่อง) ──
+### ── 8. อัปโหลดสลิป (แก้ path ให้ชี้ไฟล์รูปจริงบนเครื่อง) ──
+### ต้องเป็นรูป JPG/PNG/WEBP จริง — server ตรวจไส้ในไฟล์ ไม่ได้เชื่อแค่ Content-Type
 POST {{host}}/payments/{{bookingId}}/slip
 Authorization: Bearer {{token}}
 Content-Type: multipart/form-data; boundary=----Boundary
@@ -70,62 +70,69 @@ Content-Type: image/png
 < ./uploads/example-slip.png
 ------Boundary--
 
-### ── 10. รายการจองของฉัน ──────────────────────────────
+### ── 9. รายการจองของฉัน ──────────────────────────────
 GET {{host}}/bookings?scope=upcoming
 Authorization: Bearer {{token}}
 
-### ── 11. E-Ticket (ต้องชำระเงินสำเร็จแล้วเท่านั้น) ─────
+### ── 10. E-Ticket (ต้องชำระเงินสำเร็จแล้วเท่านั้น) ─────
 GET {{host}}/bookings/{{bookingId}}/ticket
 Authorization: Bearer {{token}}
 
-### ── 12. ยกเลิกการจอง ─────────────────────────────────
+### ── 11. ยกเลิกการจอง ─────────────────────────────────
+### ใบที่จ่ายแล้วต้องส่ง refundBankName + refundAccountNo มาด้วย (ไม่งั้น 400 REFUND_ACCOUNT_REQUIRED)
 POST {{host}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "reason": "เปลี่ยนแผน" }
 
+### ── 12. แจ้ง/แก้บัญชีรับเงินคืนภายหลัง ────────────────
+### ใช้กับใบที่รอโอนคืนอยู่ (เช่น ผู้ดูแลยกเลิกรอบแทน) — ใบอื่นได้ 409 REFUND_NOT_PENDING
+PATCH {{host}}/bookings/{{bookingId}}/refund-account
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "refundBankName": "กสิกรไทย", "refundAccountNo": "123-4-56789-0" }
+
 
 ### ══════════ ฝั่งผู้ดูแลระบบ ══════════
 
-### ── A1. ขอ OTP ของ admin ─────────────────────────────
-# @name adminOtp
-POST {{host}}/auth/otp/request
-Content-Type: application/json
-
-{ "phone": "{{adminPhone}}" }
-
-### ── A2. ล็อกอิน admin ────────────────────────────────
+### ── A1. ล็อกอิน admin ────────────────────────────────
 # @name adminLogin
-POST {{host}}/auth/otp/verify
+POST {{host}}/auth/login
 Content-Type: application/json
 
-{ "phone": "{{adminPhone}}", "code": "{{adminOtp.response.body.devCode}}" }
+{ "identifier": "{{adminLogin}}", "password": "{{password}}" }
 
 @adminToken = {{adminLogin.response.body.accessToken}}
 
-### ── A3. ภาพรวมระบบ ───────────────────────────────────
+### ── A2. ภาพรวมระบบ ───────────────────────────────────
 GET {{host}}/admin/overview
 Authorization: Bearer {{adminToken}}
 
-### ── A4. คิวสลิปรอตรวจสอบ ─────────────────────────────
+### ── A3. คิวสลิปรอตรวจสอบ (แบ่งหน้า: page, pageSize ≤ 100) ──
+### รวมสลิปที่ส่งหลังหมดเวลา (booking.status = EXPIRED) — อนุมัติแล้วเข้าคิวคืนเงินแทนการออกตั๋ว
 # @name queue
-GET {{host}}/admin/payments?status=PENDING_VERIFICATION
+GET {{host}}/admin/payments?status=PENDING_VERIFICATION&page=1
 Authorization: Bearer {{adminToken}}
 
-### ── A5. อนุมัติสลิปรายการแรกในคิว ────────────────────
+### ── A4. อนุมัติสลิปรายการแรกในคิว ────────────────────
 POST {{host}}/admin/payments/{{queue.response.body.payments.0.id}}/approve
 Authorization: Bearer {{adminToken}}
 
-### ── A6. ปฏิเสธสลิปรายการแรกในคิว ─────────────────────
+### ── A5. ปฏิเสธสลิปรายการแรกในคิว ─────────────────────
 POST {{host}}/admin/payments/{{queue.response.body.payments.0.id}}/reject
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "reason": "ยอดเงินไม่ตรงกับที่แจ้ง" }
 
-### ── A7. การจองทั้งหมด ────────────────────────────────
-GET {{host}}/admin/bookings
+### ── A6. การจองทั้งหมด (แบ่งหน้า — ได้ total/page/pageSize กลับมาด้วย) ──
+GET {{host}}/admin/bookings?page=1&pageSize=20
+Authorization: Bearer {{adminToken}}
+
+### ── A7. คิวคืนเงิน ───────────────────────────────────
+GET {{host}}/admin/refunds?status=REFUND_PENDING&page=1
 Authorization: Bearer {{adminToken}}
 
 ### ── A8. รายงานยอดขายรายวัน ───────────────────────────
@@ -137,6 +144,7 @@ GET {{host}}/admin/reports/occupancy
 Authorization: Bearer {{adminToken}}
 
 ### ── A10. เพิ่มรอบฉายใหม่ ─────────────────────────────
+### โรงที่ปิดใช้งาน (isActive = false) ลงรอบใหม่ไม่ได้ — 400 THEATRE_INACTIVE
 POST {{host}}/admin/showtimes
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
@@ -147,3 +155,12 @@ Content-Type: application/json
   "startsAt": "2026-12-25T19:00:00+07:00",
   "basePrice": 220
 }
+
+### ── A11. ยกเลิกทั้งรอบ ────────────────────────────────
+### ปิดทุกการจอง ใบที่จ่ายแล้วเข้าคิวคืนเงิน และแจ้งเตือนลูกค้า — ย้อนกลับไม่ได้
+### ยังมีสลิปรอตรวจในรอบนั้นจะได้ 409 SHOWTIME_HAS_PENDING_SLIPS (ตรวจให้จบก่อน)
+POST {{host}}/admin/showtimes/{{showtimes.response.body.showtimes.0.id}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "เครื่องฉายขัดข้อง" }
