@@ -1,0 +1,310 @@
+import prisma from '../lib/prisma.js';
+import ApiError from '../utils/ApiError.js';
+import { bangkokDayRange } from '../utils/datetime.js';
+import { buildZonePrices, toPriceMap } from '../utils/pricing.js';
+
+const showtimeInclude = {
+  theatre: {
+    select: {
+      id: true,
+      name: true,
+      screenType: true,
+      _count: { select: { seats: true } },
+    },
+  },
+  movie: { select: { id: true, titleTh: true, titleEn: true, posterUrl: true, durationMin: true } },
+  zonePrices: { select: { zone: true, price: true } },
+  _count: { select: { bookingSeats: true } },
+};
+
+const shapeShowtime = (showtime) => {
+  const totalSeats = showtime.theatre._count.seats;
+  const takenSeats = showtime._count.bookingSeats;
+  return {
+    id: showtime.id,
+    movieId: showtime.movieId,
+    movie: showtime.movie,
+    theatre: {
+      id: showtime.theatre.id,
+      name: showtime.theatre.name,
+      screenType: showtime.theatre.screenType,
+    },
+    startsAt: showtime.startsAt,
+    endsAt: showtime.endsAt,
+    basePrice: showtime.basePrice,
+    status: showtime.status,
+    prices: toPriceMap(showtime.zonePrices, showtime.basePrice),
+    totalSeats,
+    availableSeats: Math.max(totalSeats - takenSeats, 0),
+  };
+};
+
+export const listShowtimes = async ({ movieId, theatreId, date, includePast = false } = {}) => {
+  const where = { status: 'SCHEDULED' };
+  if (movieId) where.movieId = movieId;
+  if (theatreId) where.theatreId = theatreId;
+
+  if (date) {
+    const range = bangkokDayRange(date);
+    if (!range) throw ApiError.badRequest('INVALID_DATE', 'รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)');
+    // ในวันนี้ ไม่ต้องแสดงรอบที่เริ่มฉายไปแล้ว
+    const from = includePast ? range.start : new Date(Math.max(range.start.getTime(), Date.now()));
+    where.startsAt = { gte: from, lt: range.end };
+  } else if (!includePast) {
+    where.startsAt = { gte: new Date() };
+  }
+
+  const showtimes = await prisma.showtime.findMany({
+    where,
+    include: showtimeInclude,
+    orderBy: { startsAt: 'asc' },
+  });
+
+  return showtimes.map(shapeShowtime);
+};
+
+export const getShowtimeById = async (id) => {
+  const showtime = await prisma.showtime.findUnique({ where: { id }, include: showtimeInclude });
+  if (!showtime) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
+  return shapeShowtime(showtime);
+};
+
+/**
+ * ผังที่นั่งของรอบฉาย
+ * ทุกแถวใน BookingSeat = ที่นั่งที่ยังถูกยึดอยู่จริง (การจองที่ยกเลิก/หมดอายุจะถูกลบทิ้ง)
+ * จึงแยกได้แค่ว่าเป็น BOOKED (จ่ายแล้ว) หรือ HELD (กำลังรอชำระ/รอตรวจสลิป)
+ */
+export const getSeatMap = async (showtimeId) => {
+  const showtime = await prisma.showtime.findUnique({
+    where: { id: showtimeId },
+    include: {
+      theatre: true,
+      movie: { select: { id: true, titleTh: true, titleEn: true, posterUrl: true, durationMin: true } },
+      zonePrices: { select: { zone: true, price: true } },
+    },
+  });
+  if (!showtime) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
+
+  const [seats, occupied] = await Promise.all([
+    prisma.seat.findMany({
+      where: { theatreId: showtime.theatreId, isActive: true },
+      orderBy: [{ rowLabel: 'asc' }, { seatNumber: 'asc' }],
+    }),
+    prisma.bookingSeat.findMany({
+      where: { showtimeId },
+      select: { seatId: true, booking: { select: { status: true } } },
+    }),
+  ]);
+
+  const statusBySeatId = new Map(
+    occupied.map((row) => [row.seatId, row.booking.status === 'PAID' ? 'BOOKED' : 'HELD']),
+  );
+
+  const prices = toPriceMap(showtime.zonePrices, showtime.basePrice);
+
+  const rowMap = new Map();
+  for (const seat of seats) {
+    if (!rowMap.has(seat.rowLabel)) rowMap.set(seat.rowLabel, []);
+    rowMap.get(seat.rowLabel).push({
+      id: seat.id,
+      seatNumber: seat.seatNumber,
+      zone: seat.zone,
+      price: prices[seat.zone],
+      status: statusBySeatId.get(seat.id) ?? 'AVAILABLE',
+    });
+  }
+
+  return {
+    showtime: {
+      id: showtime.id,
+      startsAt: showtime.startsAt,
+      endsAt: showtime.endsAt,
+      basePrice: showtime.basePrice,
+      movie: showtime.movie,
+      theatre: {
+        id: showtime.theatre.id,
+        name: showtime.theatre.name,
+        screenType: showtime.theatre.screenType,
+      },
+    },
+    prices,
+    rows: [...rowMap.entries()].map(([rowLabel, rowSeats]) => ({ rowLabel, seats: rowSeats })),
+    stats: {
+      total: seats.length,
+      available: seats.length - statusBySeatId.size,
+    },
+  };
+};
+
+// ---------- ฝั่ง Admin ----------
+
+/** กันรอบฉายซ้อนเวลากันในโรงเดียวกัน (เผื่อเวลาทำความสะอาด 15 นาที) */
+export const TURNAROUND_MINUTES = 15;
+
+export const assertNoOverlap = async ({ theatreId, startsAt, endsAt, excludeId }) => {
+  const bufferMs = TURNAROUND_MINUTES * 60 * 1000;
+  const clash = await prisma.showtime.findFirst({
+    where: {
+      theatreId,
+      status: 'SCHEDULED',
+      ...(excludeId && { id: { not: excludeId } }),
+      startsAt: { lt: new Date(endsAt.getTime() + bufferMs) },
+      endsAt: { gt: new Date(startsAt.getTime() - bufferMs) },
+    },
+    include: { movie: { select: { titleTh: true } } },
+  });
+
+  if (clash) {
+    throw ApiError.conflict(
+      'SHOWTIME_OVERLAP',
+      `รอบนี้ชนกับรอบของเรื่อง "${clash.movie.titleTh}" ในโรงเดียวกัน (ต้องเว้นอย่างน้อย ${TURNAROUND_MINUTES} นาที)`,
+      { conflictingShowtimeId: clash.id, startsAt: clash.startsAt, endsAt: clash.endsAt },
+    );
+  }
+};
+
+/** ช่วงเวลาที่โรงเปิดให้จัดรอบฉาย (เวลาไทย) และความละเอียดของตัวเลือกเวลา */
+const OPEN_HOUR = 10;
+const CLOSE_HOUR = 24;
+const SLOT_STEP_MINUTES = 15;
+
+/**
+ * คำนวณว่าโรงนี้ในวันนี้ มีรอบไหนจองเวลาไว้แล้วบ้าง และเหลือช่วงไหนที่ลงรอบใหม่ได้
+ * ใช้กฎเดียวกับ assertNoOverlap (เว้นอย่างน้อย TURNAROUND_MINUTES ทั้งหัวและท้าย)
+ * ให้ server เป็นคนคิด เพื่อไม่ให้ client ต้องเขียนกฎซ้ำแล้วหลุดจากกันภายหลัง
+ */
+export const getAvailability = async ({ theatreId, date, movieId, excludeId }) => {
+  const range = bangkokDayRange(date);
+  if (!range) throw ApiError.badRequest('INVALID_DATE', 'รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)');
+
+  const windowStartMs = range.start.getTime() + OPEN_HOUR * 60 * 60 * 1000;
+  const windowEndMs = range.start.getTime() + CLOSE_HOUR * 60 * 60 * 1000;
+
+  const movie = await prisma.movie.findUnique({ where: { id: movieId } });
+  if (!movie) throw ApiError.notFound('MOVIE_NOT_FOUND', 'ไม่พบภาพยนตร์เรื่องนี้');
+
+  const showtimes = await prisma.showtime.findMany({
+    where: {
+      theatreId,
+      status: 'SCHEDULED',
+      ...(excludeId && { id: { not: excludeId } }),
+      // เอาเฉพาะรอบที่คาบเกี่ยวกับช่วงเวลาทำการของวันนั้นจริง ๆ (เผื่อ buffer หัวท้าย)
+      // ถ้าดึงกว้างกว่านี้ รอบของเมื่อวานจะติดมาแสดงในรายการทั้งที่ไม่ได้ชนกับช่องเวลาที่เสนอ
+      startsAt: { lt: new Date(windowEndMs + TURNAROUND_MINUTES * 60 * 1000) },
+      endsAt: { gt: new Date(windowStartMs - TURNAROUND_MINUTES * 60 * 1000) },
+    },
+    orderBy: { startsAt: 'asc' },
+    include: { movie: { select: { titleTh: true, titleEn: true } } },
+  });
+
+  const bufferMs = TURNAROUND_MINUTES * 60 * 1000;
+  const durationMs = movie.durationMin * 60 * 1000;
+  const stepMs = SLOT_STEP_MINUTES * 60 * 1000;
+
+  const conflictsAt = (startMs) => {
+    const endMs = startMs + durationMs;
+    return showtimes.some(
+      (s) => s.startsAt.getTime() < endMs + bufferMs && s.endsAt.getTime() > startMs - bufferMs,
+    );
+  };
+
+  const notBefore = Date.now();
+
+  const freeSlots = [];
+  for (let t = windowStartMs; t + durationMs <= windowEndMs; t += stepMs) {
+    if (t < notBefore) continue;
+    if (!conflictsAt(t)) freeSlots.push(new Date(t).toISOString());
+  }
+
+  return {
+    turnaroundMinutes: TURNAROUND_MINUTES,
+    durationMin: movie.durationMin,
+    slotStepMinutes: SLOT_STEP_MINUTES,
+    busy: showtimes.map((s) => ({
+      id: s.id,
+      startsAt: s.startsAt,
+      endsAt: s.endsAt,
+      movie: s.movie,
+    })),
+    freeSlots,
+  };
+};
+
+export const createShowtime = async ({ movieId, theatreId, startsAt, basePrice }) => {
+  const movie = await prisma.movie.findUnique({ where: { id: movieId } });
+  if (!movie) throw ApiError.notFound('MOVIE_NOT_FOUND', 'ไม่พบภาพยนตร์เรื่องนี้');
+
+  const theatre = await prisma.theatre.findUnique({ where: { id: theatreId } });
+  if (!theatre) throw ApiError.notFound('THEATRE_NOT_FOUND', 'ไม่พบโรงภาพยนตร์นี้');
+
+  const start = new Date(startsAt);
+  const end = new Date(start.getTime() + movie.durationMin * 60 * 1000);
+  await assertNoOverlap({ theatreId, startsAt: start, endsAt: end });
+
+  const showtime = await prisma.showtime.create({
+    data: {
+      movieId,
+      theatreId,
+      startsAt: start,
+      endsAt: end,
+      basePrice,
+      zonePrices: { create: buildZonePrices(basePrice) },
+    },
+    include: showtimeInclude,
+  });
+
+  return shapeShowtime(showtime);
+};
+
+export const updateShowtime = async (id, data) => {
+  const existing = await prisma.showtime.findUnique({ where: { id }, include: { movie: true } });
+  if (!existing) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
+
+  const bookedCount = await prisma.bookingSeat.count({ where: { showtimeId: id } });
+  if (bookedCount > 0 && (data.startsAt || data.theatreId)) {
+    throw ApiError.conflict(
+      'SHOWTIME_HAS_BOOKINGS',
+      'รอบนี้มีการจองแล้ว ไม่สามารถย้ายเวลา/โรงได้ (ยกเลิกรอบแทนหากจำเป็น)',
+    );
+  }
+
+  const theatreId = data.theatreId ?? existing.theatreId;
+  const start = data.startsAt ? new Date(data.startsAt) : existing.startsAt;
+  const end = new Date(start.getTime() + existing.movie.durationMin * 60 * 1000);
+
+  if (data.startsAt || data.theatreId) {
+    await assertNoOverlap({ theatreId, startsAt: start, endsAt: end, excludeId: id });
+  }
+
+  const showtime = await prisma.$transaction(async (tx) => {
+    if (data.basePrice !== undefined) {
+      await tx.zonePrice.deleteMany({ where: { showtimeId: id } });
+      await tx.zonePrice.createMany({
+        data: buildZonePrices(data.basePrice).map((zp) => ({ ...zp, showtimeId: id })),
+      });
+    }
+    return tx.showtime.update({
+      where: { id },
+      data: {
+        ...(data.theatreId && { theatreId }),
+        ...(data.startsAt && { startsAt: start, endsAt: end }),
+        ...(data.basePrice !== undefined && { basePrice: data.basePrice }),
+        ...(data.status && { status: data.status }),
+      },
+      include: showtimeInclude,
+    });
+  });
+
+  return shapeShowtime(showtime);
+};
+
+export const deleteShowtime = async (id) => {
+  const bookedCount = await prisma.bookingSeat.count({ where: { showtimeId: id } });
+  if (bookedCount > 0) {
+    throw ApiError.conflict(
+      'SHOWTIME_HAS_BOOKINGS',
+      'รอบนี้มีการจองอยู่ ไม่สามารถลบได้ — กรุณาจัดการการจองก่อน',
+    );
+  }
+  await prisma.showtime.delete({ where: { id } });
+};

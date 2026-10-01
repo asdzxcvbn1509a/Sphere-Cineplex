@@ -1,0 +1,248 @@
+import prisma from '../lib/prisma.js';
+import { bangkokDateKey, bangkokDayRange } from '../utils/datetime.js';
+
+const PAID = 'PAID';
+
+/**
+ * เงื่อนไขของ "งานค้าง" ที่ต้องนับ — ใช้ร่วมกันระหว่างหน้าภาพรวมกับป้ายตัวเลขบน sidebar
+ * ถ้าแยกกันเขียนแล้วแก้ที่เดียว ตัวเลขสองที่จะไม่ตรงกันโดยไม่มีใครรู้
+ */
+const PENDING_SLIP_WHERE = {
+  status: 'PENDING_VERIFICATION',
+  booking: { status: 'PENDING_VERIFICATION' },
+};
+const PENDING_REFUND_WHERE = { status: 'REFUND_PENDING' };
+
+/**
+ * ตัวเลขงานค้างสำหรับป้ายบน sidebar (+ ยอดรวมที่ต้องโอนคืน ใช้เป็นบรรทัดสรุปของหน้าคืนเงิน)
+ * แยกจาก getOverview เพราะถูกเรียกถี่กว่ามาก จึงนับแค่ไม่กี่ตัวเลขให้เบาที่สุด
+ */
+export const getQueueCounts = async () => {
+  const [pendingSlips, refunds] = await Promise.all([
+    prisma.payment.count({ where: PENDING_SLIP_WHERE }),
+    prisma.payment.aggregate({ where: PENDING_REFUND_WHERE, _count: true, _sum: { amount: true } }),
+  ]);
+  return {
+    pendingSlips,
+    pendingRefunds: refunds._count,
+    pendingRefundAmount: refunds._sum.amount ?? 0,
+  };
+};
+
+/** แถวในแผงสลิป/คืนเงินของหน้าภาพรวม ต้องการแค่รหัส ชื่อผู้จอง ยอด และสถานะ */
+const QUEUE_ROW_SELECT = {
+  id: true,
+  status: true,
+  amount: true,
+  booking: { select: { id: true, code: true, user: { select: { name: true } } } },
+};
+
+const toQueueRow = (payment) => ({
+  id: payment.id,
+  bookingId: payment.booking.id,
+  code: payment.booking.code,
+  customer: payment.booking.user.name,
+  amount: payment.amount,
+  status: payment.status,
+});
+
+/** สรุปภาพรวมหน้าแรกของ admin */
+export const getOverview = async () => {
+  const today = bangkokDayRange(bangkokDateKey(new Date()));
+
+  const [
+    paidToday,
+    pendingSlips,
+    showtimesToday,
+    activeHolds,
+    pendingRefunds,
+    recentSlips,
+    recentRefunds,
+  ] = await Promise.all([
+    prisma.booking.findMany({
+      where: { status: PAID, paidAt: { gte: today.start, lt: today.end } },
+      select: { totalAmount: true, seatSnapshot: true },
+    }),
+    prisma.payment.count({ where: PENDING_SLIP_WHERE }),
+    prisma.showtime.count({
+      where: { status: 'SCHEDULED', startsAt: { gte: today.start, lt: today.end } },
+    }),
+    prisma.booking.count({ where: { status: { in: ['PENDING_PAYMENT', 'PENDING_VERIFICATION'] } } }),
+    // การจองที่จ่ายเงินแล้วแต่ถูกยกเลิก ยังต้องโอนเงินคืนลูกค้า
+    prisma.payment.count({ where: PENDING_REFUND_WHERE }),
+    // enum ใน Postgres เรียงตามลำดับที่ประกาศ เรียง status ก่อนจึงได้ใบที่รอตรวจขึ้นบนสุด
+    prisma.payment.findMany({
+      where: { OR: [PENDING_SLIP_WHERE, { status: { in: ['APPROVED', 'REJECTED'] } }] },
+      orderBy: [{ status: 'asc' }, { slipUploadedAt: 'desc' }],
+      take: 5,
+      select: QUEUE_ROW_SELECT,
+    }),
+    prisma.payment.findMany({
+      where: { status: { in: ['REFUND_PENDING', 'REFUNDED'] } },
+      orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+      take: 5,
+      select: QUEUE_ROW_SELECT,
+    }),
+  ]);
+
+  const ticketsToday = paidToday.reduce(
+    (sum, booking) => sum + (Array.isArray(booking.seatSnapshot) ? booking.seatSnapshot.length : 0),
+    0,
+  );
+
+  return {
+    date: bangkokDateKey(new Date()),
+    revenueToday: paidToday.reduce((sum, b) => sum + b.totalAmount, 0),
+    bookingsToday: paidToday.length,
+    ticketsToday,
+    pendingSlips,
+    showtimesToday,
+    activeHolds,
+    pendingRefunds,
+    recentSlips: recentSlips.map(toQueueRow),
+    recentRefunds: recentRefunds.map(toQueueRow),
+  };
+};
+
+/**
+ * รายงานยอดขาย — นับเฉพาะการจองที่ชำระเงินแล้ว (สถานะ PAID)
+ * groupBy: 'day' | 'movie' | 'theatre'
+ */
+export const getSalesReport = async ({ from, to, groupBy = 'day' } = {}) => {
+  const start = from ? bangkokDayRange(from)?.start : undefined;
+  const end = to ? bangkokDayRange(to)?.end : undefined;
+
+  const bookings = await prisma.booking.findMany({
+    where: {
+      status: PAID,
+      ...(start || end ? { paidAt: { ...(start && { gte: start }), ...(end && { lt: end }) } } : {}),
+    },
+    include: {
+      showtime: {
+        include: {
+          movie: { select: { id: true, titleTh: true, titleEn: true } },
+          theatre: { select: { id: true, name: true } },
+        },
+      },
+    },
+    orderBy: { paidAt: 'asc' },
+  });
+
+  const groups = new Map();
+  for (const booking of bookings) {
+    const seatCount = Array.isArray(booking.seatSnapshot) ? booking.seatSnapshot.length : 0;
+    let key;
+    let label;
+
+    if (groupBy === 'movie') {
+      key = booking.showtime.movie.id;
+      label = booking.showtime.movie.titleTh;
+    } else if (groupBy === 'theatre') {
+      key = booking.showtime.theatre.id;
+      label = booking.showtime.theatre.name;
+    } else {
+      key = bangkokDateKey(booking.paidAt ?? booking.createdAt);
+      label = key;
+    }
+
+    const current = groups.get(key) ?? {
+      key,
+      label,
+      labelEn: groupBy === 'movie' ? booking.showtime.movie.titleEn : label,
+      bookings: 0,
+      tickets: 0,
+      revenue: 0,
+    };
+    current.bookings += 1;
+    current.tickets += seatCount;
+    current.revenue += booking.totalAmount;
+    groups.set(key, current);
+  }
+
+  const rows = [...groups.values()].sort((a, b) =>
+    groupBy === 'day' ? a.key.localeCompare(b.key) : b.revenue - a.revenue,
+  );
+
+  // การจองที่จ่ายเงินแล้วแต่ถูกยกเลิกในช่วงเวลาเดียวกัน
+  // เดิมรายได้จะหายไปจากรายงานเงียบ ๆ ทำให้ตัวเลขไม่ตรงกับเงินที่อยู่ในบัญชีจริง
+  const refundPayments = await prisma.payment.findMany({
+    where: {
+      status: { in: ['REFUND_PENDING', 'REFUNDED'] },
+      booking: {
+        ...(start || end
+          ? { cancelledAt: { ...(start && { gte: start }), ...(end && { lt: end }) } }
+          : {}),
+      },
+    },
+    select: { amount: true, status: true },
+  });
+
+  const refunds = {
+    count: refundPayments.length,
+    amount: refundPayments.reduce((sum, p) => sum + p.amount, 0),
+    pendingCount: refundPayments.filter((p) => p.status === 'REFUND_PENDING').length,
+    pendingAmount: refundPayments
+      .filter((p) => p.status === 'REFUND_PENDING')
+      .reduce((sum, p) => sum + p.amount, 0),
+  };
+
+  return {
+    groupBy,
+    from: from ?? null,
+    to: to ?? null,
+    rows,
+    refunds,
+    totals: rows.reduce(
+      (acc, row) => ({
+        bookings: acc.bookings + row.bookings,
+        tickets: acc.tickets + row.tickets,
+        revenue: acc.revenue + row.revenue,
+      }),
+      { bookings: 0, tickets: 0, revenue: 0 },
+    ),
+  };
+};
+
+/** อัตราการเต็มของแต่ละรอบฉาย (ที่นั่งที่ถูกยึด ÷ ที่นั่งทั้งโรง) */
+export const getOccupancyReport = async ({ from, to } = {}) => {
+  const start = from ? bangkokDayRange(from)?.start : new Date();
+  const end = to ? bangkokDayRange(to)?.end : undefined;
+
+  const showtimes = await prisma.showtime.findMany({
+    where: {
+      status: 'SCHEDULED',
+      startsAt: { ...(start && { gte: start }), ...(end && { lt: end }) },
+    },
+    orderBy: { startsAt: 'asc' },
+    take: 200,
+    include: {
+      movie: { select: { titleTh: true, titleEn: true } },
+      theatre: { select: { name: true, _count: { select: { seats: true } } } },
+      _count: { select: { bookingSeats: true } },
+    },
+  });
+
+  return showtimes.map((s) => {
+    const total = s.theatre._count.seats;
+    const sold = s._count.bookingSeats;
+    return {
+      showtimeId: s.id,
+      startsAt: s.startsAt,
+      movie: s.movie,
+      theatre: s.theatre.name,
+      totalSeats: total,
+      soldSeats: sold,
+      occupancy: total > 0 ? Math.round((sold / total) * 100) : 0,
+    };
+  });
+};
+
+export const salesReportToCsv = (report) => {
+  const header = ['key', 'label', 'bookings', 'tickets', 'revenue_baht'];
+  const lines = report.rows.map((row) =>
+    [row.key, `"${String(row.label).replace(/"/g, '""')}"`, row.bookings, row.tickets, row.revenue].join(','),
+  );
+  const totals = ['TOTAL', '""', report.totals.bookings, report.totals.tickets, report.totals.revenue].join(',');
+  // BOM ให้ Excel อ่านภาษาไทยถูก
+  return `﻿${[header.join(','), ...lines, totals].join('\r\n')}\r\n`;
+};

@@ -1,0 +1,350 @@
+import crypto from 'node:crypto';
+import prisma from '../lib/prisma.js';
+import ApiError from '../utils/ApiError.js';
+import { APP_URL, env, isDev, isMailConfigured } from '../config/env.js';
+import { sendMail } from '../utils/mailer.js';
+import { passwordResetEmail } from '../emails/passwordReset.js';
+import { isValidThaiMobile, normalizePhone } from '../utils/phone.js';
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../utils/password.js';
+import {
+  generateRefreshToken,
+  hashToken,
+  refreshTokenExpiry,
+  signAccessToken,
+} from '../utils/jwt.js';
+
+export const publicUser = (user) => {
+  return {
+    id: user.id,
+    phone: user.phone,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+};
+
+const normalizeEmail = (raw) => String(raw ?? '').trim().toLowerCase();
+
+/** ข้อความเดียวกันทุกกรณีที่ล็อกอินไม่ผ่าน — ไม่บอกว่าผิดที่บัญชีหรือรหัสผ่าน */
+const invalidCredentials = () => {
+  return ApiError.unauthorized(
+    'INVALID_CREDENTIALS',
+    'อีเมล/เบอร์โทรศัพท์ หรือรหัสผ่านไม่ถูกต้อง',
+  );
+};
+
+/** แปลง unique constraint ของ Prisma เป็นข้อความที่ชี้ช่องที่ต้องแก้ได้ */
+const duplicateFieldError = (target) => {
+  const fields = Array.isArray(target) ? target : [target];
+  if (fields.includes('email')) {
+    return ApiError.conflict('EMAIL_TAKEN', 'อีเมลนี้ถูกใช้สมัครไปแล้ว กรุณาเข้าสู่ระบบแทน');
+  }
+  if (fields.includes('phone')) {
+    return ApiError.conflict('PHONE_TAKEN', 'เบอร์โทรศัพท์นี้ถูกใช้สมัครไปแล้ว กรุณาเข้าสู่ระบบแทน');
+  }
+  return ApiError.conflict('DUPLICATE', 'ข้อมูลซ้ำกับบัญชีที่มีอยู่แล้ว');
+};
+
+/**
+ * สมัครสมาชิก — อีเมลใช้เป็นชื่อผู้ใช้หลัก ส่วนเบอร์โทรเก็บไว้ติดต่อและใช้ล็อกอินได้เหมือนกัน
+ * สมัครเสร็จถือว่าล็อกอินให้เลย ผู้ใช้จะได้กลับไปจองที่นั่งต่อได้ทันทีโดยไม่ต้องกรอกซ้ำ
+ */
+export const register = async ({ name, email, phone, password, userAgent }) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPhone = normalizePhone(phone);
+
+  if (!isValidThaiMobile(normalizedPhone)) {
+    throw ApiError.badRequest('INVALID_PHONE', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ต้องเป็นเบอร์มือถือ 10 หลัก)');
+  }
+
+  // เช็กก่อนเพื่อให้ได้ข้อความที่ชี้ช่องถูก — ส่วน unique index ใน DB เป็นด่านสุดท้ายกันสมัครพร้อมกัน
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email: normalizedEmail }, { phone: normalizedPhone }] },
+    select: { email: true, phone: true },
+  });
+  if (existing) {
+    throw duplicateFieldError(existing.email === normalizedEmail ? 'email' : 'phone');
+  }
+
+  try {
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        passwordHash: await hashPassword(password),
+      },
+    });
+    return { ...(await issueSession(user, userAgent)), isNewUser: true };
+  } catch (error) {
+    if (error?.code === 'P2002') throw duplicateFieldError(error.meta?.target);
+    throw error;
+  }
+};
+
+/** เข้าสู่ระบบด้วยอีเมลหรือเบอร์โทรศัพท์ก็ได้ — ดูจากว่ามี @ อยู่ในสิ่งที่กรอกมาหรือไม่ */
+export const login = async ({ identifier, password, userAgent }) => {
+  const value = String(identifier ?? '').trim();
+  const where = value.includes('@')
+    ? { email: normalizeEmail(value) }
+    : { phone: normalizePhone(value) };
+
+  const user = where.email || where.phone ? await prisma.user.findUnique({ where }) : null;
+  // เทียบรหัสผ่านเสมอแม้ไม่เจอบัญชี เพื่อให้เวลาที่ใช้ตอบใกล้เคียงกันทุกกรณี
+  const matched = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+
+  if (!user || !matched) throw invalidCredentials();
+
+  return await issueSession(user, userAgent);
+};
+
+export const issueSession = async (user, userAgent) => {
+  const { token, tokenHash } = generateRefreshToken();
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt: refreshTokenExpiry(),
+      userAgent: userAgent?.slice(0, 255) ?? null,
+    },
+  });
+  return { user: publicUser(user), accessToken: signAccessToken(user), refreshToken: token };
+};
+
+/**
+ * ต่ออายุเซสชันแบบ rotate — ใบเก่าถูก revoke ทันทีที่ออกใบใหม่
+ * ถ้ามีใครเอาใบที่ revoke แล้วมาใช้ซ้ำ = token ถูกขโมย → เพิกถอนทุกเซสชันของ user คนนั้น
+ */
+export const rotateSession = async (rawToken, userAgent) => {
+  if (!rawToken) {
+    throw ApiError.unauthorized('NO_REFRESH_TOKEN', 'ไม่พบเซสชัน กรุณาเข้าสู่ระบบใหม่');
+  }
+
+  const stored = await prisma.refreshToken.findUnique({
+    where: { tokenHash: hashToken(rawToken) },
+    include: { user: true },
+  });
+  if (!stored) {
+    throw ApiError.unauthorized('INVALID_REFRESH_TOKEN', 'เซสชันไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
+  }
+
+  if (stored.revokedAt) {
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    throw ApiError.unauthorized(
+      'REFRESH_TOKEN_REUSED',
+      'ตรวจพบการใช้เซสชันซ้ำ ระบบได้ออกจากระบบทุกอุปกรณ์เพื่อความปลอดภัย',
+    );
+  }
+
+  if (stored.expiresAt <= new Date()) {
+    throw ApiError.unauthorized('REFRESH_TOKEN_EXPIRED', 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+  }
+
+  const next = generateRefreshToken();
+  await prisma.$transaction(async (tx) => {
+    const created = await tx.refreshToken.create({
+      data: {
+        userId: stored.userId,
+        tokenHash: next.tokenHash,
+        expiresAt: refreshTokenExpiry(),
+        userAgent: userAgent?.slice(0, 255) ?? null,
+      },
+    });
+    await tx.refreshToken.update({
+      where: { id: stored.id },
+      data: { revokedAt: new Date(), replacedById: created.id },
+    });
+  });
+
+  return {
+    user: publicUser(stored.user),
+    accessToken: signAccessToken(stored.user),
+    refreshToken: next.token,
+  };
+};
+
+export const revokeSession = async (rawToken) => {
+  if (!rawToken) return;
+  await prisma.refreshToken.updateMany({
+    where: { tokenHash: hashToken(rawToken), revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+};
+
+/**
+ * เปลี่ยนรหัสผ่านด้วยตัวเอง — ต้องยืนยันรหัสเดิมก่อน
+ * ถ้ามีใครขโมยเซสชันไปได้ จะได้ยึดบัญชีทั้งใบด้วยการเปลี่ยนรหัสไม่ได้
+ *
+ * เปลี่ยนสำเร็จแล้วเพิกถอนเซสชันอื่นทั้งหมด เหลือแค่เครื่องที่กำลังใช้อยู่
+ * เพราะเหตุผลหลักที่คนเปลี่ยนรหัสคือสงสัยว่ารหัสรั่ว การไล่เครื่องอื่นออกจึงเป็นสิ่งที่คาดหวัง
+ */
+export const changePassword = async ({ userId, currentPassword, newPassword, keepToken }) => {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+
+  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+    throw ApiError.badRequest('WRONG_PASSWORD', 'รหัสผ่านปัจจุบันไม่ถูกต้อง');
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash: await hashPassword(newPassword) },
+  });
+
+  await prisma.refreshToken.updateMany({
+    where: {
+      userId,
+      revokedAt: null,
+      ...(keepToken && { NOT: { tokenHash: hashToken(keepToken) } }),
+    },
+    data: { revokedAt: new Date() },
+  });
+
+  return { ok: true };
+};
+
+/**
+ * ปิดอีเมลไว้บางส่วนตอนเอาไปแสดงบนหน้าเว็บ
+ * คนที่ถือลิงก์จะได้ยืนยันว่าเป็นบัญชีของตัวเองจริง โดยที่ลิงก์หลุดไปก็ไม่ประกาศอีเมลเต็ม ๆ ให้คนอื่น
+ */
+export const maskEmail = (email) => {
+  const [name = '', domain = ''] = String(email ?? '').split('@');
+  const head = name.slice(0, 2);
+  // จำนวนดาวคงที่ไม่เกิน 6 ตัว ไม่ได้ไล่ตามความยาวจริง — ความยาวอีเมลก็เป็นข้อมูลที่ไม่ต้องบอก
+  const hidden = Math.min(Math.max(name.length - head.length, 1), 6);
+  return `${head}${'*'.repeat(hidden)}@${domain}`;
+};
+
+/** ลิงก์ผิด/ถูกใช้ไปแล้ว ใช้ข้อความเดียวกัน — ไม่บอกคนที่เดา token ว่าเดาใกล้เคียงแค่ไหน */
+const invalidResetLink = () => {
+  return ApiError.badRequest(
+    'RESET_LINK_INVALID',
+    'ลิงก์ตั้งรหัสผ่านนี้ใช้ไม่ได้แล้ว กรุณาขอลิงก์ใหม่อีกครั้ง',
+  );
+};
+
+const findLiveResetToken = async (rawToken) => {
+  const token = String(rawToken ?? '');
+  if (!token) throw invalidResetLink();
+
+  const stored = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashToken(token) },
+    include: { user: true },
+  });
+
+  if (!stored || stored.usedAt) throw invalidResetLink();
+  if (stored.expiresAt <= new Date()) {
+    // แยกรหัสจากกรณีลิงก์ผิด เพราะ "หมดอายุ" ผู้ใช้แก้เองได้ด้วยการขอใหม่ ไม่ใช่ความผิดพลาดของเขา
+    throw ApiError.badRequest(
+      'RESET_LINK_EXPIRED',
+      `ลิงก์ตั้งรหัสผ่านหมดอายุแล้ว (ลิงก์มีอายุ ${env.PASSWORD_RESET_TTL_MINUTES} นาที) กรุณาขอลิงก์ใหม่อีกครั้ง`,
+    );
+  }
+
+  return stored;
+};
+
+/**
+ * ขอลิงก์ตั้งรหัสผ่านใหม่ทางอีเมล
+ *
+ * ตอบ ok เหมือนกันทุกครั้งไม่ว่าอีเมลนั้นจะมีบัญชีอยู่จริงหรือไม่
+ * ไม่งั้นหน้านี้จะกลายเป็นเครื่องมือไล่เช็กว่าอีเมลไหนเป็นลูกค้าของเราบ้าง
+ */
+export const requestPasswordReset = async ({ email, lang, ip }) => {
+  // ตอบเหมือนกันทุกกรณี รวมถึงอายุลิงก์ที่หน้าเว็บเอาไปบอกผู้ใช้ว่าต้องกดภายในกี่นาที
+  const answer = { ok: true, ttlMinutes: env.PASSWORD_RESET_TTL_MINUTES };
+
+  const user = await prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
+  if (!user) return answer;
+
+  // 32 ไบต์สุ่ม = เดาไม่ได้ในทางปฏิบัติ · base64url ใส่ใน query string ได้โดยไม่ต้อง encode
+  const token = crypto.randomBytes(32).toString('base64url');
+
+  await prisma.$transaction([
+    // ขอใบใหม่แล้วใบเก่าใช้ไม่ได้ทันที (และเป็นการเก็บกวาดใบที่หมดอายุไปในตัว)
+    // คนที่กด "ส่งอีกครั้ง" จะได้ไม่ต้องเดาว่าต้องเปิดเมลฉบับไหน — ฉบับล่าสุดเสมอ
+    prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }),
+    prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + env.PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
+        requestIp: ip ?? null,
+      },
+    }),
+  ]);
+
+  const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+  const { delivered } = await sendMail({
+    to: user.email,
+    ...passwordResetEmail({
+      name: user.name,
+      resetUrl,
+      ttlMinutes: env.PASSWORD_RESET_TTL_MINUTES,
+      lang,
+    }),
+  });
+
+  // ตอนพัฒนาที่ยังไม่ได้ตั้ง SMTP ส่งลิงก์กลับไปให้หน้าเว็บด้วย จะได้ทดสอบจนจบขั้นตอนได้โดยไม่ต้องมีเมลเซิร์ฟเวอร์
+  // เงื่อนไขผูกกับ NODE_ENV ด้วย ต่อให้ลืมตั้ง SMTP ตอนขึ้นจริง ลิงก์ก็ไม่หลุดออกไปทาง API
+  const exposeLink = isDev && !isMailConfigured && !delivered;
+  return { ...answer, ...(exposeLink && { devResetUrl: resetUrl }) };
+};
+
+/** ตรวจลิงก์ก่อนแสดงฟอร์ม ผู้ใช้จะได้ไม่ตั้งรหัสใหม่จนเสร็จแล้วค่อยมารู้ว่าลิงก์หมดอายุ */
+export const checkResetToken = async (token) => {
+  const stored = await findLiveResetToken(token);
+  return {
+    email: maskEmail(stored.user.email),
+    name: stored.user.name,
+    expiresAt: stored.expiresAt,
+  };
+};
+
+/**
+ * ตั้งรหัสผ่านใหม่จากลิงก์ในอีเมล
+ *
+ * เสร็จแล้วเพิกถอนเซสชันของบัญชีนั้น "ทุกเครื่อง" ไม่เว้นเครื่องไหนเลย
+ * ต่างจากการเปลี่ยนรหัสเองที่หน้าโปรไฟล์ เพราะกรณีนี้คนตั้งรหัสยังไม่ได้ล็อกอิน
+ * และเหตุผลที่ต้องรีเซ็ตมักเป็นเพราะบัญชีอาจถูกคนอื่นเข้าถึงอยู่
+ */
+export const resetPassword = async ({ token, password }) => {
+  const stored = await findLiveResetToken(token);
+  const passwordHash = await hashPassword(password);
+  const now = new Date();
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: stored.userId }, data: { passwordHash } }),
+    prisma.passwordResetToken.updateMany({
+      where: { userId: stored.userId, usedAt: null },
+      data: { usedAt: now },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, revokedAt: null },
+      data: { revokedAt: now },
+    }),
+  ]);
+
+  // คืนอีเมลเต็มให้หน้าเว็บเอาไปเติมในช่องล็อกอินต่อ — คนที่ถือลิงก์คือคนที่เปิดเมลฉบับนั้นได้อยู่แล้ว
+  return { ok: true, email: stored.user.email };
+};
+
+export const updateProfile = async (userId, data) => {
+  const email = data.email !== undefined ? normalizeEmail(data.email) : undefined;
+  try {
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(email !== undefined && { email }),
+      },
+    });
+    return publicUser(user);
+  } catch (error) {
+    if (error?.code === 'P2002') throw duplicateFieldError(error.meta?.target);
+    throw error;
+  }
+};

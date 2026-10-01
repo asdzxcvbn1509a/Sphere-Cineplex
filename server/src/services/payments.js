@@ -1,0 +1,425 @@
+import fs from 'node:fs/promises';
+import prisma from '../lib/prisma.js';
+import ApiError from '../utils/ApiError.js';
+import { env } from '../config/env.js';
+import { addMinutes } from '../utils/datetime.js';
+import { resolveSlipPath } from '../middleware/upload.js';
+import { notify } from './notifications.js';
+import { getBookingById } from './bookings.js';
+
+/** ข้อมูลหน้าชำระเงินของผู้ใช้ (รวม payload สำหรับ render QR ฝั่ง client) */
+export const getPaymentForBooking = async ({ bookingId, userId }) => {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { payment: true, showtime: { select: { startsAt: true } } },
+  });
+  if (!booking) throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
+  if (booking.userId !== userId) {
+    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
+  }
+  if (!booking.payment) throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบข้อมูลการชำระเงิน');
+
+  return {
+    bookingId: booking.id,
+    bookingCode: booking.code,
+    bookingStatus: booking.status,
+    amount: booking.payment.amount,
+    reference: booking.payment.reference,
+    qrPayload: booking.payment.qrPayload,
+    promptPayId: env.PROMPTPAY_ID,
+    merchantName: env.PROMPTPAY_MERCHANT_NAME,
+    status: booking.payment.status,
+    slipUploadedAt: booking.payment.slipUploadedAt,
+    hasSlip: Boolean(booking.payment.slipPath),
+    rejectReason: booking.payment.rejectReason,
+    holdExpiresAt: booking.holdExpiresAt,
+    holdSecondsLeft: booking.holdExpiresAt
+      ? Math.max(0, Math.floor((booking.holdExpiresAt.getTime() - Date.now()) / 1000))
+      : null,
+  };
+};
+
+/**
+ * ผู้ใช้ส่งสลิป
+ * จุดสำคัญ: ตั้ง holdExpiresAt = null เพื่อ "หยุดนับถอยหลัง" ระหว่างรอ admin ตรวจ
+ * ที่นั่งจะถูกยึดไว้จนกว่า admin จะอนุมัติหรือปฏิเสธ ผู้ใช้จึงไม่เสียสิทธิ์เพราะความล่าช้าของ admin
+ */
+export const uploadSlip = async ({ bookingId, userId, file }) => {
+  if (!file) throw ApiError.badRequest('NO_FILE', 'กรุณาแนบรูปสลิปการโอนเงิน');
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { payment: true },
+  });
+
+  const cleanup = async () => {
+    await fs.unlink(file.path).catch(() => {});
+  };
+
+  if (!booking || !booking.payment) {
+    await cleanup();
+    throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
+  }
+  if (booking.userId !== userId) {
+    await cleanup();
+    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
+  }
+  if (booking.status !== 'PENDING_PAYMENT') {
+    await cleanup();
+    throw ApiError.conflict(
+      'BOOKING_NOT_PAYABLE',
+      booking.status === 'PENDING_VERIFICATION'
+        ? 'ส่งสลิปแล้ว กำลังรอผู้ดูแลระบบตรวจสอบ'
+        : 'รายการนี้ไม่อยู่ในสถานะที่ชำระเงินได้แล้ว',
+    );
+  }
+  if (booking.holdExpiresAt && booking.holdExpiresAt <= new Date()) {
+    await cleanup();
+    throw ApiError.conflict('HOLD_EXPIRED', 'หมดเวลาชำระเงินแล้ว กรุณาจองใหม่อีกครั้ง');
+  }
+
+  const previousSlip = booking.payment.slipPath;
+
+  await prisma.$transaction([
+    prisma.payment.update({
+      where: { id: booking.payment.id },
+      data: {
+        slipPath: file.filename,
+        slipUploadedAt: new Date(),
+        status: 'PENDING_VERIFICATION',
+        rejectReason: null,
+        verifiedById: null,
+        verifiedAt: null,
+      },
+    }),
+    prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
+    }),
+  ]);
+
+  // ลบสลิปเก่าทิ้ง (กรณีส่งใหม่หลังถูกปฏิเสธ) หลังบันทึกสำเร็จแล้วเท่านั้น
+  if (previousSlip && previousSlip !== file.filename) {
+    await fs.unlink(resolveSlipPath(previousSlip)).catch(() => {});
+  }
+
+  return getPaymentForBooking({ bookingId, userId });
+};
+
+/** ส่งไฟล์สลิปให้เจ้าของการจองหรือ admin เท่านั้น (ไม่เปิดเป็น static file) */
+export const getSlipFilePath = async ({ bookingId, requester }) => {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { payment: true },
+  });
+  if (!booking?.payment?.slipPath) {
+    throw ApiError.notFound('SLIP_NOT_FOUND', 'ยังไม่มีสลิปสำหรับรายการนี้');
+  }
+  if (requester.role !== 'ADMIN' && booking.userId !== requester.id) {
+    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์ดูสลิปของรายการนี้');
+  }
+  return resolveSlipPath(booking.payment.slipPath);
+};
+
+// ---------- ฝั่ง Admin ----------
+
+export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100 } = {}) => {
+  // คิวที่กดอนุมัติ/ปฏิเสธได้ ต้องเป็นใบที่การจองยังรอตรวจอยู่เท่านั้น
+  // กันสลิปค้างคิวกรณีการจองถูกยกเลิกหรือหมดอายุไปแล้ว (ซึ่ง admin กดอะไรไม่ได้)
+  const where =
+    status === 'ALL'
+      ? {}
+      : status === 'PENDING_VERIFICATION'
+        ? { status, booking: { status: 'PENDING_VERIFICATION' } }
+        : { status };
+
+  const payments = await prisma.payment.findMany({
+    where,
+    orderBy: { slipUploadedAt: 'asc' },
+    take,
+    include: {
+      booking: {
+        include: {
+          user: { select: { id: true, name: true, phone: true } },
+          showtime: {
+            include: {
+              movie: { select: { titleTh: true, titleEn: true, posterUrl: true } },
+              theatre: { select: { name: true } },
+            },
+          },
+        },
+      },
+      verifiedBy: { select: { id: true, name: true } },
+    },
+  });
+
+  return payments.map((payment) => ({
+    id: payment.id,
+    status: payment.status,
+    amount: payment.amount,
+    reference: payment.reference,
+    slipUploadedAt: payment.slipUploadedAt,
+    hasSlip: Boolean(payment.slipPath),
+    rejectReason: payment.rejectReason,
+    verifiedAt: payment.verifiedAt,
+    verifiedBy: payment.verifiedBy,
+    booking: {
+      id: payment.booking.id,
+      code: payment.booking.code,
+      status: payment.booking.status,
+      totalAmount: payment.booking.totalAmount,
+      seats: payment.booking.seatSnapshot,
+      createdAt: payment.booking.createdAt,
+      user: payment.booking.user,
+      showtime: {
+        id: payment.booking.showtime.id,
+        startsAt: payment.booking.showtime.startsAt,
+        movie: payment.booking.showtime.movie,
+        theatre: payment.booking.showtime.theatre,
+      },
+    },
+  }));
+};
+
+export const approvePayment = async ({ paymentId, adminId }) => {
+  const payment = await loadPendingPayment(paymentId);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'APPROVED',
+        verifiedById: adminId,
+        verifiedAt: new Date(),
+        rejectReason: null,
+      },
+    });
+    await tx.booking.update({
+      where: { id: payment.bookingId },
+      data: { status: 'PAID', paidAt: new Date(), holdExpiresAt: null },
+    });
+    await notify(
+      {
+        userId: payment.booking.userId,
+        type: 'PAYMENT_APPROVED',
+        context: { code: payment.booking.code },
+        data: { bookingId: payment.bookingId },
+      },
+      tx,
+    );
+  });
+
+  return getBookingById(payment.bookingId);
+};
+
+/**
+ * ปฏิเสธสลิป — คืนการจองกลับไปสถานะรอชำระเงิน พร้อมให้เวลาใหม่
+ * (ไม่ยกเลิกทิ้งทันที เพราะผู้ใช้อาจแค่แนบสลิปผิดรูป)
+ */
+export const rejectPayment = async ({ paymentId, adminId, reason }) => {
+  const payment = await loadPendingPayment(paymentId);
+  const newHold = addMinutes(new Date(), env.REJECTED_RETRY_MINUTES);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'REJECTED',
+        rejectReason: reason,
+        verifiedById: adminId,
+        verifiedAt: new Date(),
+      },
+    });
+    await tx.booking.update({
+      where: { id: payment.bookingId },
+      data: { status: 'PENDING_PAYMENT', holdExpiresAt: newHold },
+    });
+    await notify(
+      {
+        userId: payment.booking.userId,
+        type: 'PAYMENT_REJECTED',
+        context: { code: payment.booking.code, reason },
+        data: { bookingId: payment.bookingId },
+      },
+      tx,
+    );
+  });
+
+  return getBookingById(payment.bookingId);
+};
+
+const loadPendingPayment = async (paymentId) => {
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    include: { booking: { select: { id: true, code: true, userId: true, status: true } } },
+  });
+  if (!payment) throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบรายการชำระเงินนี้');
+  if (payment.status !== 'PENDING_VERIFICATION') {
+    throw ApiError.conflict('PAYMENT_NOT_PENDING', 'รายการนี้ถูกตรวจสอบไปแล้ว');
+  }
+  if (payment.booking.status !== 'PENDING_VERIFICATION') {
+    throw ApiError.conflict('BOOKING_NOT_PENDING', 'สถานะการจองเปลี่ยนไปแล้ว กรุณารีเฟรชหน้าจอ');
+  }
+  return payment;
+};
+
+// ---------- การคืนเงิน ----------
+
+/**
+ * คิวรอคืนเงิน — การจองที่จ่ายเงินมาแล้วแต่ถูกยกเลิกภายหลัง
+ * ระบบนี้รับเงินด้วยการโอน + ตรวจสลิป การคืนเงินจึงเป็นการโอนคืนด้วยมือเช่นกัน
+ * หน้าที่ของระบบคือเตือนว่ายังค้างอยู่ และเก็บหลักฐานว่าโอนคืนไปแล้วเมื่อไหร่ โดยใคร
+ */
+export const listRefunds = async ({ status = 'REFUND_PENDING', take = 100 } = {}) => {
+  const refunds = await prisma.payment.findMany({
+    where: status === 'ALL' ? { status: { in: ['REFUND_PENDING', 'REFUNDED'] } } : { status },
+    orderBy: status === 'REFUNDED' ? { refundedAt: 'desc' } : { refundDueAt: 'asc' },
+    take,
+    include: {
+      booking: {
+        include: {
+          user: { select: { id: true, name: true, phone: true } },
+          showtime: {
+            include: {
+              movie: { select: { titleTh: true, titleEn: true, posterUrl: true } },
+              theatre: { select: { name: true } },
+            },
+          },
+        },
+      },
+      refundedBy: { select: { id: true, name: true } },
+    },
+  });
+
+  return refunds.map((payment) => ({
+    id: payment.id,
+    status: payment.status,
+    amount: payment.amount,
+    reference: payment.reference,
+    paidAt: payment.booking.paidAt,
+    refundDueAt: payment.refundDueAt,
+    refundedAt: payment.refundedAt,
+    refundedBy: payment.refundedBy,
+    refundNote: payment.refundNote,
+    refundBankName: payment.refundBankName,
+    refundAccountNo: payment.refundAccountNo,
+    hasRefundSlip: Boolean(payment.refundSlipPath),
+    booking: {
+      id: payment.booking.id,
+      code: payment.booking.code,
+      status: payment.booking.status,
+      totalAmount: payment.booking.totalAmount,
+      seats: payment.booking.seatSnapshot,
+      cancelledAt: payment.booking.cancelledAt,
+      cancelReason: payment.booking.cancelReason,
+      user: payment.booking.user,
+      showtime: {
+        id: payment.booking.showtime.id,
+        startsAt: payment.booking.showtime.startsAt,
+        movie: payment.booking.showtime.movie,
+        theatre: payment.booking.showtime.theatre,
+      },
+    },
+  }));
+};
+
+/** ผู้ดูแลโอนคืนเองแล้วมาบันทึก ต้องแนบสลิปคืนเงิน เพราะลูกค้าเปิดดูเป็นหลักฐานได้ที่หน้าการจองของฉัน */
+export const completeRefund = async ({ paymentId, adminId, note, file }) => {
+  if (!file) throw ApiError.badRequest('NO_FILE', 'กรุณาแนบสลิปการโอนคืน');
+
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    include: { booking: { select: { id: true, code: true, userId: true } } },
+  });
+
+  const cleanup = async () => {
+    await fs.unlink(file.path).catch(() => {});
+  };
+
+  if (!payment) {
+    await cleanup();
+    throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบรายการชำระเงินนี้');
+  }
+  if (payment.status !== 'REFUND_PENDING') {
+    await cleanup();
+    throw ApiError.conflict(
+      'REFUND_NOT_PENDING',
+      payment.status === 'REFUNDED'
+        ? 'รายการนี้คืนเงินไปแล้ว'
+        : 'รายการนี้ไม่ได้อยู่ในสถานะรอคืนเงิน',
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'REFUNDED',
+        refundedAt: new Date(),
+        refundedById: adminId,
+        refundNote: note ?? null,
+        refundSlipPath: file.filename,
+      },
+    });
+    await notify(
+      {
+        userId: payment.booking.userId,
+        type: 'REFUND_COMPLETED',
+        context: { code: payment.booking.code, amount: payment.amount },
+        data: { bookingId: payment.bookingId },
+      },
+      tx,
+    );
+  });
+
+  return listRefunds({ status: 'REFUND_PENDING' });
+};
+
+/**
+ * แก้รายการที่บันทึกคืนเงินไปแล้ว — เปลี่ยนสลิป (ถ้าแนบมาใหม่) และหมายเหตุ
+ * ไม่แตะสถานะ/เวลาคืนเงิน และไม่แจ้งเตือนลูกค้าซ้ำ เพราะเงินถูกโอนไปแล้วจริง แค่แก้หลักฐานให้ถูก
+ */
+export const updateRefund = async ({ paymentId, note, file }) => {
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+
+  const cleanup = async () => {
+    if (file) await fs.unlink(file.path).catch(() => {});
+  };
+
+  if (!payment) {
+    await cleanup();
+    throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบรายการชำระเงินนี้');
+  }
+  if (payment.status !== 'REFUNDED') {
+    await cleanup();
+    throw ApiError.conflict('REFUND_NOT_COMPLETED', 'รายการนี้ยังไม่ได้บันทึกการคืนเงิน');
+  }
+
+  await prisma.payment.update({
+    where: { id: paymentId },
+    data: {
+      refundNote: note?.trim() || null,
+      ...(file && { refundSlipPath: file.filename }),
+    },
+  });
+
+  // สลิปเก่าไม่มีใครอ้างถึงแล้ว ลบทิ้งหลังบันทึกสำเร็จเท่านั้น
+  if (file && payment.refundSlipPath) {
+    await fs.unlink(resolveSlipPath(payment.refundSlipPath, 'refund')).catch(() => {});
+  }
+};
+
+/** สลิปคืนเงิน — เจ้าของการจองหรือ admin เท่านั้น เหมือนสลิปฝั่งจ่ายเงิน */
+export const getRefundSlipFilePath = async ({ bookingId, requester }) => {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { payment: true },
+  });
+  if (!booking?.payment?.refundSlipPath) {
+    throw ApiError.notFound('REFUND_SLIP_NOT_FOUND', 'ยังไม่มีสลิปคืนเงินสำหรับรายการนี้');
+  }
+  if (requester.role !== 'ADMIN' && booking.userId !== requester.id) {
+    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์ดูสลิปของรายการนี้');
+  }
+  return resolveSlipPath(booking.payment.refundSlipPath, 'refund');
+};

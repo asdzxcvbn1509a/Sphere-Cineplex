@@ -1,0 +1,298 @@
+// Theatre Reservation System — database schema
+// หมายเหตุเรื่องเงิน: เก็บทุกจำนวนเงินเป็น Int หน่วย "บาท" (ราคาตั๋วในไทยเป็นจำนวนเต็มเสมอ)
+// เพื่อเลี่ยงปัญหา floating point และการ serialize Decimal ข้าม JSON
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum MovieStatus {
+  NOW_SHOWING
+  COMING_SOON
+  ARCHIVED
+}
+
+enum SeatZone {
+  NORMAL
+  PREMIUM
+  SOFA
+}
+
+enum ShowtimeStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  PENDING_VERIFICATION
+  PAID
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  AWAITING_SLIP
+  PENDING_VERIFICATION
+  APPROVED
+  REJECTED
+  /// ยกเลิกการจองหลังจ่ายเงินแล้ว ต้องรอผู้ดูแลโอนเงินคืน
+  REFUND_PENDING
+  /// ผู้ดูแลโอนคืนและบันทึกหลักฐานแล้ว
+  REFUNDED
+}
+
+enum NotificationType {
+  PAYMENT_APPROVED
+  REFUND_COMPLETED
+  PAYMENT_REJECTED
+  BOOKING_CANCELLED
+  BOOKING_EXPIRED
+  SHOWTIME_REMINDER
+}
+
+model User {
+  id String @id @default(cuid())
+  /// ชื่อผู้ใช้หลักตอนเข้าสู่ระบบ เก็บเป็นตัวพิมพ์เล็กเสมอ จะได้ไม่มีบัญชีซ้ำแค่เพราะพิมพ์ใหญ่/เล็กต่างกัน
+  email String @unique
+  /// ล็อกอินด้วยเบอร์แทนอีเมลก็ได้ และใช้เป็นช่องทางติดต่อเวลาการจองมีปัญหา
+  phone String @unique
+  /// bcrypt hash เท่านั้น — ไม่เคยเก็บรหัสผ่านจริงลงฐานข้อมูล
+  passwordHash String
+  name         String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bookings         Booking[]
+  refreshTokens    RefreshToken[]
+  passwordResets   PasswordResetToken[]
+  notifications    Notification[]
+  verifiedPayments Payment[]      @relation("PaymentVerifier")
+  refundedPayments Payment[]      @relation("PaymentRefunder")
+}
+
+/// refresh token แบบ rotate — เก็บ sha256 hash เท่านั้น
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// ลิงก์ตั้งรหัสผ่านใหม่ที่ส่งไปทางอีเมล — เก็บแค่ sha256 hash เหมือน refresh token
+/// ฐานข้อมูลรั่วก็เอาแถวพวกนี้ไปตั้งรหัสผ่านใหม่ของใครไม่ได้
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  /// ใช้ไปแล้วครั้งเดียวจบ ลิงก์เดิมกดซ้ำไม่ได้แม้จะยังไม่หมดอายุ
+  usedAt    DateTime?
+  /// ไอพีของคนที่กดขอลิงก์ ไว้ไล่ดูตอนมีคนสั่งรีเซ็ตบัญชีคนอื่นรัว ๆ
+  requestIp String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Movie {
+  id          String      @id @default(cuid())
+  titleTh     String
+  titleEn     String
+  synopsisTh  String
+  synopsisEn  String
+  posterUrl   String
+  backdropUrl String?
+  durationMin Int
+  rating      String      @default("G")
+  genres      String[]
+  releaseDate DateTime
+  status      MovieStatus @default(NOW_SHOWING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  showtimes Showtime[]
+
+  @@index([status])
+}
+
+/// โรงภาพยนตร์ / ห้องฉาย
+model Theatre {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  screenType String   @default("2D")
+  rowsCount  Int
+  colsCount  Int
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  seats     Seat[]
+  showtimes Showtime[]
+}
+
+model Seat {
+  id         String   @id @default(cuid())
+  theatreId  String
+  rowLabel   String
+  seatNumber Int
+  zone       SeatZone @default(NORMAL)
+  isActive   Boolean  @default(true)
+
+  theatre      Theatre       @relation(fields: [theatreId], references: [id], onDelete: Cascade)
+  bookingSeats BookingSeat[]
+
+  @@unique([theatreId, rowLabel, seatNumber])
+  @@index([theatreId])
+}
+
+model Showtime {
+  id        String         @id @default(cuid())
+  movieId   String
+  theatreId String
+  startsAt  DateTime
+  endsAt    DateTime
+  basePrice Int
+  status    ShowtimeStatus @default(SCHEDULED)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  movie        Movie         @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  theatre      Theatre       @relation(fields: [theatreId], references: [id], onDelete: Cascade)
+  zonePrices   ZonePrice[]
+  bookings     Booking[]
+  bookingSeats BookingSeat[]
+
+  @@unique([theatreId, startsAt])
+  @@index([movieId, startsAt])
+  @@index([startsAt])
+}
+
+/// ราคาต่อโซนของแต่ละรอบฉาย
+model ZonePrice {
+  id         String   @id @default(cuid())
+  showtimeId String
+  zone       SeatZone
+  price      Int
+
+  showtime Showtime @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+
+  @@unique([showtimeId, zone])
+}
+
+model Booking {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  userId         String
+  showtimeId     String
+  status         BookingStatus @default(PENDING_PAYMENT)
+  totalAmount    Int
+  /// null = หยุดนับถอยหลัง (เช่น ระหว่างรอ admin ตรวจสลิป) หรือจบสถานะแล้ว
+  holdExpiresAt  DateTime?
+  /// สำเนาที่นั่ง ณ เวลาที่จอง ใช้แสดงประวัติหลัง BookingSeat ถูกลบตอนยกเลิก
+  seatSnapshot   Json
+  cancelReason   String?
+  reminderSentAt DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showtime Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  seats    BookingSeat[]
+  payment  Payment?
+
+  @@index([userId, status])
+  @@index([status, holdExpiresAt])
+  @@index([showtimeId])
+}
+
+/// ที่นั่งที่ถูกจอง — @@unique([showtimeId, seatId]) คือด่านกันจองซ้ำระดับฐานข้อมูล
+/// เมื่อ booking ถูกยกเลิก/หมดอายุ แถวเหล่านี้จะถูกลบเพื่อคืนที่นั่งเข้าระบบ
+model BookingSeat {
+  id         String @id @default(cuid())
+  bookingId  String
+  showtimeId String
+  seatId     String
+  price      Int
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  showtime Showtime @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  seat     Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+
+  @@unique([showtimeId, seatId])
+  @@index([bookingId])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  bookingId       String        @unique
+  method          String        @default("PROMPTPAY")
+  amount          Int
+  qrPayload       String
+  reference       String
+  slipPath        String?
+  slipUploadedAt  DateTime?
+  status          PaymentStatus @default(AWAITING_SLIP)
+  verifiedById    String?
+  verifiedAt      DateTime?
+  rejectReason    String?
+  /// ---------- การคืนเงิน ----------
+  /// ระบบไม่ได้ตัดเงินเอง ผู้ดูแลโอนคืนผ่านแอปธนาคารแล้วมาบันทึกหลักฐานที่นี่
+  refundDueAt     DateTime?
+  /// บัญชีที่ลูกค้าแจ้งไว้ตอนยกเลิก เพื่อให้ผู้ดูแลโอนคืนได้ถูกบัญชี
+  refundBankName  String?
+  refundAccountNo String?
+  refundedAt      DateTime?
+  refundedById    String?
+  refundSlipPath  String?
+  refundNote      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  verifiedBy User?   @relation("PaymentVerifier", fields: [verifiedById], references: [id])
+  refundedBy User?   @relation("PaymentRefunder", fields: [refundedById], references: [id])
+
+  @@index([status])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  titleTh   String
+  titleEn   String
+  bodyTh    String
+  bodyEn    String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}

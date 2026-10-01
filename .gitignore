@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+
+# environment
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# uploaded payment slips (runtime data)
+server/uploads/
+server/uploads-test/
+
+# python (docs/mvc-slides)
+__pycache__/
+*.pyc
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / os
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
