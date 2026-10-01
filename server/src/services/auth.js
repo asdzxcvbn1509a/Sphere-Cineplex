@@ -212,9 +212,11 @@ export const changePassword = async ({ userId, currentPassword, newPassword, kee
     throw ApiError.badRequest('WRONG_PASSWORD', 'รหัสผ่านปัจจุบันไม่ถูกต้อง');
   }
 
+  // tokenVersion +1 = access token ทุกใบที่ออกก่อนหน้าใช้ไม่ได้ทันที
+  // เครื่องที่กดเปลี่ยนเองได้ 401 ครั้งเดียวแล้วต่ออายุด้วย refresh token ที่เก็บไว้ (keepToken) ต่อได้เลย
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(newPassword) },
+    data: { passwordHash: await hashPassword(newPassword), tokenVersion: { increment: 1 } },
   });
 
   await prisma.refreshToken.updateMany({
@@ -340,7 +342,10 @@ export const resetPassword = async ({ token, password }) => {
   const now = new Date();
 
   await prisma.$transaction([
-    prisma.user.update({ where: { id: stored.userId }, data: { passwordHash } }),
+    prisma.user.update({
+      where: { id: stored.userId },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    }),
     prisma.passwordResetToken.updateMany({
       where: { userId: stored.userId, usedAt: null },
       data: { usedAt: now },

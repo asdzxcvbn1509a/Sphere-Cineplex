@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import morgan from 'morgan';
 import { env, isDev } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { parseTrustProxy } from './utils/trustProxy.js';
 
 import authRoutes from './routes/auth.js';
 import movieRoutes from './routes/movies.js';
@@ -16,7 +18,10 @@ import adminRoutes from './routes/admin.js';
 export const createApp = () => {
   const app = express();
 
-  app.set('trust proxy', 1);
+  // req.ip ใช้เป็นกุญแจของ rate limit ทุกตัว ต้องเชื่อ X-Forwarded-For เฉพาะ proxy ที่ตั้งไว้จริงเท่านั้น
+  app.set('trust proxy', parseTrustProxy(env.TRUST_PROXY));
+  // security headers มาตรฐาน — สำคัญสุดคือ nosniff: รูปสลิปที่ส่งออกไปต้องไม่ถูกเบราว์เซอร์เดาเป็น HTML/สคริปต์
+  app.use(helmet());
   app.use(
     cors({
       origin: env.CLIENT_ORIGIN,

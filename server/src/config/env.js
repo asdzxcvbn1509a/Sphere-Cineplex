@@ -70,6 +70,10 @@ const envSchema = z.object({
 
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_SLIP_SIZE_MB: z.coerce.number().positive().default(5),
+
+  // ใครอยู่หน้า API บ้าง — ใช้ตัดสินว่าจะเชื่อ X-Forwarded-For แค่ไหน (ดู utils/trustProxy.js)
+  // ค่าเริ่มต้น loopback = เชื่อเฉพาะ reverse proxy บนเครื่องเดียวกัน ปลอดภัยทั้งตอนพัฒนาและตอนขึ้นจริงแบบทั่วไป
+  TRUST_PROXY: z.string().default('loopback'),
 });
 
 /**

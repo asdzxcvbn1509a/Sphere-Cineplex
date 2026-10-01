@@ -73,6 +73,9 @@ model User {
   phone String @unique
   /// bcrypt hash เท่านั้น — ไม่เคยเก็บรหัสผ่านจริงลงฐานข้อมูล
   passwordHash String
+  /// ฝังอยู่ใน access token — เพิ่มค่าเมื่อเปลี่ยน/รีเซ็ตรหัสผ่าน แล้ว access token เก่าทุกใบใช้ไม่ได้ทันที
+  /// (ไม่ต้องรอหมดอายุ 15 นาที) authenticate อ่านแถวผู้ใช้ทุก request อยู่แล้ว จึงเทียบได้แทบไม่มีต้นทุน
+  tokenVersion Int      @default(0)
   name         String
   role         Role     @default(USER)
   createdAt    DateTime @default(now())

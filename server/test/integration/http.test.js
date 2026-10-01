@@ -1,0 +1,110 @@
+import { after, before, beforeEach, describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import fs from 'node:fs/promises';
+import { createApp } from '../../src/app.js';
+import { PAYMENT_SLIP_DIR } from '../../src/config/env.js';
+import { changePassword, issueSession, rotateSession } from '../../src/services/auth.js';
+import { hashPassword } from '../../src/utils/password.js';
+import { signAccessToken } from '../../src/utils/jwt.js';
+import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
+import { book, bookingOf, createShowtimeFixture, createUser } from '../helpers/fixtures.js';
+
+/**
+ * เทสต์ผ่าน HTTP จริงทั้งสาย (helmet → authenticate → multer → ตรวจไฟล์ → service)
+ * สิ่งที่เทสต์ระดับ service มองไม่เห็น เช่น header ความปลอดภัย และ middleware ที่อยู่หน้า controller
+ */
+let server;
+let base;
+
+before(async () => {
+  setupDatabase();
+  server = createApp().listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  base = `http://127.0.0.1:${server.address().port}`;
+});
+beforeEach(resetDb);
+after(async () => {
+  server.close();
+  await disconnectDb();
+});
+
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+const postSlip = (bookingId, token, content, type = 'image/png') => {
+  const form = new FormData();
+  form.append('slip', new Blob([content], { type }), 'slip.png');
+  return fetch(`${base}/api/payments/${bookingId}/slip`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+};
+
+const slipFileCount = async () => (await fs.readdir(PAYMENT_SLIP_DIR)).length;
+
+describe('security headers', () => {
+  test('ทุก response มี nosniff — เบราว์เซอร์ต้องไม่เดาชนิดไฟล์สลิปเป็นอย่างอื่น', async () => {
+    const res = await fetch(`${base}/api/health`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  });
+});
+
+describe('อัปโหลดสลิป', () => {
+  test('ไฟล์ที่บอกว่าเป็น PNG แต่ไส้ในเป็น HTML ถูกปฏิเสธ และไม่เหลือไฟล์ค้าง', async () => {
+    const { showtime, seats } = await createShowtimeFixture();
+    const user = await createUser();
+    const booking = await book({ user, showtime, seats: [seats[0]] });
+    const before = await slipFileCount();
+
+    const res = await postSlip(booking.id, signAccessToken(user), '<html><script>alert(1)</script></html>');
+
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error.code, 'UNSUPPORTED_FILE_TYPE');
+    assert.equal(await slipFileCount(), before);
+    assert.equal((await bookingOf(booking.id)).status, 'PENDING_PAYMENT');
+  });
+
+  test('รูป PNG จริงผ่าน และการจองเข้าคิวตรวจ', async () => {
+    const { showtime, seats } = await createShowtimeFixture();
+    const user = await createUser();
+    const booking = await book({ user, showtime, seats: [seats[0]] });
+
+    const res = await postSlip(booking.id, signAccessToken(user), TINY_PNG);
+
+    assert.equal(res.status, 201);
+    assert.equal((await bookingOf(booking.id)).status, 'PENDING_VERIFICATION');
+  });
+});
+
+describe('เพิกถอน access token เมื่อเปลี่ยนรหัสผ่าน', () => {
+  test('access token ใบเก่าใช้ไม่ได้ทันที — แต่เครื่องที่กดเปลี่ยนต่ออายุด้วย refresh token ได้', async () => {
+    const user = await createUser({ passwordHash: await hashPassword('Password123') });
+    const { accessToken, refreshToken } = await issueSession(user, 'test');
+    const me = (token) => fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+
+    assert.equal((await me(accessToken)).status, 200);
+
+    await changePassword({
+      userId: user.id,
+      currentPassword: 'Password123',
+      newPassword: 'NewPassword456',
+      keepToken: refreshToken,
+    });
+
+    const revoked = await me(accessToken);
+    assert.equal(revoked.status, 401);
+    assert.equal((await revoked.json()).error.code, 'TOKEN_REVOKED');
+
+    const renewed = await rotateSession(refreshToken);
+    const ok = await me(renewed.accessToken);
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.user.id, user.id);
+    assert.equal(body.user.tokenVersion, undefined, 'ไม่ส่ง tokenVersion ออกไปกับข้อมูลผู้ใช้');
+  });
+});

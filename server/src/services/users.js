@@ -123,7 +123,8 @@ export const resetUserPassword = async ({ userId, actorId, newPassword }) => {
   await prisma.$transaction([
     prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await hashPassword(newPassword) },
+      // access token ที่ค้างอยู่ในเครื่องคนที่ยึดบัญชีไปก็ใช้ไม่ได้ทันทีด้วย ไม่ใช่แค่ refresh token
+      data: { passwordHash: await hashPassword(newPassword), tokenVersion: { increment: 1 } },
     }),
     prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },

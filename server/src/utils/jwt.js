@@ -2,11 +2,16 @@ import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 
-/** ออก access token อายุสั้น เก็บไว้ใน memory ฝั่ง client เท่านั้น */
+/**
+ * ออก access token อายุสั้น เก็บไว้ใน memory ฝั่ง client เท่านั้น
+ * tv = tokenVersion ตอนออก — authenticate เทียบกับค่าปัจจุบันในฐานข้อมูล เปลี่ยนรหัสผ่านแล้วใบเก่าใช้ไม่ได้ทันที
+ */
 export const signAccessToken = (user) => {
-  return jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, env.JWT_ACCESS_SECRET, {
-    expiresIn: env.ACCESS_TOKEN_TTL,
-  });
+  return jwt.sign(
+    { sub: user.id, role: user.role, phone: user.phone, tv: user.tokenVersion ?? 0 },
+    env.JWT_ACCESS_SECRET,
+    { expiresIn: env.ACCESS_TOKEN_TTL },
+  );
 };
 
 export const verifyAccessToken = (token) => {

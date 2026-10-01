@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
 import { customAlphabet } from 'nanoid';
@@ -32,10 +33,47 @@ const createSlipUpload = (dir) =>
     },
   }).single('slip');
 
+/** ไบต์แรกของไฟล์รูปแต่ละชนิด (magic bytes) */
+const SIGNATURES = {
+  'image/jpeg': (head) => head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff,
+  'image/png': (head) =>
+    head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (head) =>
+    head.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    head.subarray(8, 12).toString('latin1') === 'WEBP',
+};
+
+/**
+ * ตรวจไส้ในไฟล์ว่าเป็นรูปจริงตามชนิดที่บอกมา — mimetype ใน multipart เป็นค่าที่ฝั่งส่งตั้งเองได้
+ * ไม่ตรวจตรงนี้ ใครก็อัปโหลด HTML/สคริปต์โดยบอกว่าเป็น image/png แล้วไปค้างอยู่ในโฟลเดอร์สลิปได้
+ * ไฟล์ที่ไม่ผ่านถูกลบทันที ไม่ปล่อยค้างไว้รอใครมาเก็บ
+ */
+export const verifySlipContent = async (req, _res, next) => {
+  if (!req.file) return next();
+  try {
+    const handle = await fsp.open(req.file.path, 'r');
+    const head = Buffer.alloc(12);
+    try {
+      await handle.read(head, 0, head.length, 0);
+    } finally {
+      await handle.close();
+    }
+    if (!SIGNATURES[req.file.mimetype]?.(head)) {
+      await fsp.unlink(req.file.path).catch(() => {});
+      return next(
+        ApiError.badRequest('UNSUPPORTED_FILE_TYPE', 'ไฟล์นี้ไม่ใช่รูปภาพ JPG, PNG หรือ WEBP ที่ถูกต้อง'),
+      );
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** สลิปโอนเงินที่ลูกค้าอัปโหลด */
-export const uploadPaymentSlip = createSlipUpload(PAYMENT_SLIP_DIR);
+export const uploadPaymentSlip = [createSlipUpload(PAYMENT_SLIP_DIR), verifySlipContent];
 /** สลิปโอนคืนที่ผู้ดูแลอัปโหลด */
-export const uploadRefundSlip = createSlipUpload(REFUND_SLIP_DIR);
+export const uploadRefundSlip = [createSlipUpload(REFUND_SLIP_DIR), verifySlipContent];
 
 /**
  * แปลงชื่อไฟล์ใน DB เป็น path จริง พร้อมกันการหลุดออกนอกโฟลเดอร์ที่กำหนด
