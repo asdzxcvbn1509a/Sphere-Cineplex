@@ -61,6 +61,8 @@ enum NotificationType {
   SHOWTIME_REMINDER
   /// ผู้ดูแลยกเลิกทั้งรอบ (เครื่องฉายเสีย โรงปิด ฯลฯ) — ใบที่จ่ายแล้วเข้าคิวคืนเงิน
   SHOWTIME_CANCELLED
+  /// สลิปมาหลังหมดเวลาและที่นั่งไม่ว่างแล้ว — ผู้ดูแลยืนยันยอดแล้ว จึงเข้าคิวคืนเงิน
+  LATE_PAYMENT_REFUND
 }
 
 model User {
@@ -220,6 +222,8 @@ model Booking {
   updatedAt      DateTime      @updatedAt
   paidAt         DateTime?
   cancelledAt    DateTime?
+  /// เวลาที่หมดเวลาชำระเงิน — ใช้นับช่วงผ่อนผันให้ลูกค้าที่โอนแล้วแต่ส่งสลิปไม่ทัน
+  expiredAt      DateTime?
 
   user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   showtime Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)

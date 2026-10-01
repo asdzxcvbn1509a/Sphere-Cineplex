@@ -74,7 +74,12 @@
     "maxSeats": "Up to {{max}} seats per booking",
     "holdNotice": "Your seats will be held for {{minutes}} minutes to complete payment",
     "seatTaken": "Seat {{seats}} was just taken. Please choose again.",
-    "refreshMap": "Refresh seat map"
+    "refreshMap": "Refresh seat map",
+    "pendingTitle": "You already have an unpaid booking",
+    "pendingBody": "You already booked this showtime (seats {{seats}}) but haven't paid yet. Continue with that booking, or cancel it and pick new seats.",
+    "pendingGoPay": "Pay for that booking",
+    "pendingRelease": "Cancel it",
+    "pendingReleased": "Previous booking cancelled — pick your seats again"
   },
   "login": {
     "title": "Sign in",
@@ -182,7 +187,14 @@
     "approvedTitle": "Payment confirmed",
     "viewTicket": "View e-ticket",
     "verifyNotice": "This QR follows the PromptPay standard — scan it with any banking app. After transferring, upload your slip so an admin can verify the payment.",
-    "bookingCode": "Booking code"
+    "bookingCode": "Booking code",
+    "lateTitle": "The payment window has closed — already transferred?",
+    "lateBody": "If you've already transferred the money, you can still upload the slip until {{time}}. If your seats are still free you'll get them back; otherwise we'll refund you once we confirm the payment. Haven't paid yet? Please book again.",
+    "lateWaitingTitle": "Slip received — awaiting review",
+    "lateWaitingBody": "Your seats were released before the slip arrived. Once we confirm the payment, we'll refund you.",
+    "lateRefundTitle": "Payment confirmed — refund on the way",
+    "lateRefundBody": "Add your refund bank account on the \"My bookings\" page.",
+    "goMyBookings": "Go to My bookings"
   },
   "ticket": {
     "title": "E-Ticket",
@@ -235,7 +247,9 @@
     "refundAccountTitle": "Refund account",
     "refundAccountLater": "We will transfer the refund for booking {{code}} to this account. Please double-check the account number before saving.",
     "refundAccountSaved": "Refund account saved",
-    "refundAccountMissing": "No refund account yet"
+    "refundAccountMissing": "No refund account yet",
+    "lateSlipAction": "Upload slip (already paid)",
+    "lateSlipWaiting": "Slip sent after the deadline — awaiting review"
   },
   "notifications": {
     "title": "Notifications",
@@ -357,7 +371,9 @@
       "approveConfirm": "Confirm the full amount was received?",
       "waitingSince": "Submitted",
       "customer": "Customer",
-      "amount": "Amount"
+      "amount": "Amount",
+      "lateSlip": "Paid after the deadline — the seats are gone. Approving queues a refund (no ticket).",
+      "lateApproved": "{{code}} → refund queued"
     },
     "reportsPage": {
       "groupBy": "Group by",

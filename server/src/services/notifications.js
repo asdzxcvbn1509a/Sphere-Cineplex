@@ -17,11 +17,26 @@ const templates = {
     bodyTh: `คืนเงิน ${ctx.amount} บาท ของการจอง ${ctx.code} เรียบร้อยแล้ว กรุณาตรวจสอบยอดในบัญชีของคุณ`,
     bodyEn: `We refunded ${ctx.amount} THB for booking ${ctx.code}. Please check your bank account.`,
   }),
-  PAYMENT_REJECTED: (ctx) => ({
-    titleTh: 'สลิปไม่ผ่านการตรวจสอบ',
-    titleEn: 'Slip was rejected',
-    bodyTh: `การจอง ${ctx.code} ยังไม่สำเร็จ (${ctx.reason}) กรุณาชำระเงินและส่งสลิปใหม่อีกครั้ง`,
-    bodyEn: `Booking ${ctx.code} was not approved (${ctx.reason}). Please pay and upload the slip again.`,
+  // closed = การจองปิดไปแล้ว (รอบเริ่มฉาย หรือเป็นสลิปที่ส่งหลังหมดเวลา) จึงไม่ได้ให้จ่ายใหม่
+  PAYMENT_REJECTED: (ctx) =>
+    ctx.closed
+      ? {
+          titleTh: 'สลิปไม่ผ่านการตรวจสอบ',
+          titleEn: 'Slip was rejected',
+          bodyTh: `สลิปของการจอง ${ctx.code} ไม่ผ่านการตรวจสอบ (${ctx.reason}) และการจองนี้ปิดแล้ว หากโอนเงินไปแล้วจริงกรุณาติดต่อเจ้าหน้าที่พร้อมรหัสการจอง`,
+          bodyEn: `The slip for booking ${ctx.code} was rejected (${ctx.reason}) and the booking is now closed. If you did transfer the money, please contact us with your booking code.`,
+        }
+      : {
+          titleTh: 'สลิปไม่ผ่านการตรวจสอบ',
+          titleEn: 'Slip was rejected',
+          bodyTh: `การจอง ${ctx.code} ยังไม่สำเร็จ (${ctx.reason}) กรุณาชำระเงินและส่งสลิปใหม่อีกครั้ง`,
+          bodyEn: `Booking ${ctx.code} was not approved (${ctx.reason}). Please pay and upload the slip again.`,
+        },
+  LATE_PAYMENT_REFUND: (ctx) => ({
+    titleTh: 'ได้รับเงินแล้ว — จะโอนคืนให้',
+    titleEn: 'Payment received — refund on the way',
+    bodyTh: `เราได้รับเงิน ${ctx.amount} บาท ของการจอง ${ctx.code} แล้ว แต่ที่นั่งถูกปล่อยไปก่อนสลิปมาถึง จึงจะโอนเงินคืนให้ กรุณาแจ้งบัญชีรับเงินคืนที่หน้า "การจองของฉัน"`,
+    bodyEn: `We received ${ctx.amount} THB for booking ${ctx.code}, but the seats were released before your slip arrived, so we will refund you. Please add your bank account on the "My bookings" page.`,
   }),
   BOOKING_CANCELLED: (ctx) => ({
     titleTh: 'ยกเลิกการจองแล้ว',

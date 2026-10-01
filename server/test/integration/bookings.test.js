@@ -45,9 +45,10 @@ describe('สร้างการจอง', () => {
 
   test('จองชุดที่นั่งซ้อนกันโดยเลือกคนละลำดับพร้อมกัน — ได้ SEAT_TAKEN ไม่ใช่ deadlock', async () => {
     const { showtime, seats } = await createShowtimeFixture();
-    const [alice, bob] = await Promise.all([createUser(), createUser()]);
 
     for (let i = 0; i + 1 < 10; i += 2) {
+      // คนใหม่ทุกรอบ — คนเดิมจองรอบเดิมซ้ำขณะยังมีใบรอชำระอยู่จะติดนโยบายกักที่นั่งแทน
+      const [alice, bob] = await Promise.all([createUser(), createUser()]);
       const [x, y] = [seats[i], seats[i + 1]];
       const results = await Promise.allSettled([
         createBooking({ userId: alice.id, showtimeId: showtime.id, seatIds: [x.id, y.id] }),

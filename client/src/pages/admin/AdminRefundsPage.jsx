@@ -183,7 +183,11 @@ const AdminRefundsPage = () => {
 
               <dt className="text-muted">{t('admin.refundPage.cancelledAt')}</dt>
               <dd className="text-right font-semibold">
-                {formatDateTime(item.booking.cancelledAt, lang)}
+                {/* สลิปที่โอนมาหลังหมดเวลาไม่มีวันยกเลิก — ใช้เวลาที่เข้าคิวคืนเงินแทน */}
+                {formatDateTime(item.booking.cancelledAt ?? item.refundDueAt, lang)}
+                {item.booking.status === 'EXPIRED' && item.booking.cancelReason && (
+                  <span className="block text-xs font-normal text-muted">{item.booking.cancelReason}</span>
+                )}
               </dd>
 
               <dt className="text-muted">{t('admin.refundPage.bankAccount')}</dt>

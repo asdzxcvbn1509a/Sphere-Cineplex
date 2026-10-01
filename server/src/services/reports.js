@@ -1,16 +1,14 @@
 import prisma from '../lib/prisma.js';
 import { bangkokDateKey, bangkokDayRange } from '../utils/datetime.js';
+import { PENDING_SLIP_WHERE } from './payments.js';
 
 const PAID = 'PAID';
 
 /**
- * เงื่อนไขของ "งานค้าง" ที่ต้องนับ — ใช้ร่วมกันระหว่างหน้าภาพรวมกับป้ายตัวเลขบน sidebar
+ * เงื่อนไขของ "งานค้าง" ที่ต้องนับ — ใช้ร่วมกันระหว่างหน้าภาพรวม ป้ายตัวเลขบน sidebar และคิวตรวจสลิป
  * ถ้าแยกกันเขียนแล้วแก้ที่เดียว ตัวเลขสองที่จะไม่ตรงกันโดยไม่มีใครรู้
+ * (PENDING_SLIP_WHERE อยู่ใน payments.js คู่กับ listPayments ที่ใช้เงื่อนไขเดียวกัน)
  */
-const PENDING_SLIP_WHERE = {
-  status: 'PENDING_VERIFICATION',
-  booking: { status: 'PENDING_VERIFICATION' },
-};
 const PENDING_REFUND_WHERE = { status: 'REFUND_PENDING' };
 
 /**
@@ -163,16 +161,15 @@ export const getSalesReport = async ({ from, to, groupBy = 'day' } = {}) => {
     groupBy === 'day' ? a.key.localeCompare(b.key) : b.revenue - a.revenue,
   );
 
-  // การจองที่จ่ายเงินแล้วแต่ถูกยกเลิกในช่วงเวลาเดียวกัน
+  // เงินที่ต้องคืน/คืนแล้วในช่วงเวลาเดียวกัน — ยกเลิกหลังจ่าย ยกเลิกทั้งรอบ หรือโอนมาหลังหมดเวลา
   // เดิมรายได้จะหายไปจากรายงานเงียบ ๆ ทำให้ตัวเลขไม่ตรงกับเงินที่อยู่ในบัญชีจริง
+  // นับตามวันที่เข้าคิวคืนเงิน (refundDueAt) ไม่ใช่วันยกเลิก เพราะสลิปที่โอนมาหลังหมดเวลาไม่มีวันยกเลิก
   const refundPayments = await prisma.payment.findMany({
     where: {
       status: { in: ['REFUND_PENDING', 'REFUNDED'] },
-      booking: {
-        ...(start || end
-          ? { cancelledAt: { ...(start && { gte: start }), ...(end && { lt: end }) } }
-          : {}),
-      },
+      ...(start || end
+        ? { refundDueAt: { ...(start && { gte: start }), ...(end && { lt: end }) } }
+        : {}),
     },
     select: { amount: true, status: true },
   });

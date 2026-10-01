@@ -3,11 +3,12 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clock3, RefreshCw, TimerReset } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getSeatMap } from '../api/showtimes.js';
-import { createBooking } from '../api/bookings.js';
+import { cancelBooking, createBooking } from '../api/bookings.js';
 import { useIsAuthenticated } from '../store/authStore.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import Button from '../components/ui/Button.jsx';
+import Modal from '../components/ui/Modal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import SeatMap from '../components/seatmap/SeatMap.jsx';
@@ -30,6 +31,9 @@ const SeatSelectionPage = () => {
   const [seatMap, setSeatMap] = useState(null);
   const [state, setState] = useState({ loading: true, error: null });
   const [submitting, setSubmitting] = useState(false);
+  // มีการจองรอบนี้ที่ยังไม่จ่ายอยู่ (มักเกิดจากกด back ออกจากหน้าชำระเงินมาเลือกใหม่) — { bookingId, seats }
+  const [pendingBooking, setPendingBooking] = useState(null);
+  const [releasing, setReleasing] = useState(false);
   const { selected, toggle, clear, keepOnly } = useSeatSelection(showtimeId, MAX_SEATS);
 
   const load = useCallback(
@@ -100,11 +104,28 @@ const SeatSelectionPage = () => {
       if (problem.code === 'SEAT_TAKEN') {
         toast.error(t('seats.seatTaken', { seats: problem.details?.seats?.join(', ') ?? '' }));
         await load(true);
+      } else if (problem.code === 'PENDING_BOOKING_EXISTS') {
+        setPendingBooking(problem.details);
       } else {
         toast.error(problem.message);
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /** ยกเลิกใบเดิมที่ยังไม่จ่าย แล้วโหลดผังใหม่ — ที่นั่งชุดเดิมจะกลับมาว่างให้เลือกรวมกับชุดใหม่ได้ */
+  const releasePendingBooking = async () => {
+    setReleasing(true);
+    try {
+      await cancelBooking(pendingBooking.bookingId, { reason: 'ผู้ใช้ยกเลิกเพื่อเลือกที่นั่งใหม่' });
+      toast.success(t('seats.pendingReleased'));
+      setPendingBooking(null);
+      await load(true);
+    } catch (error) {
+      toast.error(apiError(error).message);
+    } finally {
+      setReleasing(false);
     }
   };
 
@@ -196,6 +217,30 @@ const SeatSelectionPage = () => {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={Boolean(pendingBooking)}
+        onClose={() => setPendingBooking(null)}
+        title={t('seats.pendingTitle')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="danger" loading={releasing} onClick={releasePendingBooking}>
+              {t('seats.pendingRelease')}
+            </Button>
+            <Button
+              disabled={releasing}
+              onClick={() => navigate(`/booking/${pendingBooking.bookingId}/payment`)}
+            >
+              {t('seats.pendingGoPay')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">
+          {t('seats.pendingBody', { seats: pendingBooking?.seats?.join(', ') ?? '' })}
+        </p>
+      </Modal>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CreditCard, Landmark, ReceiptText, Ticket, TicketX } from 'lucide-react';
+import { CreditCard, Landmark, ReceiptText, Ticket, TicketX, Upload } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { cancelBooking, listMyBookings, updateRefundAccount } from '../api/bookings.js';
@@ -207,6 +207,17 @@ const MyBookingsPage = () => {
                 <Button as={Link} to={`/booking/${booking.id}/payment`} size="sm">
                   <CreditCard size={14} /> {t('bookings.payNow')}
                 </Button>
+              )}
+              {/* หมดเวลาไปไม่นาน — คนที่โอนแล้วแต่ส่งสลิปไม่ทันยังส่งได้ ไม่ต้องรู้เองว่าต้องกลับไปหน้าไหน */}
+              {booking.status === 'EXPIRED' && booking.canUploadSlip && (
+                <Button as={Link} to={`/booking/${booking.id}/payment`} size="sm" variant="secondary">
+                  <Upload size={14} /> {t('bookings.lateSlipAction')}
+                </Button>
+              )}
+              {booking.status === 'EXPIRED' && booking.payment?.status === 'PENDING_VERIFICATION' && (
+                <span className="rounded-md border border-info/40 bg-info/10 px-2.5 py-1.5 text-xs text-info sm:text-sm">
+                  {t('bookings.lateSlipWaiting')}
+                </span>
               )}
               {booking.canCancel && (
                 <Button variant="danger" size="sm" onClick={() => openCancel(booking)}>

@@ -5,7 +5,16 @@ import { env } from '../config/env.js';
 import { addMinutes } from '../utils/datetime.js';
 import { resolveSlipPath } from '../middleware/upload.js';
 import { notify } from './notifications.js';
-import { getBookingById } from './bookings.js';
+import { SLIP_ACCEPTING_PAYMENT_STATUSES, getBookingById, slipUploadWindow } from './bookings.js';
+
+/**
+ * สลิปที่รอผู้ดูแลตรวจ — ใช้ชุดเดียวกันทั้งคิวตรวจสลิป ป้ายตัวเลขบนเมนู และหน้าภาพรวม
+ * รวมสลิปที่ส่งมาหลังการจองหมดเวลาแล้วด้วย (การจองเป็น EXPIRED) ซึ่งผู้ดูแลอนุมัติแล้วจะเข้าคิวคืนเงิน
+ */
+export const PENDING_SLIP_WHERE = {
+  status: 'PENDING_VERIFICATION',
+  booking: { status: { in: ['PENDING_VERIFICATION', 'EXPIRED'] } },
+};
 
 /** ข้อมูลหน้าชำระเงินของผู้ใช้ (รวม payload สำหรับ render QR ฝั่ง client) */
 export const getPaymentForBooking = async ({ bookingId, userId }) => {
@@ -18,6 +27,9 @@ export const getPaymentForBooking = async ({ bookingId, userId }) => {
     throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
   }
   if (!booking.payment) throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบข้อมูลการชำระเงิน');
+
+  // ให้ server เป็นคนตัดสินว่ายังส่งสลิปได้ไหม หน้าเว็บจะได้ไม่ต้องเดากติกาเองจากนาฬิกาเครื่องลูกค้า
+  const { canUpload, lateUntil } = slipUploadWindow(booking);
 
   return {
     bookingId: booking.id,
@@ -36,7 +48,80 @@ export const getPaymentForBooking = async ({ bookingId, userId }) => {
     holdSecondsLeft: booking.holdExpiresAt
       ? Math.max(0, Math.floor((booking.holdExpiresAt.getTime() - Date.now()) / 1000))
       : null,
+    canUploadSlip: canUpload,
+    lateSlipUntil: lateUntil,
+    lateSlipGraceMinutes: env.LATE_SLIP_GRACE_MINUTES,
   };
+};
+
+const notPayable = () => {
+  return ApiError.conflict('BOOKING_NOT_PAYABLE', 'รายการนี้ไม่อยู่ในสถานะที่ชำระเงินได้แล้ว');
+};
+
+/** ที่นั่งเดิมของการจองที่หมดเวลาไปแล้วเอาคืนไม่ได้ (ถูกจองต่อ, ปิดใช้งาน, รอบเริ่ม/ถูกยกเลิก) */
+class SeatsUnavailableError extends Error {}
+
+/**
+ * ส่งสลิปหลังการจองหมดเวลาไปแล้ว (ภายในช่วงผ่อนผัน) — ลูกค้าโอนเงินแล้วจริงแต่ส่งหลักฐานไม่ทัน
+ *
+ * ลองเอาที่นั่งเดิมคืนก่อน ถ้ายังว่างอยู่ก็เข้าคิวตรวจตามปกติเหมือนไม่เคยหมดเวลา
+ * ถ้าที่นั่งไม่ว่างแล้ว การจองคงหมดเวลาไว้ แต่สลิปยังเข้าคิวตรวจ ผู้ดูแลยืนยันยอดแล้วจะเข้าคิวคืนเงิน
+ * เดิมระบบปฏิเสธสลิปทิ้งเฉย ๆ — เงินที่โอนมาแล้วจึงไม่มีทางไปต่อในระบบเลย
+ */
+const acceptLateSlip = async (booking, slipData) => {
+  const now = new Date();
+  const showtimeOpen = booking.showtime.status === 'SCHEDULED' && booking.showtime.startsAt > now;
+
+  if (showtimeOpen) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        // ล็อกแถวรอบฉายเหมือนตอนจองใหม่ — กันชนกับการยกเลิกทั้งรอบที่อาจเกิดพร้อมกัน
+        const [live] = await tx.$queryRaw`
+          SELECT "status" FROM "Showtime" WHERE "id" = ${booking.showtimeId} FOR SHARE`;
+        if (live?.status !== 'SCHEDULED') throw new SeatsUnavailableError();
+
+        const seatIds = booking.seatSnapshot.map((seat) => seat.id).sort();
+        const usable = await tx.seat.count({ where: { id: { in: seatIds }, isActive: true } });
+        if (usable !== seatIds.length) throw new SeatsUnavailableError();
+
+        const { count } = await tx.booking.updateMany({
+          where: { id: booking.id, status: 'EXPIRED' },
+          data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null, cancelReason: null },
+        });
+        if (count === 0) throw notPayable();
+
+        // ที่นั่งถูกคนอื่นจองไปแล้ว = unique constraint ชน (P2002) แล้วทั้ง transaction ย้อนกลับ
+        const priceById = new Map(booking.seatSnapshot.map((seat) => [seat.id, seat.price]));
+        await tx.bookingSeat.createMany({
+          data: seatIds.map((seatId) => ({
+            bookingId: booking.id,
+            showtimeId: booking.showtimeId,
+            seatId,
+            price: priceById.get(seatId),
+          })),
+        });
+        await tx.payment.update({ where: { id: booking.payment.id }, data: slipData });
+      });
+      return;
+    } catch (error) {
+      if (!(error instanceof SeatsUnavailableError) && error?.code !== 'P2002') throw error;
+      // ที่นั่งไม่ว่างแล้ว — ไปทางเข้าคิวตรวจแบบไม่มีที่นั่งด้านล่าง
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // ล็อก booking ก่อน payment ตามลำดับเดียวกับที่อื่น และยืนยันว่ายังหมดเวลาอยู่จริง
+    const { count } = await tx.booking.updateMany({
+      where: { id: booking.id, status: 'EXPIRED' },
+      data: { cancelReason: 'โอนหลังหมดเวลา ที่นั่งไม่ว่างแล้ว — รอตรวจสลิปเพื่อคืนเงิน' },
+    });
+    if (count === 0) throw notPayable();
+    const moved = await tx.payment.updateMany({
+      where: { id: booking.payment.id, status: { in: SLIP_ACCEPTING_PAYMENT_STATUSES } },
+      data: slipData,
+    });
+    if (moved.count === 0) throw notPayable();
+  });
 };
 
 /**
@@ -49,7 +134,7 @@ export const uploadSlip = async ({ bookingId, userId, file }) => {
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { payment: true },
+    include: { payment: true, showtime: { select: { status: true, startsAt: true } } },
   });
 
   const cleanup = async () => {
@@ -64,45 +149,57 @@ export const uploadSlip = async ({ bookingId, userId, file }) => {
     await cleanup();
     throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
   }
-  if (booking.status !== 'PENDING_PAYMENT') {
+
+  if (!slipUploadWindow(booking).canUpload) {
     await cleanup();
-    throw ApiError.conflict(
-      'BOOKING_NOT_PAYABLE',
-      booking.status === 'PENDING_VERIFICATION'
-        ? 'ส่งสลิปแล้ว กำลังรอผู้ดูแลระบบตรวจสอบ'
-        : 'รายการนี้ไม่อยู่ในสถานะที่ชำระเงินได้แล้ว',
-    );
-  }
-  if (booking.holdExpiresAt && booking.holdExpiresAt <= new Date()) {
-    await cleanup();
-    throw ApiError.conflict('HOLD_EXPIRED', 'หมดเวลาชำระเงินแล้ว กรุณาจองใหม่อีกครั้ง');
+    if (booking.payment.status === 'PENDING_VERIFICATION') {
+      throw ApiError.conflict('BOOKING_NOT_PAYABLE', 'ส่งสลิปแล้ว กำลังรอผู้ดูแลระบบตรวจสอบ');
+    }
+    if (booking.status === 'EXPIRED') {
+      throw ApiError.conflict(
+        'HOLD_EXPIRED',
+        `หมดเวลาส่งสลิปแล้ว หากโอนเงินไปแล้วกรุณาติดต่อเจ้าหน้าที่ พร้อมรหัสการจอง ${booking.code}`,
+      );
+    }
+    throw notPayable();
   }
 
   const previousSlip = booking.payment.slipPath;
+  const slipData = {
+    slipPath: file.filename,
+    slipUploadedAt: new Date(),
+    status: 'PENDING_VERIFICATION',
+    rejectReason: null,
+    verifiedById: null,
+    verifiedAt: null,
+  };
 
   try {
-    await prisma.$transaction(async (tx) => {
-      // เงื่อนไขสถานะอยู่ใน update — ถ้า job หมดเวลาหรือการยกเลิกชิงเปลี่ยนสถานะไปก่อนในจังหวะเดียวกัน
-      // จะไม่โดนแถวไหนแล้วทั้ง transaction ถูกยกเลิก แทนที่จะเขียนทับสถานะที่เพิ่งเปลี่ยน
-      const { count } = await tx.booking.updateMany({
-        where: { id: bookingId, status: 'PENDING_PAYMENT' },
-        data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
+    let current = booking;
+    if (current.status === 'PENDING_PAYMENT') {
+      const moved = await prisma.$transaction(async (tx) => {
+        // เงื่อนไขสถานะอยู่ใน update — ถ้า job หมดเวลาหรือการยกเลิกชิงเปลี่ยนสถานะไปก่อนในจังหวะเดียวกัน
+        // จะไม่โดนแถวไหน แทนที่จะเขียนทับสถานะที่เพิ่งเปลี่ยน
+        // (ไม่เช็กว่าเลยกำหนดหรือยัง — ถ้า job ยังไม่ปล่อยที่นั่ง ที่นั่งก็ยังเป็นของคนนี้ รับสลิปได้เลย)
+        const { count } = await tx.booking.updateMany({
+          where: { id: bookingId, status: 'PENDING_PAYMENT' },
+          data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
+        });
+        if (count === 0) return false;
+        await tx.payment.update({ where: { id: booking.payment.id }, data: slipData });
+        return true;
       });
-      if (count === 0) {
-        throw ApiError.conflict('BOOKING_NOT_PAYABLE', 'รายการนี้ไม่อยู่ในสถานะที่ชำระเงินได้แล้ว');
+      if (!moved) {
+        // job เพิ่งปล่อยที่นั่งไปในจังหวะเดียวกันพอดี — อ่านใหม่แล้วไปทางสลิปส่งช้า
+        // ลูกค้าไม่ควรเห็น error เพียงเพราะกดส่งตรงเสี้ยววินาทีที่ job ทำงาน
+        current = await prisma.booking.findUnique({
+          where: { id: bookingId },
+          include: { payment: true, showtime: { select: { status: true, startsAt: true } } },
+        });
+        if (current.status !== 'EXPIRED' || !slipUploadWindow(current).canUpload) throw notPayable();
       }
-      await tx.payment.update({
-        where: { id: booking.payment.id },
-        data: {
-          slipPath: file.filename,
-          slipUploadedAt: new Date(),
-          status: 'PENDING_VERIFICATION',
-          rejectReason: null,
-          verifiedById: null,
-          verifiedAt: null,
-        },
-      });
-    });
+    }
+    if (current.status === 'EXPIRED') await acceptLateSlip(current, slipData);
   } catch (error) {
     await cleanup();
     throw error;
@@ -134,14 +231,10 @@ export const getSlipFilePath = async ({ bookingId, requester }) => {
 // ---------- ฝั่ง Admin ----------
 
 export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100 } = {}) => {
-  // คิวที่กดอนุมัติ/ปฏิเสธได้ ต้องเป็นใบที่การจองยังรอตรวจอยู่เท่านั้น
-  // กันสลิปค้างคิวกรณีการจองถูกยกเลิกหรือหมดอายุไปแล้ว (ซึ่ง admin กดอะไรไม่ได้)
+  // คิวที่กดอนุมัติ/ปฏิเสธได้ = PENDING_SLIP_WHERE (รวมสลิปที่ส่งหลังหมดเวลา)
+  // กันสลิปค้างคิวกรณีการจองถูกยกเลิกไปแล้ว (ซึ่ง admin กดอะไรไม่ได้)
   const where =
-    status === 'ALL'
-      ? {}
-      : status === 'PENDING_VERIFICATION'
-        ? { status, booking: { status: 'PENDING_VERIFICATION' } }
-        : { status };
+    status === 'ALL' ? {} : status === 'PENDING_VERIFICATION' ? PENDING_SLIP_WHERE : { status };
 
   const payments = await prisma.payment.findMany({
     where,
@@ -192,7 +285,7 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100
 };
 
 /**
- * ย้ายทั้งใบชำระเงินและการจองออกจาก "รอตรวจ" พร้อมกัน — ทั้งคู่ต้องยังรอตรวจอยู่จริงตอนเขียน
+ * ย้ายทั้งใบชำระเงินและการจองออกจาก "รอตรวจ" พร้อมกัน — ทั้งคู่ต้องยังอยู่ในสถานะที่คาดไว้ตอนเขียน
  * ไม่งั้นทั้ง transaction ถูกยกเลิก (เช่น ผู้ดูแลสองคนกดพร้อมกัน หรือมีคนกดยกเลิกการจองไปก่อนเสี้ยววินาที)
  * เดิมเช็กจากข้อมูลที่อ่านไว้แล้วค่อยเขียนทับ จึงอนุมัติทับการจองที่เพิ่งถูกยกเลิกได้
  * ได้การจองที่ PAID ทั้งที่ที่นั่งถูกปล่อยให้คนอื่นจองซ้ำไปแล้ว
@@ -200,9 +293,13 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100
  * ลำดับสำคัญ: ล็อกแถว booking ก่อน payment เสมอ ให้ตรงกับการยกเลิก/ส่งสลิป/หมดเวลา
  * ถ้าล็อกสลับลำดับกัน สองรายการที่ชนกันจะรอกันเองจนเกิด deadlock แล้วฝั่งหนึ่งได้ 500 แทน 409
  */
-const settlePendingPayment = async (tx, payment, { paymentData, bookingData }) => {
+const settlePendingPayment = async (
+  tx,
+  payment,
+  { paymentData, bookingData, bookingStatus = 'PENDING_VERIFICATION' },
+) => {
   const bookingMoved = await tx.booking.updateMany({
-    where: { id: payment.bookingId, status: 'PENDING_VERIFICATION' },
+    where: { id: payment.bookingId, status: bookingStatus },
     data: bookingData,
   });
   const paymentMoved = await tx.payment.updateMany({
@@ -217,22 +314,51 @@ const settlePendingPayment = async (tx, payment, { paymentData, bookingData }) =
   }
 };
 
+/**
+ * อนุมัติสลิป → ออกตั๋ว
+ *
+ * ยกเว้นสลิปที่ส่งมาหลังการจองหมดเวลาแล้วและเอาที่นั่งคืนไม่ได้ (การจองยังเป็น EXPIRED)
+ * ยืนยันยอดแล้วแปลว่าเงินเข้ามาจริงแต่ไม่มีที่นั่งให้ จึงเข้าคิวคืนเงินแทนการออกตั๋ว
+ */
 export const approvePayment = async ({ paymentId, adminId }) => {
   const payment = await loadPendingPayment(paymentId);
+  const late = payment.booking.status === 'EXPIRED';
+  const notification = {
+    userId: payment.booking.userId,
+    data: { bookingId: payment.bookingId },
+  };
 
   await prisma.$transaction(async (tx) => {
     const now = new Date();
+    if (late) {
+      await settlePendingPayment(tx, payment, {
+        bookingStatus: 'EXPIRED',
+        bookingData: { cancelReason: 'โอนหลังหมดเวลา ที่นั่งไม่ว่างแล้ว — คืนเงิน' },
+        paymentData: {
+          status: 'REFUND_PENDING',
+          verifiedById: adminId,
+          verifiedAt: now,
+          rejectReason: null,
+          refundDueAt: now,
+        },
+      });
+      await notify(
+        {
+          ...notification,
+          type: 'LATE_PAYMENT_REFUND',
+          context: { code: payment.booking.code, amount: payment.amount },
+        },
+        tx,
+      );
+      return;
+    }
+
     await settlePendingPayment(tx, payment, {
       paymentData: { status: 'APPROVED', verifiedById: adminId, verifiedAt: now, rejectReason: null },
       bookingData: { status: 'PAID', paidAt: now, holdExpiresAt: null },
     });
     await notify(
-      {
-        userId: payment.booking.userId,
-        type: 'PAYMENT_APPROVED',
-        context: { code: payment.booking.code },
-        data: { bookingId: payment.bookingId },
-      },
+      { ...notification, type: 'PAYMENT_APPROVED', context: { code: payment.booking.code } },
       tx,
     );
   });
@@ -241,23 +367,53 @@ export const approvePayment = async ({ paymentId, adminId }) => {
 };
 
 /**
- * ปฏิเสธสลิป — คืนการจองกลับไปสถานะรอชำระเงิน พร้อมให้เวลาใหม่
+ * ปฏิเสธสลิป — ปกติคืนการจองกลับไปสถานะรอชำระเงิน พร้อมให้เวลาใหม่
  * (ไม่ยกเลิกทิ้งทันที เพราะผู้ใช้อาจแค่แนบสลิปผิดรูป)
+ *
+ * ยกเว้นสองกรณีที่ปิดการจองไปเลย
+ * - สลิปที่ส่งหลังหมดเวลา — การจองหมดเวลาไปแล้ว ไม่มีอะไรให้จ่ายใหม่
+ * - รอบเริ่มฉายไปแล้ว — เดิมระบบเปิดให้จ่ายใหม่อีก 10 นาทีสำหรับรอบที่ฉายไปแล้ว
+ *   ตอนนี้ปิดเป็นหมดเวลาแทน ถ้าเงินโอนมาจริง ลูกค้ายังส่งสลิปที่ถูกต้องได้ในช่วงผ่อนผันแล้วได้เงินคืน
  */
 export const rejectPayment = async ({ paymentId, adminId, reason }) => {
   const payment = await loadPendingPayment(paymentId);
-  const newHold = addMinutes(new Date(), env.REJECTED_RETRY_MINUTES);
+  const now = new Date();
+  const late = payment.booking.status === 'EXPIRED';
+  const showtimeStarted = payment.booking.showtime.startsAt <= now;
+  const paymentData = { status: 'REJECTED', rejectReason: reason, verifiedById: adminId, verifiedAt: now };
 
   await prisma.$transaction(async (tx) => {
-    await settlePendingPayment(tx, payment, {
-      paymentData: { status: 'REJECTED', rejectReason: reason, verifiedById: adminId, verifiedAt: new Date() },
-      bookingData: { status: 'PENDING_PAYMENT', holdExpiresAt: newHold },
-    });
+    if (late) {
+      await settlePendingPayment(tx, payment, {
+        bookingStatus: 'EXPIRED',
+        bookingData: { cancelReason: `สลิปไม่ผ่านการตรวจสอบ: ${reason}` },
+        paymentData,
+      });
+    } else if (showtimeStarted) {
+      await settlePendingPayment(tx, payment, {
+        bookingData: {
+          status: 'EXPIRED',
+          expiredAt: now,
+          holdExpiresAt: null,
+          cancelReason: `สลิปไม่ผ่านการตรวจสอบหลังรอบเริ่มฉาย: ${reason}`,
+        },
+        paymentData,
+      });
+      await tx.bookingSeat.deleteMany({ where: { bookingId: payment.bookingId } });
+    } else {
+      await settlePendingPayment(tx, payment, {
+        bookingData: {
+          status: 'PENDING_PAYMENT',
+          holdExpiresAt: addMinutes(now, env.REJECTED_RETRY_MINUTES),
+        },
+        paymentData,
+      });
+    }
     await notify(
       {
         userId: payment.booking.userId,
         type: 'PAYMENT_REJECTED',
-        context: { code: payment.booking.code, reason },
+        context: { code: payment.booking.code, reason, closed: late || showtimeStarted },
         data: { bookingId: payment.bookingId },
       },
       tx,
@@ -270,13 +426,24 @@ export const rejectPayment = async ({ paymentId, adminId, reason }) => {
 const loadPendingPayment = async (paymentId) => {
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
-    include: { booking: { select: { id: true, code: true, userId: true, status: true } } },
+    include: {
+      booking: {
+        select: {
+          id: true,
+          code: true,
+          userId: true,
+          status: true,
+          showtime: { select: { startsAt: true } },
+        },
+      },
+    },
   });
   if (!payment) throw ApiError.notFound('PAYMENT_NOT_FOUND', 'ไม่พบรายการชำระเงินนี้');
   if (payment.status !== 'PENDING_VERIFICATION') {
     throw ApiError.conflict('PAYMENT_NOT_PENDING', 'รายการนี้ถูกตรวจสอบไปแล้ว');
   }
-  if (payment.booking.status !== 'PENDING_VERIFICATION') {
+  // EXPIRED = สลิปที่ส่งมาหลังหมดเวลา (ดู acceptLateSlip) ยังตรวจได้ตามปกติ
+  if (!['PENDING_VERIFICATION', 'EXPIRED'].includes(payment.booking.status)) {
     throw ApiError.conflict('BOOKING_NOT_PENDING', 'สถานะการจองเปลี่ยนไปแล้ว กรุณารีเฟรชหน้าจอ');
   }
   return payment;

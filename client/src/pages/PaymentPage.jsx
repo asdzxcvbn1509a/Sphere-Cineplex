@@ -31,6 +31,8 @@ const PaymentPage = () => {
 
   const [booking, setBooking] = useState(null);
   const [payment, setPayment] = useState(null);
+  // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = หมดเวลาแล้ว/ไม่ได้นับ)
+  const [holdDeadline, setHoldDeadline] = useState(null);
   const [state, setState] = useState({ loading: true, error: null });
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -45,8 +47,16 @@ const PaymentPage = () => {
           getBooking(bookingId),
           getPayment(bookingId),
         ]);
+        const nextPayment = paymentRes.data.payment;
         setBooking(bookingRes.data.booking);
-        setPayment(paymentRes.data.payment);
+        setPayment(nextPayment);
+        // นับถอยหลังจากวินาทีที่เหลือที่ server คำนวณ ไม่ใช่เทียบ holdExpiresAt กับนาฬิกาเครื่องลูกค้า
+        // เครื่องที่ตั้งเวลาช้าจะเห็นเวลาเหลือมากกว่าจริง แล้วโอนเงินไปทั้งที่ระบบปิดรับไปแล้ว
+        setHoldDeadline(
+          nextPayment.holdSecondsLeft > 0
+            ? new Date(Date.now() + nextPayment.holdSecondsLeft * 1000).toISOString()
+            : null,
+        );
         setState({ loading: false, error: null });
       } catch (error) {
         setState({ loading: false, error: apiError(error).message });
@@ -70,13 +80,14 @@ const PaymentPage = () => {
   }, [file]);
 
   const status = booking?.status;
+  // ส่งสลิปหลังหมดเวลาแล้วที่นั่งไม่ว่าง — การจองคงหมดเวลา แต่สลิปรอผู้ดูแลตรวจเพื่อคืนเงิน
+  const lateWaiting = status === 'EXPIRED' && payment?.status === 'PENDING_VERIFICATION';
 
   // ระหว่างรอ admin ตรวจสลิป หน้าจะอัปเดตเองโดยไม่ต้องให้ผู้ใช้กดรีเฟรช
-  usePolling(() => load(true), 5000, status === 'PENDING_VERIFICATION');
+  usePolling(() => load(true), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
 
-  const secondsLeft = useCountdown(
-    status === 'PENDING_PAYMENT' ? booking?.holdExpiresAt : null,
-    () => load(true),
+  const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () =>
+    load(true),
   );
 
   const handleUpload = async (event) => {
@@ -113,8 +124,46 @@ const PaymentPage = () => {
     );
   }
 
-  const expired = status === 'EXPIRED' || (status === 'PENDING_PAYMENT' && secondsLeft === 0);
+  // หมดเวลา = job ปิดการจองแล้ว หรือนับถอยหลังครบแล้วแต่ job ยังไม่ทันทำงาน
+  const holdOver = status === 'PENDING_PAYMENT' && (!holdDeadline || secondsLeft === 0);
+  const expired = status === 'EXPIRED' || holdOver;
   const wasRejected = payment?.status === 'REJECTED' && status === 'PENDING_PAYMENT';
+  // server บอกว่ายังรับสลิปส่งช้าได้ — สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
+  const lateUpload = expired && !lateWaiting && payment?.canUploadSlip;
+  const lateRefund =
+    status === 'EXPIRED' && ['REFUND_PENDING', 'REFUNDED'].includes(payment?.status);
+  const closed =
+    status === 'CANCELLED' || (expired && !lateUpload && !lateWaiting && !lateRefund);
+
+  const uploadForm = (
+    <form onSubmit={handleUpload} className="card mt-4 p-5 sm:p-6">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <Upload size={18} className="text-accent" /> {t('payment.uploadTitle')}
+      </h2>
+      <p className="mt-1 text-sm text-muted">{t('payment.uploadHint')}</p>
+
+      <label className="mt-4 flex min-h-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line px-4 py-6 text-center transition hover:border-accent/60 sm:min-h-72">
+        {preview ? (
+          <img src={preview} alt="" className="max-h-64 rounded-lg object-contain" />
+        ) : (
+          <Upload size={22} className="text-muted" />
+        )}
+        <span className="text-sm text-muted">
+          {file ? file.name : t('payment.chooseFile')}
+        </span>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+
+      <Button type="submit" size="lg" className="mt-4 w-full" loading={uploading} disabled={!file}>
+        {t('payment.submitSlip')}
+      </Button>
+    </form>
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -174,7 +223,50 @@ const PaymentPage = () => {
         </div>
       )}
 
-      {(status === 'CANCELLED' || expired) && status !== 'PAID' && (
+      {lateWaiting && (
+        <div className="card border-info/40 p-6 text-center sm:p-8">
+          <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
+          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.lateWaitingTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+            {t('payment.lateWaitingBody')}
+          </p>
+        </div>
+      )}
+
+      {lateRefund && (
+        <div className="card border-accent/40 p-6 text-center sm:p-8">
+          <CheckCircle2 className="mx-auto mb-3 text-accent" size={40} />
+          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.lateRefundTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+            {t('payment.lateRefundBody')}
+          </p>
+          <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
+            {t('payment.goMyBookings')}
+          </Button>
+        </div>
+      )}
+
+      {lateUpload && (
+        <>
+          <div className="card border-accent/40 p-5 sm:p-6">
+            <h2 className="flex items-center gap-2 text-lg font-bold">
+              <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('payment.lateTitle')}
+            </h2>
+            <p className="mt-2 text-sm text-muted sm:text-base">
+              {t('payment.lateBody', {
+                time: payment.lateSlipUntil ? formatTime(payment.lateSlipUntil, lang) : '—',
+              })}
+            </p>
+            <p className="mt-3 text-sm text-muted">
+              {t('payment.reference')}:{' '}
+              <span className="font-mono text-fg">{payment.reference}</span>
+            </p>
+          </div>
+          {uploadForm}
+        </>
+      )}
+
+      {closed && (
         <div className="card border-danger/40 p-6 text-center sm:p-8">
           <AlertTriangle className="mx-auto mb-3 text-danger" size={40} />
           <h2 className="text-xl font-bold sm:text-2xl">{t('payment.expired')}</h2>
@@ -248,33 +340,7 @@ const PaymentPage = () => {
             </p>
           </div>
 
-          <form onSubmit={handleUpload} className="card mt-4 p-5 sm:p-6">
-            <h2 className="flex items-center gap-2 font-semibold">
-              <Upload size={18} className="text-accent" /> {t('payment.uploadTitle')}
-            </h2>
-            <p className="mt-1 text-sm text-muted">{t('payment.uploadHint')}</p>
-
-            <label className="mt-4 flex min-h-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line px-4 py-6 text-center transition hover:border-accent/60 sm:min-h-72">
-              {preview ? (
-                <img src={preview} alt="" className="max-h-64 rounded-lg object-contain" />
-              ) : (
-                <Upload size={22} className="text-muted" />
-              )}
-              <span className="text-sm text-muted">
-                {file ? file.name : t('payment.chooseFile')}
-              </span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
-            </label>
-
-            <Button type="submit" size="lg" className="mt-4 w-full" loading={uploading} disabled={!file}>
-              {t('payment.submitSlip')}
-            </Button>
-          </form>
+          {uploadForm}
         </>
       )}
     </div>

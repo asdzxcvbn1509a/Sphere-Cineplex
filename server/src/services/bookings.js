@@ -34,6 +34,40 @@ const holdSecondsLeft = (booking) => {
   return Math.max(0, Math.floor((booking.holdExpiresAt.getTime() - Date.now()) / 1000));
 };
 
+/** ใบชำระเงินที่ยังรับสลิปได้ — ยังไม่เคยส่ง หรือใบเดิมถูกปฏิเสธ/หมดเวลาไป */
+export const SLIP_ACCEPTING_PAYMENT_STATUSES = ['AWAITING_SLIP', 'REJECTED'];
+
+/**
+ * การจองนี้ส่งสลิปได้ไหม และถ้าเลยเวลาชำระไปแล้ว ส่งช้าได้ถึงเมื่อไหร่
+ *
+ * - รอชำระอยู่ → ส่งได้เสมอ แม้เลยกำหนดแล้วแต่ job ยังไม่ได้ปล่อยที่นั่ง (ที่นั่งยังเป็นของเขาอยู่)
+ * - หมดเวลาไปแล้ว → ส่งได้อีก LATE_SLIP_GRACE_MINUTES นับจากตอนหมดเวลา สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
+ *   (ที่นั่งยังว่างก็ได้คืน ไม่ว่างแล้วผู้ดูแลยืนยันยอดแล้วคืนเงิน) — ต้องยังไม่มีสลิปที่รอตรวจหรือจบไปแล้ว
+ */
+export const slipUploadWindow = (booking, now = new Date()) => {
+  const grace = env.LATE_SLIP_GRACE_MINUTES;
+
+  if (booking.status === 'PENDING_PAYMENT') {
+    const overdue = booking.holdExpiresAt && booking.holdExpiresAt <= now;
+    return {
+      canUpload: true,
+      lateUntil: overdue && grace > 0 ? addMinutes(booking.holdExpiresAt, grace) : null,
+    };
+  }
+
+  if (
+    booking.status === 'EXPIRED' &&
+    booking.expiredAt &&
+    grace > 0 &&
+    SLIP_ACCEPTING_PAYMENT_STATUSES.includes(booking.payment?.status)
+  ) {
+    const lateUntil = addMinutes(booking.expiredAt, grace);
+    if (lateUntil > now) return { canUpload: true, lateUntil };
+  }
+
+  return { canUpload: false, lateUntil: null };
+};
+
 /** สถานะเปลี่ยนไประหว่างที่กำลังทำรายการ (อีกคนกดก่อน, หมดเวลาพอดี) — ให้ผู้ใช้รีเฟรชแล้วดูใหม่ */
 export const bookingStateChanged = () => {
   return ApiError.conflict(
@@ -52,6 +86,7 @@ const canCancel = (booking) => {
 };
 
 export const shapeBooking = (booking) => {
+  const { canUpload, lateUntil } = slipUploadWindow(booking);
   return {
     id: booking.id,
     code: booking.code,
@@ -63,7 +98,11 @@ export const shapeBooking = (booking) => {
     createdAt: booking.createdAt,
     paidAt: booking.paidAt,
     cancelledAt: booking.cancelledAt,
+    expiredAt: booking.expiredAt,
     cancelReason: booking.cancelReason,
+    // หน้าการจองของฉันใช้โชว์ปุ่ม "ส่งสลิป (โอนแล้ว)" ให้การจองที่เพิ่งหมดเวลา
+    canUploadSlip: canUpload,
+    lateSlipUntil: lateUntil,
     canCancel: canCancel(booking),
     cancelCutoffHours: env.CANCEL_CUTOFF_HOURS,
     showtime: {
@@ -93,6 +132,53 @@ export const shapeBooking = (booking) => {
       user: { id: booking.user.id, name: booking.user.name, phone: booking.user.phone },
     }),
   };
+};
+
+/**
+ * นโยบายกักที่นั่ง — การจองที่ยังไม่จ่ายถือที่นั่งไว้ได้ 10 นาที ถ้าไม่จำกัด บัญชีเดียวก็วนจองกักได้ทั้งโรง
+ *
+ * - รอบเดียวกันมีการจองที่ยังรอชำระอยู่แล้ว → ให้ไปจ่ายใบเดิมหรือยกเลิกก่อน
+ *   (ส่วนใหญ่คือกด back จากหน้าชำระเงินมาเลือกใหม่ ที่นั่งชุดเดิมของตัวเองจะค้างอยู่ 10 นาทีโดยไม่รู้ตัว)
+ *   ส่วนใบที่ส่งสลิปแล้ว (รอตรวจ) ไม่นับ — จองเพิ่มให้เพื่อนในรอบเดียวกันได้ตามปกติ
+ * - ถือที่นั่งค้างรวมทุกรอบเกิน MAX_PENDING_BOOKINGS_PER_USER รายการ → ปฏิเสธ
+ *
+ * เช็กก่อนสร้างโดยไม่ได้ล็อก — สองคำขอของคนเดียวกันที่มาพร้อมกันเป๊ะอาจผ่านได้ทั้งคู่
+ * ยอมรับได้เพราะเพดานนี้มีไว้กันการกักแบบวนซ้ำ ไม่ใช่นับให้ตรงทุกเสี้ยววินาที
+ */
+const assertCanHoldMoreSeats = async ({ userId, showtimeId }) => {
+  const now = new Date();
+  const holding = await prisma.booking.findMany({
+    where: {
+      userId,
+      OR: [
+        { status: 'PENDING_PAYMENT', holdExpiresAt: { gt: now } },
+        { status: 'PENDING_VERIFICATION' },
+      ],
+    },
+    select: { id: true, status: true, showtimeId: true, seatSnapshot: true },
+  });
+
+  const unpaidSameShowtime = holding.find(
+    (booking) => booking.status === 'PENDING_PAYMENT' && booking.showtimeId === showtimeId,
+  );
+  if (unpaidSameShowtime) {
+    throw ApiError.conflict(
+      'PENDING_BOOKING_EXISTS',
+      'คุณมีการจองรอบนี้ที่ยังรอชำระเงินอยู่ กรุณาชำระเงินหรือยกเลิกรายการเดิมก่อนจองใหม่',
+      {
+        bookingId: unpaidSameShowtime.id,
+        seats: (unpaidSameShowtime.seatSnapshot ?? []).map((seat) => seat.label),
+      },
+    );
+  }
+
+  if (holding.length >= env.MAX_PENDING_BOOKINGS_PER_USER) {
+    throw ApiError.conflict(
+      'TOO_MANY_PENDING_BOOKINGS',
+      `คุณมีการจองที่ยังไม่เสร็จ (รอชำระเงิน/รอตรวจสลิป) อยู่ ${holding.length} รายการ กรุณาจัดการรายการเดิมก่อนจองเพิ่ม`,
+      { count: holding.length, limit: env.MAX_PENDING_BOOKINGS_PER_USER },
+    );
+  }
 };
 
 /**
@@ -132,6 +218,8 @@ export const createBooking = async ({ userId, showtimeId, seatIds }) => {
   if (seats.length !== uniqueSeatIds.length) {
     throw ApiError.badRequest('INVALID_SEATS', 'มีที่นั่งบางที่ไม่ถูกต้องสำหรับรอบฉายนี้');
   }
+
+  await assertCanHoldMoreSeats({ userId, showtimeId });
 
   const priceMap = toPriceMap(showtime.zonePrices, showtime.basePrice);
   const { items, total } = priceSeats(seats, priceMap);
@@ -383,7 +471,13 @@ export const expireBooking = async ({ id, code, userId }, now = new Date()) => {
   return prisma.$transaction(async (tx) => {
     const { count } = await tx.booking.updateMany({
       where: { id, status: 'PENDING_PAYMENT', holdExpiresAt: { lt: now } },
-      data: { status: 'EXPIRED', holdExpiresAt: null, cancelReason: 'หมดเวลาชำระเงิน' },
+      data: {
+        status: 'EXPIRED',
+        holdExpiresAt: null,
+        // จุดเริ่มนับช่วงผ่อนผันส่งสลิปช้า (slipUploadWindow)
+        expiredAt: now,
+        cancelReason: 'หมดเวลาชำระเงิน',
+      },
     });
     if (count === 0) return false;
 

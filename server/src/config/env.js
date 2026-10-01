@@ -46,6 +46,12 @@ const envSchema = z.object({
   REJECTED_RETRY_MINUTES: z.coerce.number().int().positive().default(10),
   CANCEL_CUTOFF_HOURS: z.coerce.number().int().nonnegative().default(3),
   MAX_SEATS_PER_BOOKING: z.coerce.number().int().positive().default(8),
+  // การจองที่ยังถือที่นั่งไว้พร้อมกันได้กี่รายการต่อคน (รอชำระ + รอตรวจสลิป)
+  // กันบัญชีเดียววนจองกักที่นั่งไว้ทั้งโรงโดยไม่จ่าย — คนจองจริงแทบไม่เคยค้างเกิน 1-2 รายการ
+  MAX_PENDING_BOOKINGS_PER_USER: z.coerce.number().int().positive().default(3),
+  // หลังหมดเวลาชำระเงินแล้วยังส่งสลิปได้อีกกี่นาที (0 = ปิด) — สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
+  // ที่นั่งยังว่างก็ได้ที่นั่งเดิมคืน ไม่ว่างแล้วผู้ดูแลยืนยันยอดแล้วคืนเงินให้ เงินจึงไม่หลุดนอกระบบ
+  LATE_SLIP_GRACE_MINUTES: z.coerce.number().int().nonnegative().default(30),
 
   PROMPTPAY_ID: z.string().min(8).default('0812345678'),
   PROMPTPAY_MERCHANT_NAME: z.string().default('THEATRE RESERVATION'),

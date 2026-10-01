@@ -17,6 +17,9 @@ import SlipImage from '../../components/ui/SlipImage.jsx';
 import usePolling from '../../hooks/usePolling.js';
 import { formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
 
+/** สลิปที่ลูกค้าส่งหลังการจองหมดเวลาแล้ว และเอาที่นั่งเดิมคืนไม่ได้ — การจองยังเป็น EXPIRED */
+const isLateSlip = (payment) => payment.booking.status === 'EXPIRED';
+
 const AdminPaymentsPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
@@ -51,7 +54,12 @@ const AdminPaymentsPage = () => {
     setBusyId(payment.id);
     try {
       await approvePayment(payment.id);
-      toast.success(`${payment.booking.code} → ${t('bookings.statusPAID')}`);
+      // สลิปที่ส่งหลังหมดเวลาและที่นั่งไม่ว่างแล้ว อนุมัติ = เข้าคิวคืนเงิน ไม่ได้ออกตั๋ว
+      toast.success(
+        isLateSlip(payment)
+          ? t('admin.paymentQueue.lateApproved', { code: payment.booking.code })
+          : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
+      );
       await load(true);
     } catch (error) {
       toast.error(apiError(error).message);
@@ -111,6 +119,12 @@ const AdminPaymentsPage = () => {
                 {payment.booking.showtime.theatre.name} ·{' '}
                 {formatDateTime(payment.booking.showtime.startsAt, lang)}
               </p>
+
+              {isLateSlip(payment) && (
+                <p className="mt-3 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent sm:text-sm">
+                  {t('admin.paymentQueue.lateSlip')}
+                </p>
+              )}
 
               <dl className="mt-3 grid grid-cols-2 gap-y-1.5 text-sm">
                 <dt className="text-muted">{t('admin.paymentQueue.customer')}</dt>

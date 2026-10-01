@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 
 // controllers
@@ -48,8 +49,28 @@ const refundAccountSchema = z.object({
   refundAccountNo: accountNoSchema,
 });
 
+/**
+ * กันสคริปต์จอง-ยกเลิกวนเพื่อกักที่นั่ง — ด่านหลักคือเพดานการจองค้างใน service (MAX_PENDING_BOOKINGS_PER_USER)
+ * ตัวนี้กันอีกชั้นที่เพดานไม่ครอบคลุม: จองแล้วยกเลิกทันทีซ้ำ ๆ ทำให้ที่นั่งกระพริบจนคนอื่นจองไม่ได้
+ * นับต่อบัญชี (ผ่าน authenticate มาแล้ว) และนับเฉพาะครั้งที่จองสำเร็จ — ชน SEAT_TAKEN ไม่เสียโควตา
+ */
+const createBookingLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipFailedRequests: true,
+  keyGenerator: (req) => req.user.id,
+  message: {
+    error: {
+      code: 'BOOKING_RATE_LIMITED',
+      message: 'ทำรายการจองบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่',
+    },
+  },
+});
+
 // @ENDPOINT http://localhost:4000/api/bookings
-router.post('/', validate({ body: createBookingSchema }), createBooking);
+router.post('/', createBookingLimiter, validate({ body: createBookingSchema }), createBooking);
 router.get('/', validate({ query: listQuerySchema }), listMyBookings);
 // @ENDPOINT http://localhost:4000/api/bookings/:id
 router.get('/:id', getBooking);
