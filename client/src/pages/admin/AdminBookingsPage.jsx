@@ -14,6 +14,7 @@ import Textarea from '../../components/ui/Textarea.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
 import { formatDateTime, formatMoney } from '../../utils/format.js';
 
 const STATUSES = ['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID', 'CANCELLED', 'EXPIRED'];
@@ -25,7 +26,9 @@ const AdminBookingsPage = () => {
   // ?q= มาจากลิงก์ในหน้าจัดการผู้ใช้ (กดที่จำนวนการจองแล้วมาดูรายการของคนนั้นเลย)
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') ?? '';
-  const [filters, setFilters] = useState({ status: '', date: '', q: initialQuery });
+  // page อยู่ใน filters ด้วย — เปลี่ยนตัวกรองแล้วกลับหน้า 1 ได้ในการ set ครั้งเดียว ไม่โหลดซ้ำสองรอบ
+  const [filters, setFilters] = useState({ status: '', date: '', q: initialQuery, page: 1 });
+  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [search, setSearch] = useState(initialQuery);
   const [state, setState] = useState({ loading: true, error: null });
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -36,7 +39,13 @@ const AdminBookingsPage = () => {
     setState({ loading: true, error: null });
     listAllBookings(filters)
       .then(({ data }) => {
+        // หน้าสุดท้ายว่างลงหลังทำรายการ (เช่นยกเลิกใบสุดท้ายของหน้า) — ถอยไปหน้าก่อนหน้าแทนโชว์ตารางว่าง
+        if (data.bookings.length === 0 && filters.page > 1) {
+          setFilters((current) => ({ ...current, page: current.page - 1 }));
+          return;
+        }
         setBookings(data.bookings);
+        setMeta({ total: data.total, pageSize: data.pageSize });
         setState({ loading: false, error: null });
       })
       .catch((error) => setState({ loading: false, error: apiError(error).message }));
@@ -52,7 +61,7 @@ const AdminBookingsPage = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       const q = search.trim();
-      setFilters((current) => (current.q === q ? current : { ...current, q }));
+      setFilters((current) => (current.q === q ? current : { ...current, q, page: 1 }));
     }, 400);
     return () => clearTimeout(timer);
   }, [search]);
@@ -81,7 +90,9 @@ const AdminBookingsPage = () => {
         <Field label={t('common.status')} className="w-44">
           <Select
             value={filters.status}
-            onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, status: event.target.value, page: 1 }))
+            }
           >
             <option value="">{t('common.all')}</option>
             {STATUSES.map((status) => (
@@ -96,7 +107,9 @@ const AdminBookingsPage = () => {
           <Input
             type="date"
             value={filters.date}
-            onChange={(event) => setFilters((current) => ({ ...current, date: event.target.value }))}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, date: event.target.value, page: 1 }))
+            }
           />
         </Field>
 
@@ -179,6 +192,16 @@ const AdminBookingsPage = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!state.loading && !state.error && (
+        <Pagination
+          className="mt-4"
+          page={filters.page}
+          pageSize={meta.pageSize}
+          total={meta.total}
+          onChange={(page) => setFilters((current) => ({ ...current, page }))}
+        />
       )}
 
       <Modal

@@ -15,6 +15,7 @@ import Select from '../../components/ui/Select.jsx';
 import PasswordInput from '../../components/ui/PasswordInput.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
 import { formatDateTime } from '../../utils/format.js';
 
 const EMPTY_EDIT = { name: '', email: '', phone: '', role: 'USER' };
@@ -25,7 +26,9 @@ const AdminUsersPage = () => {
   const me = useAuthUser();
 
   const [users, setUsers] = useState([]);
-  const [filters, setFilters] = useState({ q: '', role: '' });
+  // page อยู่ใน filters ด้วย — เปลี่ยนตัวกรองแล้วกลับหน้า 1 ได้ในการ set ครั้งเดียว
+  const [filters, setFilters] = useState({ q: '', role: '', page: 1 });
+  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [search, setSearch] = useState('');
   const [state, setState] = useState({ loading: true, error: null });
 
@@ -44,7 +47,13 @@ const AdminUsersPage = () => {
     setState({ loading: true, error: null });
     listUsers(filters)
       .then(({ data }) => {
+        // หน้าสุดท้ายว่างลงหลังลบบัญชี — ถอยไปหน้าก่อนหน้าแทนโชว์ตารางว่าง
+        if (data.users.length === 0 && filters.page > 1) {
+          setFilters((current) => ({ ...current, page: current.page - 1 }));
+          return;
+        }
         setUsers(data.users);
+        setMeta({ total: data.total, pageSize: data.pageSize });
         setState({ loading: false, error: null });
       })
       .catch((error) => setState({ loading: false, error: apiError(error).message }));
@@ -56,7 +65,7 @@ const AdminUsersPage = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       const q = search.trim();
-      setFilters((current) => (current.q === q ? current : { ...current, q }));
+      setFilters((current) => (current.q === q ? current : { ...current, q, page: 1 }));
     }, 400);
     return () => clearTimeout(timer);
   }, [search]);
@@ -139,7 +148,9 @@ const AdminUsersPage = () => {
         <Field label={t('admin.userPage.role')} className="w-44">
           <Select
             value={filters.role}
-            onChange={(event) => setFilters((current) => ({ ...current, role: event.target.value }))}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, role: event.target.value, page: 1 }))
+            }
           >
             <option value="">{t('common.all')}</option>
             <option value="USER">{t('admin.userPage.roleUSER')}</option>
@@ -270,6 +281,16 @@ const AdminUsersPage = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!state.loading && !state.error && (
+        <Pagination
+          className="mt-4"
+          page={filters.page}
+          pageSize={meta.pageSize}
+          total={meta.total}
+          onChange={(page) => setFilters((current) => ({ ...current, page }))}
+        />
       )}
 
       <Modal

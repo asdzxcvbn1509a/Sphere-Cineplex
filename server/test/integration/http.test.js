@@ -8,7 +8,13 @@ import { changePassword, issueSession, rotateSession } from '../../src/services/
 import { hashPassword } from '../../src/utils/password.js';
 import { signAccessToken } from '../../src/utils/jwt.js';
 import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
-import { book, bookingOf, createShowtimeFixture, createUser } from '../helpers/fixtures.js';
+import {
+  book,
+  bookingOf,
+  createAdmin,
+  createShowtimeFixture,
+  createUser,
+} from '../helpers/fixtures.js';
 
 /**
  * เทสต์ผ่าน HTTP จริงทั้งสาย (helmet → authenticate → multer → ตรวจไฟล์ → service)
@@ -78,6 +84,39 @@ describe('อัปโหลดสลิป', () => {
 
     assert.equal(res.status, 201);
     assert.equal((await bookingOf(booking.id)).status, 'PENDING_VERIFICATION');
+  });
+});
+
+describe('แบ่งหน้ารายการฝั่งผู้ดูแล', () => {
+  test('หน้า 2 ได้ช่วงถัดไปพร้อมจำนวนทั้งหมด หน้าเกินได้รายการว่าง และขอเกินเพดานไม่ได้', async () => {
+    const admin = await createAdmin();
+    const { showtime, seats } = await createShowtimeFixture();
+    for (let i = 0; i < 7; i += 1) {
+      const user = await createUser();
+      await book({ user, showtime, seats: [seats[i]] });
+    }
+    const token = signAccessToken(admin);
+    const get = (query) =>
+      fetch(`${base}/api/admin/bookings?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+
+    const all = await (await get('pageSize=100')).json();
+    assert.equal(all.total, 7);
+    assert.equal(all.bookings.length, 7);
+
+    const page2 = await (await get('page=2&pageSize=3')).json();
+    assert.equal(page2.total, 7);
+    assert.equal(page2.page, 2);
+    assert.equal(page2.pageSize, 3);
+    assert.deepEqual(
+      page2.bookings.map((booking) => booking.id),
+      all.bookings.slice(3, 6).map((booking) => booking.id),
+    );
+
+    const beyond = await (await get('page=5&pageSize=3')).json();
+    assert.equal(beyond.bookings.length, 0);
+    assert.equal(beyond.total, 7);
+
+    assert.equal((await get('pageSize=500')).status, 422);
   });
 });
 

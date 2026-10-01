@@ -14,6 +14,7 @@ import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import SlipImage from '../../components/ui/SlipImage.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
 import usePolling from '../../hooks/usePolling.js';
 import { formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
 
@@ -24,6 +25,8 @@ const AdminPaymentsPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
   const [payments, setPayments] = useState([]);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [state, setState] = useState({ loading: true, error: null });
   const [busyId, setBusyId] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
@@ -33,15 +36,21 @@ const AdminPaymentsPage = () => {
 
   const load = useCallback((silent = false) => {
     if (!silent) setState({ loading: true, error: null });
-    return listPayments('PENDING_VERIFICATION')
+    return listPayments('PENDING_VERIFICATION', { page })
       .then(({ data }) => {
+        // ตรวจใบสุดท้ายของหน้าหมดแล้ว — ถอยไปหน้าก่อนหน้า (คิวที่เหลือยังอยู่ตรงนั้น)
+        if (data.payments.length === 0 && page > 1) {
+          setPage((current) => current - 1);
+          return;
+        }
         setPayments(data.payments);
+        setMeta({ total: data.total, pageSize: data.pageSize });
         setState({ loading: false, error: null });
         // ป้ายบนเมนูต้องลดลงทันทีที่อนุมัติ/ปฏิเสธ ไม่ต้องรอผู้ดูแลรีเฟรชหน้าเอง
         refreshCounts();
       })
       .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [refreshCounts]);
+  }, [page, refreshCounts]);
 
   useEffect(() => {
     load();
@@ -183,6 +192,10 @@ const AdminPaymentsPage = () => {
             </div>
           </article>
         ))}
+
+        {!state.loading && !state.error && (
+          <Pagination page={page} pageSize={meta.pageSize} total={meta.total} onChange={setPage} />
+        )}
       </div>
 
       <Modal

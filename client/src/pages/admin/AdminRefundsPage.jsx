@@ -15,6 +15,7 @@ import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import SlipImage from '../../components/ui/SlipImage.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
 import usePolling from '../../hooks/usePolling.js';
 import { formatDateTime, formatMoney } from '../../utils/format.js';
 
@@ -24,6 +25,8 @@ const AdminRefundsPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
   const [tab, setTab] = useState('REFUND_PENDING');
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [refunds, setRefunds] = useState([]);
   const [state, setState] = useState({ loading: true, error: null });
 
@@ -43,16 +46,22 @@ const AdminRefundsPage = () => {
   const load = useCallback(
     (silent = false) => {
       if (!silent) setState({ loading: true, error: null });
-      return listRefunds(tab)
+      return listRefunds(tab, { page })
         .then(({ data }) => {
+          // บันทึกคืนเงินใบสุดท้ายของหน้าแล้ว — ถอยไปหน้าก่อนหน้า
+          if (data.refunds.length === 0 && page > 1) {
+            setPage((current) => current - 1);
+            return;
+          }
           setRefunds(data.refunds);
+          setMeta({ total: data.total, pageSize: data.pageSize });
           setState({ loading: false, error: null });
           // เช่นเดียวกับคิวตรวจสลิป กดบันทึกคืนเงินแล้วป้ายต้องลดลงเลย
           refreshCounts();
         })
         .catch((error) => setState({ loading: false, error: apiError(error).message }));
     },
-    [tab, refreshCounts],
+    [tab, page, refreshCounts],
   );
 
   useEffect(() => {
@@ -119,7 +128,10 @@ const AdminRefundsPage = () => {
           <button
             key={item}
             type="button"
-            onClick={() => setTab(item)}
+            onClick={() => {
+              setTab(item);
+              setPage(1);
+            }}
             className={clsx(
               'rounded-lg px-4 py-1.5 text-sm font-medium transition',
               tab === item ? 'bg-accent text-ink' : 'text-muted hover:text-fg',
@@ -237,6 +249,10 @@ const AdminRefundsPage = () => {
             )}
           </article>
         ))}
+
+        {!state.loading && !state.error && (
+          <Pagination page={page} pageSize={meta.pageSize} total={meta.total} onChange={setPage} />
+        )}
       </div>
 
       <Modal

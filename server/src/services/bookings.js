@@ -2,6 +2,7 @@ import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { env } from '../config/env.js';
 import { addMinutes, bangkokDayRange, formatBangkokShort } from '../utils/datetime.js';
+import { toPage } from '../utils/pagination.js';
 import { generateBookingCode, generatePaymentReference } from '../utils/codes.js';
 import { priceSeats, toPriceMap } from '../utils/pricing.js';
 import { createPromptPayPayload } from '../utils/promptpay.js';
@@ -632,7 +633,8 @@ export const cancelShowtime = async ({ showtimeId, reason }) => {
   return { showtime: await getShowtimeById(showtimeId), ...result };
 };
 
-export const listAllBookings = async ({ status, date, q, take = 100 } = {}) => {
+export const listAllBookings = async ({ status, date, q, page, pageSize } = {}) => {
+  const paging = toPage({ page, pageSize });
   const where = {};
   if (status) where.status = status;
   if (date) {
@@ -647,11 +649,16 @@ export const listAllBookings = async ({ status, date, q, take = 100 } = {}) => {
     ];
   }
 
-  const bookings = await prisma.booking.findMany({
-    where,
-    include: { ...bookingInclude, user: { select: { id: true, name: true, phone: true } } },
-    orderBy: { createdAt: 'desc' },
-    take,
-  });
-  return bookings.map(shapeBooking);
+  const [bookings, total] = await prisma.$transaction([
+    prisma.booking.findMany({
+      where,
+      include: { ...bookingInclude, user: { select: { id: true, name: true, phone: true } } },
+      // id ต่อท้ายให้ลำดับคงที่ — แถวที่สร้างพร้อมกันจะไม่สลับไปมาจนโผล่ซ้ำ/หายระหว่างหน้า
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: paging.skip,
+      take: paging.take,
+    }),
+    prisma.booking.count({ where }),
+  ]);
+  return { items: bookings.map(shapeBooking), total, page: paging.page, pageSize: paging.pageSize };
 };

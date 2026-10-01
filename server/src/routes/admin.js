@@ -43,6 +43,7 @@ import { requireRole } from '../middleware/requireRole.js';
 import { uploadRefundSlip } from '../middleware/upload.js';
 import { validate } from '../middleware/validate.js';
 import { passwordSchema } from '../utils/password.js';
+import { paginationQuery } from '../utils/pagination.js';
 
 const router = express.Router();
 
@@ -127,6 +128,7 @@ const bookingListQuery = z.object({
     .optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   q: z.string().trim().min(1).max(60).optional(),
+  ...paginationQuery,
 });
 
 const cancelSchema = z.object({
@@ -137,6 +139,7 @@ const paymentListQuery = z.object({
   status: z
     .enum(['AWAITING_SLIP', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'ALL'])
     .optional(),
+  ...paginationQuery,
 });
 
 const rejectSchema = z.object({
@@ -145,11 +148,13 @@ const rejectSchema = z.object({
 
 const refundListQuery = z.object({
   status: z.enum(['REFUND_PENDING', 'REFUNDED', 'ALL']).optional(),
+  ...paginationQuery,
 });
 
 const userListQuery = z.object({
   q: z.string().trim().min(1).max(60).optional(),
   role: z.enum(['USER', 'ADMIN']).optional(),
+  ...paginationQuery,
 });
 
 const userUpdateSchema = z

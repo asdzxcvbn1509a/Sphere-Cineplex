@@ -24,7 +24,12 @@
     "empty": "Nothing here yet",
     "required": "Required",
     "slip": "Slip",
-    "noSlip": "No slip"
+    "noSlip": "No slip",
+    "pagination": "Pagination",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "pageOf": "Page {{page}}/{{pages}}",
+    "pageRange": "{{from}}–{{to}} of {{total}}"
   },
   "nav": {
     "home": "Home",

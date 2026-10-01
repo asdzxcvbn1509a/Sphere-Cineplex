@@ -127,12 +127,14 @@ export const deleteShowtime = async (showtimeId) => {
 
 // ---------- การจอง ----------
 
-export const listAllBookings = async ({ status, date, q } = {}) => {
+/** แบ่งหน้าละ 50 รายการ (ค่าเริ่มต้นของ server) — คืน { bookings, total, page, pageSize } */
+export const listAllBookings = async ({ status, date, q, page = 1 } = {}) => {
   return await api.get('/admin/bookings', {
     params: {
       ...(status && { status }),
       ...(date && { date }),
       ...(q && { q }),
+      page,
     },
   });
 };
@@ -146,9 +148,12 @@ export const cancelBooking = async (bookingId, reason) => {
 
 // ---------- ตรวจสลิป ----------
 
-/** คิวสลิป — status: 'PENDING_VERIFICATION' | 'APPROVED' | 'REJECTED' | 'AWAITING_SLIP' | 'ALL' */
-export const listPayments = async (status = 'PENDING_VERIFICATION') => {
-  return await api.get('/admin/payments', { params: { status } });
+/**
+ * คิวสลิป — status: 'PENDING_VERIFICATION' | 'APPROVED' | 'REJECTED' | 'AWAITING_SLIP' | 'ALL'
+ * คืน { payments, total, page, pageSize }
+ */
+export const listPayments = async (status = 'PENDING_VERIFICATION', { page = 1 } = {}) => {
+  return await api.get('/admin/payments', { params: { status, page } });
 };
 
 /** อนุมัติ → การจองเป็น PAID และออก E-Ticket ให้ผู้ใช้ทันที */
@@ -163,9 +168,12 @@ export const rejectPayment = async (paymentId, reason) => {
 
 // ---------- คืนเงิน ----------
 
-/** คิวการจองที่จ่ายเงินแล้วแต่ถูกยกเลิก จึงต้องโอนเงินคืน — status: 'REFUND_PENDING' | 'REFUNDED' | 'ALL' */
-export const listRefunds = async (status = 'REFUND_PENDING') => {
-  return await api.get('/admin/refunds', { params: { status } });
+/**
+ * คิวการจองที่จ่ายเงินแล้วแต่ถูกยกเลิก จึงต้องโอนเงินคืน — status: 'REFUND_PENDING' | 'REFUNDED' | 'ALL'
+ * คืน { refunds, total, page, pageSize }
+ */
+export const listRefunds = async (status = 'REFUND_PENDING', { page = 1 } = {}) => {
+  return await api.get('/admin/refunds', { params: { status, page } });
 };
 
 /** บันทึกว่าโอนเงินคืนแล้ว ต้องแนบสลิปคืนเงิน (server ปฏิเสธถ้าไม่มี) */
@@ -215,10 +223,10 @@ export const downloadSalesCsv = async ({ from, to, groupBy = 'day' } = {}) => {
 
 // ---------- ผู้ใช้ ----------
 
-/** ค้นได้ทั้งชื่อ อีเมล และเบอร์โทรด้วยคำเดียว */
-export const listUsers = async ({ q, role } = {}) => {
+/** ค้นได้ทั้งชื่อ อีเมล และเบอร์โทรด้วยคำเดียว — คืน { users, total, page, pageSize } */
+export const listUsers = async ({ q, role, page = 1 } = {}) => {
   return await api.get('/admin/users', {
-    params: { ...(q && { q }), ...(role && { role }) },
+    params: { ...(q && { q }), ...(role && { role }), page },
   });
 };
 

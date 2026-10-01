@@ -71,7 +71,7 @@ describe('ส่งสลิปหลังหมดเวลา (โอนแ�
     assert.equal(payment.status, 'PENDING_VERIFICATION');
     const queue = await listPayments();
     assert.ok(
-      queue.some((item) => item.id === payment.id && item.booking.status === 'EXPIRED'),
+      queue.items.some((item) => item.id === payment.id && item.booking.status === 'EXPIRED'),
       'ต้องโผล่ในคิวตรวจสลิป พร้อมบอกว่าเป็นการจองที่หมดเวลาแล้ว',
     );
 

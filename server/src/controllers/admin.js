@@ -206,8 +206,8 @@ export const deleteShowtime = async (req, res, next) => {
 // @ENDPOINT GET http://localhost:4000/api/admin/bookings
 export const listAllBookings = async (req, res, next) => {
   try {
-    const bookings = await bookingService.listAllBookings(req.validatedQuery);
-    res.json({ bookings });
+    const { items, ...pageInfo } = await bookingService.listAllBookings(req.validatedQuery);
+    res.json({ bookings: items, ...pageInfo });
   } catch (error) {
     next(error);
   }
@@ -241,8 +241,8 @@ export const cancelBooking = async (req, res, next) => {
 // @ENDPOINT GET http://localhost:4000/api/admin/payments
 export const listPayments = async (req, res, next) => {
   try {
-    const payments = await paymentService.listPayments(req.validatedQuery);
-    res.json({ payments });
+    const { items, ...pageInfo } = await paymentService.listPayments(req.validatedQuery);
+    res.json({ payments: items, ...pageInfo });
   } catch (error) {
     next(error);
   }
@@ -281,8 +281,8 @@ export const rejectPayment = async (req, res, next) => {
 // @ENDPOINT GET http://localhost:4000/api/admin/refunds
 export const listRefunds = async (req, res, next) => {
   try {
-    const refunds = await paymentService.listRefunds(req.validatedQuery);
-    res.json({ refunds });
+    const { items, ...pageInfo } = await paymentService.listRefunds(req.validatedQuery);
+    res.json({ refunds: items, ...pageInfo });
   } catch (error) {
     next(error);
   }
@@ -358,8 +358,8 @@ export const getOccupancyReport = async (req, res, next) => {
 // @ENDPOINT GET http://localhost:4000/api/admin/users
 export const listUsers = async (req, res, next) => {
   try {
-    const users = await userService.listUsers(req.validatedQuery);
-    res.json({ users });
+    const { items, ...pageInfo } = await userService.listUsers(req.validatedQuery);
+    res.json({ users: items, ...pageInfo });
   } catch (error) {
     next(error);
   }

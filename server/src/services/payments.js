@@ -3,6 +3,7 @@ import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { env } from '../config/env.js';
 import { addMinutes } from '../utils/datetime.js';
+import { toPage } from '../utils/pagination.js';
 import { resolveSlipPath } from '../middleware/upload.js';
 import { notify } from './notifications.js';
 import { SLIP_ACCEPTING_PAYMENT_STATUSES, getBookingById, slipUploadWindow } from './bookings.js';
@@ -230,16 +231,19 @@ export const getSlipFilePath = async ({ bookingId, requester }) => {
 
 // ---------- ฝั่ง Admin ----------
 
-export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100 } = {}) => {
+export const listPayments = async ({ status = 'PENDING_VERIFICATION', page, pageSize } = {}) => {
+  const paging = toPage({ page, pageSize });
   // คิวที่กดอนุมัติ/ปฏิเสธได้ = PENDING_SLIP_WHERE (รวมสลิปที่ส่งหลังหมดเวลา)
   // กันสลิปค้างคิวกรณีการจองถูกยกเลิกไปแล้ว (ซึ่ง admin กดอะไรไม่ได้)
   const where =
     status === 'ALL' ? {} : status === 'PENDING_VERIFICATION' ? PENDING_SLIP_WHERE : { status };
 
-  const payments = await prisma.payment.findMany({
+  const query = {
     where,
-    orderBy: { slipUploadedAt: 'asc' },
-    take,
+    // คิวเก่าสุดขึ้นก่อน (ใครส่งก่อนได้ตรวจก่อน) — id ต่อท้ายให้ลำดับคงที่ระหว่างหน้า
+    orderBy: [{ slipUploadedAt: 'asc' }, { id: 'asc' }],
+    skip: paging.skip,
+    take: paging.take,
     include: {
       booking: {
         include: {
@@ -254,9 +258,13 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100
       },
       verifiedBy: { select: { id: true, name: true } },
     },
-  });
+  };
+  const [payments, total] = await prisma.$transaction([
+    prisma.payment.findMany(query),
+    prisma.payment.count({ where }),
+  ]);
 
-  return payments.map((payment) => ({
+  const items = payments.map((payment) => ({
     id: payment.id,
     status: payment.status,
     amount: payment.amount,
@@ -282,6 +290,7 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', take = 100
       },
     },
   }));
+  return { items, total, page: paging.page, pageSize: paging.pageSize };
 };
 
 /**
@@ -456,11 +465,19 @@ const loadPendingPayment = async (paymentId) => {
  * ระบบนี้รับเงินด้วยการโอน + ตรวจสลิป การคืนเงินจึงเป็นการโอนคืนด้วยมือเช่นกัน
  * หน้าที่ของระบบคือเตือนว่ายังค้างอยู่ และเก็บหลักฐานว่าโอนคืนไปแล้วเมื่อไหร่ โดยใคร
  */
-export const listRefunds = async ({ status = 'REFUND_PENDING', take = 100 } = {}) => {
-  const refunds = await prisma.payment.findMany({
-    where: status === 'ALL' ? { status: { in: ['REFUND_PENDING', 'REFUNDED'] } } : { status },
-    orderBy: status === 'REFUNDED' ? { refundedAt: 'desc' } : { refundDueAt: 'asc' },
-    take,
+export const listRefunds = async ({ status = 'REFUND_PENDING', page, pageSize } = {}) => {
+  const paging = toPage({ page, pageSize });
+  const where =
+    status === 'ALL' ? { status: { in: ['REFUND_PENDING', 'REFUNDED'] } } : { status };
+  const query = {
+    where,
+    // รอคืน: ค้างนานสุดขึ้นก่อน · คืนแล้ว: ล่าสุดขึ้นก่อน — id ต่อท้ายให้ลำดับคงที่ระหว่างหน้า
+    orderBy:
+      status === 'REFUNDED'
+        ? [{ refundedAt: 'desc' }, { id: 'desc' }]
+        : [{ refundDueAt: 'asc' }, { id: 'asc' }],
+    skip: paging.skip,
+    take: paging.take,
     include: {
       booking: {
         include: {
@@ -475,9 +492,13 @@ export const listRefunds = async ({ status = 'REFUND_PENDING', take = 100 } = {}
       },
       refundedBy: { select: { id: true, name: true } },
     },
-  });
+  };
+  const [refunds, total] = await prisma.$transaction([
+    prisma.payment.findMany(query),
+    prisma.payment.count({ where }),
+  ]);
 
-  return refunds.map((payment) => ({
+  const items = refunds.map((payment) => ({
     id: payment.id,
     status: payment.status,
     amount: payment.amount,
@@ -507,6 +528,7 @@ export const listRefunds = async ({ status = 'REFUND_PENDING', take = 100 } = {}
       },
     },
   }));
+  return { items, total, page: paging.page, pageSize: paging.pageSize };
 };
 
 /** ผู้ดูแลโอนคืนเองแล้วมาบันทึก ต้องแนบสลิปคืนเงิน เพราะลูกค้าเปิดดูเป็นหลักฐานได้ที่หน้าการจองของฉัน */

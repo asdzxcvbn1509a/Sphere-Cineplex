@@ -2,6 +2,7 @@ import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { hashPassword } from '../utils/password.js';
 import { isValidThaiMobile, normalizePhone } from '../utils/phone.js';
+import { toPage } from '../utils/pagination.js';
 
 /**
  * ผู้ดูแลระบบเห็นข้อมูลผู้ใช้ได้เท่าที่จำเป็นต่อการช่วยลูกค้า
@@ -30,7 +31,8 @@ const duplicateFieldError = (target) => {
   return ApiError.conflict('DUPLICATE', 'ข้อมูลซ้ำกับบัญชีที่มีอยู่แล้ว');
 };
 
-export const listUsers = async ({ q, role, take = 100 } = {}) => {
+export const listUsers = async ({ q, role, page, pageSize } = {}) => {
+  const paging = toPage({ page, pageSize });
   const where = {};
   if (role) where.role = role;
   if (q) {
@@ -42,14 +44,18 @@ export const listUsers = async ({ q, role, take = 100 } = {}) => {
     ];
   }
 
-  const users = await prisma.user.findMany({
-    where,
-    include: { _count: { select: { bookings: true } } },
-    orderBy: { createdAt: 'desc' },
-    take,
-  });
+  const [users, total] = await prisma.$transaction([
+    prisma.user.findMany({
+      where,
+      include: { _count: { select: { bookings: true } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: paging.skip,
+      take: paging.take,
+    }),
+    prisma.user.count({ where }),
+  ]);
 
-  return users.map(shapeUser);
+  return { items: users.map(shapeUser), total, page: paging.page, pageSize: paging.pageSize };
 };
 
 export const getUser = async (userId) => {

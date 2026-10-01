@@ -24,7 +24,12 @@
     "empty": "ยังไม่มีข้อมูล",
     "required": "จำเป็นต้องกรอก",
     "slip": "รูปสลิป",
-    "noSlip": "ไม่มีรูปสลิป"
+    "noSlip": "ไม่มีรูปสลิป",
+    "pagination": "แบ่งหน้า",
+    "prevPage": "ก่อนหน้า",
+    "nextPage": "ถัดไป",
+    "pageOf": "หน้า {{page}}/{{pages}}",
+    "pageRange": "{{from}}–{{to}} จาก {{total}} รายการ"
   },
   "nav": {
     "home": "หน้าแรก",
