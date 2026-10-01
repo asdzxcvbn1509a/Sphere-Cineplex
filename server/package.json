@@ -14,7 +14,8 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio",
-    "test": "node --test"
+    "test": "node --test \"src/**/*.test.js\"",
+    "test:int": "node --env-file=.env.test --test --test-concurrency=1 \"test/integration/**/*.test.js\""
   },
   "prisma": {
     "seed": "node prisma/seed.js"

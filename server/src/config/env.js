@@ -11,13 +11,19 @@ export const SERVER_ROOT = path.resolve(currentDir, '../..');
 dotenv.config({ path: path.join(SERVER_ROOT, '.env'), quiet: true });
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1, 'ต้องกำหนด DATABASE_URL ใน server/.env'),
+  DATABASE_URL: z
+    .string({ error: 'ต้องกำหนด DATABASE_URL ใน server/.env' })
+    .min(1, 'ต้องกำหนด DATABASE_URL ใน server/.env'),
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   CLIENT_ORIGIN: z.string().default('http://localhost:5173'),
 
-  JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET สั้นเกินไป'),
-  JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET สั้นเกินไป'),
+  JWT_ACCESS_SECRET: z
+    .string({ error: 'ต้องกำหนด JWT_ACCESS_SECRET ใน server/.env' })
+    .min(16, 'JWT_ACCESS_SECRET สั้นเกินไป'),
+  JWT_REFRESH_SECRET: z
+    .string({ error: 'ต้องกำหนด JWT_REFRESH_SECRET ใน server/.env' })
+    .min(16, 'JWT_REFRESH_SECRET สั้นเกินไป'),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
@@ -60,7 +66,16 @@ const envSchema = z.object({
   MAX_SLIP_SIZE_MB: z.coerce.number().positive().default(5),
 });
 
-const parsed = envSchema.safeParse(process.env);
+/**
+ * ค่าที่เป็นสตริงว่างถือว่า "ไม่ได้ตั้ง" — .env.example มีบรรทัดอย่าง `SMTP_HOST=` ไว้ให้เติมทีหลัง
+ * ถ้าส่งสตริงว่างเข้า zod ตรง ๆ ช่องที่เป็น optional แต่มีเงื่อนไข (min(1), enum) จะไม่ผ่าน
+ * แล้วเซิร์ฟเวอร์เปิดไม่ขึ้นทั้งที่คัดลอก .env.example ไปใช้ตามขั้นตอนใน README ทุกอย่าง
+ */
+const definedEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([, value]) => value !== ''),
+);
+
+const parsed = envSchema.safeParse(definedEnv);
 
 if (!parsed.success) {
   const details = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
