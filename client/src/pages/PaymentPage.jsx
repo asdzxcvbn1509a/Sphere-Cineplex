@@ -1,32 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { QRCodeCanvas } from 'qrcode.react';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Download,
-  Hourglass,
-  Info,
-  QrCode,
-  Ticket,
-  Upload,
-} from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Hourglass, Ticket } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getBooking } from '../api/bookings.js';
 import { getPayment, uploadSlip } from '../api/payments.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import PaymentSummaryCard from '../components/payment/PaymentSummaryCard.jsx';
+import PromptPayPanel from '../components/payment/PromptPayPanel.jsx';
+import SlipUploadForm from '../components/payment/SlipUploadForm.jsx';
 import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
-import { formatCountdown, formatDate, formatMoney, formatTime } from '../utils/format.js';
+import { formatMoney, formatTime } from '../utils/format.js';
 
 const PaymentPage = () => {
   const { bookingId } = useParams();
   const navigate = useNavigate();
-  const { t, lang, pick } = useI18n();
+  const { t, lang } = useI18n();
   const toast = useToast();
 
   const [booking, setBooking] = useState(null);
@@ -34,10 +27,6 @@ const PaymentPage = () => {
   // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = หมดเวลาแล้ว/ไม่ได้นับ)
   const [holdDeadline, setHoldDeadline] = useState(null);
   const [state, setState] = useState({ loading: true, error: null });
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const qrWrapperRef = useRef(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -69,16 +58,6 @@ const PaymentPage = () => {
     load();
   }, [load]);
 
-  useEffect(() => {
-    if (!file) {
-      setPreview(null);
-      return undefined;
-    }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
   const status = booking?.status;
   // ส่งสลิปหลังหมดเวลาแล้วที่นั่งไม่ว่าง — การจองคงหมดเวลา แต่สลิปรอผู้ดูแลตรวจเพื่อคืนเงิน
   const lateWaiting = status === 'EXPIRED' && payment?.status === 'PENDING_VERIFICATION';
@@ -90,29 +69,17 @@ const PaymentPage = () => {
     load(true),
   );
 
-  const handleUpload = async (event) => {
-    event.preventDefault();
-    if (!file) return;
-    setUploading(true);
+  /** คืน true เมื่อส่งสำเร็จ — SlipUploadForm จะล้างไฟล์ที่เลือกไว้ */
+  const handleUpload = async (file) => {
     try {
       await uploadSlip(bookingId, file);
-      setFile(null);
       toast.success(t('payment.waitingTitle'));
       await load(true);
+      return true;
     } catch (error) {
       toast.error(apiError(error).message);
-    } finally {
-      setUploading(false);
+      return false;
     }
-  };
-
-  const downloadQr = () => {
-    const canvas = qrWrapperRef.current?.querySelector('canvas');
-    if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = `promptpay-${booking.code}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
   };
 
   if (state.loading) return <LoadingBlock label={t('common.loading')} />;
@@ -135,35 +102,7 @@ const PaymentPage = () => {
   const closed =
     status === 'CANCELLED' || (expired && !lateUpload && !lateWaiting && !lateRefund);
 
-  const uploadForm = (
-    <form onSubmit={handleUpload} className="card mt-4 p-5 sm:p-6">
-      <h2 className="flex items-center gap-2 font-semibold">
-        <Upload size={18} className="text-accent" /> {t('payment.uploadTitle')}
-      </h2>
-      <p className="mt-1 text-sm text-muted">{t('payment.uploadHint')}</p>
-
-      <label className="mt-4 flex min-h-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line px-4 py-6 text-center transition hover:border-accent/60 sm:min-h-72">
-        {preview ? (
-          <img src={preview} alt="" className="max-h-64 rounded-lg object-contain" />
-        ) : (
-          <Upload size={22} className="text-muted" />
-        )}
-        <span className="text-sm text-muted">
-          {file ? file.name : t('payment.chooseFile')}
-        </span>
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="hidden"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-        />
-      </label>
-
-      <Button type="submit" size="lg" className="mt-4 w-full" loading={uploading} disabled={!file}>
-        {t('payment.submitSlip')}
-      </Button>
-    </form>
-  );
+  const uploadForm = <SlipUploadForm onUpload={handleUpload} />;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -172,43 +111,31 @@ const PaymentPage = () => {
         {t('payment.bookingCode')}: <span className="font-mono text-accent">{booking.code}</span>
       </p>
 
-      <div className="card mb-4 p-4 sm:p-6">
-        <div className="flex gap-3 sm:gap-5">
-          <img
-            src={booking.showtime.movie.posterUrl}
-            alt=""
-            className="h-24 w-16 shrink-0 rounded-lg object-cover sm:h-45 sm:w-30"
-          />
-          <div className="min-w-0 flex-1 text-sm sm:text-base">
-            <p className="truncate font-semibold">{pick(booking.showtime.movie, 'title')}</p>
-            <p className="mt-0.5 text-muted">
-              {booking.showtime.theatre.name} · {formatDate(booking.showtime.startsAt, lang)}{' '}
-              {formatTime(booking.showtime.startsAt, lang)}
-            </p>
-            <p className="mt-1.5 text-muted">
-              {t('ticket.seats')}:{' '}
-              <span className="font-semibold text-fg">
-                {booking.seats.map((seat) => seat.label).join(', ')}
-              </span>
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-xs text-muted">{t('payment.amount')}</p>
-            <p className="text-xl font-bold text-accent sm:text-2xl">
-              {formatMoney(booking.totalAmount, lang)}
-            </p>
-            <p className="text-xs text-muted">{t('common.baht')}</p>
-          </div>
-        </div>
-      </div>
+      <PaymentSummaryCard
+        booking={booking}
+        amountLabel={t('payment.amount')}
+        amount={formatMoney(booking.totalAmount, lang)}
+      >
+        <p className="mt-1.5 text-muted">
+          {t('ticket.seats')}:{' '}
+          <span className="font-semibold text-fg">
+            {booking.seats.map((seat) => seat.label).join(', ')}
+          </span>
+        </p>
+      </PaymentSummaryCard>
 
       {status === 'PAID' && (
         <div className="card border-success/40 p-6 text-center sm:p-8">
           <CheckCircle2 className="mx-auto mb-3 text-success" size={40} />
           <h2 className="text-xl font-bold sm:text-2xl">{t('payment.approvedTitle')}</h2>
-          <Button as={Link} to={`/booking/${booking.id}/ticket`} className="mt-4">
-            <Ticket size={16} /> {t('payment.viewTicket')}
-          </Button>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Button as={Link} to={`/booking/${booking.id}/ticket`}>
+              <Ticket size={16} /> {t('payment.viewTicket')}
+            </Button>
+            <Button as={Link} to={`/booking/${booking.id}/receipt`} variant="secondary">
+              <FileText size={16} /> {t('payment.viewReceipt')}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -247,7 +174,7 @@ const PaymentPage = () => {
       )}
 
       {lateUpload && (
-        <>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           <div className="card border-accent/40 p-5 sm:p-6">
             <h2 className="flex items-center gap-2 text-lg font-bold">
               <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('payment.lateTitle')}
@@ -263,7 +190,7 @@ const PaymentPage = () => {
             </p>
           </div>
           {uploadForm}
-        </>
+        </div>
       )}
 
       {closed && (
@@ -290,57 +217,18 @@ const PaymentPage = () => {
             </div>
           )}
 
-          <div className="card p-5 sm:p-6">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 font-semibold">
-                <QrCode size={18} className="text-accent" /> {t('payment.scanTitle')}
-              </h2>
-              <div className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-right">
-                <p className="text-[10px] uppercase tracking-wide text-muted">
-                  {t('payment.timeLeft')}
-                </p>
-                <p className="font-mono text-lg font-bold leading-none text-accent">
-                  {formatCountdown(secondsLeft)}
-                </p>
-              </div>
-            </div>
+          {/* จอใหญ่วาง QR คู่กับช่องส่งสลิป เห็นทั้งสองขั้นตอนในจอเดียว */}
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <PromptPayPanel
+              qrPayload={payment.qrPayload}
+              reference={payment.reference}
+              promptPayId={payment.promptPayId}
+              secondsLeft={secondsLeft}
+              downloadName={`promptpay-${booking.code}`}
+            />
 
-            <p className="mb-6 text-sm text-muted">{t('payment.scanHint')}</p>
-
-            {/* style ทับขนาดที่ได้จาก size ทำให้ QR ย่อตามจอมือถือได้ ส่วนรูปที่บันทึกยังคมเท่าเดิม */}
-            <div ref={qrWrapperRef} className="mx-auto w-full max-w-80 rounded-2xl bg-white p-4">
-              <QRCodeCanvas
-                value={payment.qrPayload}
-                size={288}
-                level="M"
-                marginSize={1}
-                style={{ width: '100%', height: 'auto' }}
-              />
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-center text-sm">
-              <span className="text-muted">
-                {t('payment.reference')}:{' '}
-                <span className="font-mono text-fg">{payment.reference}</span>
-              </span>
-              <span className="text-muted">
-                PromptPay: <span className="font-mono text-fg">{payment.promptPayId}</span>
-              </span>
-            </div>
-
-            <div className="mt-4 flex justify-center">
-              <Button variant="secondary" onClick={downloadQr}>
-                <Download size={16} /> {t('payment.saveQr')}
-              </Button>
-            </div>
-
-            <p className="mt-6 flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-4 text-sm text-muted">
-              <Info size={16} className="mt-0.5 shrink-0" />
-              {t('payment.verifyNotice')}
-            </p>
+            {uploadForm}
           </div>
-
-          {uploadForm}
         </>
       )}
     </div>

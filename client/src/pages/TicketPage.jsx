@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
-import { ArrowLeft, Clapperboard } from 'lucide-react';
+import { Clapperboard, FileText } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getTicket } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
+import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import { formatDate, formatMoney, formatTime } from '../utils/format.js';
@@ -36,12 +38,14 @@ const TicketPage = () => {
 
   return (
     <div className="mx-auto max-w-lg px-4 py-8">
-      <Link
-        to="/my-bookings"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-fg"
-      >
-        <ArrowLeft size={16} /> {t('ticket.backToBookings')}
-      </Link>
+      <Breadcrumb
+        className="mb-4"
+        items={[
+          { label: t('nav.home'), to: '/' },
+          { label: t('nav.myBookings'), to: '/my-bookings' },
+          { label: t('ticket.title') },
+        ]}
+      />
 
       {/*
         การ์ดตั๋วใช้พื้นสว่างบนธีมมืด ตามข้อสรุปของผลสำรวจ:
@@ -117,6 +121,14 @@ const TicketPage = () => {
         </div>
 
       </div>
+
+      {ticket.payment?.receiptNo && (
+        <div className="mt-4 text-center">
+          <Button as={Link} to={`/booking/${ticket.id}/receipt`} variant="secondary" size="sm">
+            <FileText size={14} /> {t('ticket.viewReceipt')}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

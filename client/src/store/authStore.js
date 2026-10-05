@@ -15,21 +15,50 @@ import { refreshSession } from '../api/refresh.js';
  */
 const authApi = axios.create({ baseURL: '/api/auth', withCredentials: true });
 
+// ต่ออายุก่อนหมดจริงเล็กน้อย เผื่อเวลาเดินทางของ request
+const RENEW_MARGIN_MS = 30 * 1000;
+
+/**
+ * เวลาที่ควรต่ออายุ access token ตามนาฬิกาของเครื่องนี้
+ * ใช้อายุของ token (exp - iat เป็นเวลาของ server ทั้งคู่) นับจากตอนที่ได้รับ นาฬิกาเครื่องผู้ใช้เพี้ยนก็ไม่กระทบ
+ * แค่อ่าน payload ไม่ได้ตรวจลายเซ็น (server ตรวจเอง) — อ่านไม่ได้คืน null แล้วพึ่ง 401 → refresh แบบเดิม
+ */
+const renewAtOf = (accessToken) => {
+  try {
+    const payload = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const { iat, exp } = JSON.parse(atob(payload));
+    const lifetimeMs = (exp - iat) * 1000;
+    if (!(lifetimeMs > 0)) return null;
+    // ตั้งอายุไว้สั้นมาก (เช่นตอนทดสอบ) ก็ต่อที่ครึ่งอายุ ไม่ใช่ต่อทุก request
+    return Date.now() + lifetimeMs - Math.min(RENEW_MARGIN_MS, lifetimeMs / 2);
+  } catch {
+    return null;
+  }
+};
+
+/** token กับเวลาต่ออายุต้องเปลี่ยนคู่กันเสมอ */
+const withToken = (accessToken) => ({
+  accessToken,
+  accessTokenRenewAt: accessToken ? renewAtOf(accessToken) : null,
+});
+
 export const useAuthStore = create((set, get) => ({
   user: null,
   // เก็บ access token ไว้ใน memory เท่านั้น (ไม่แตะ localStorage) — XSS จึงขโมยไปใช้ต่อไม่ได้
   accessToken: null,
+  // ถึงเวลานี้แล้ว request interceptor ต่ออายุก่อนส่ง ไม่รอให้โดน 401 TOKEN_EXPIRED (ดู api/client.js)
+  accessTokenRenewAt: null,
   // loading = ยังไม่รู้ว่ามีเซสชันเดิมไหม, authed = ล็อกอินอยู่, guest = ยังไม่ล็อกอิน
   status: 'loading',
 
   /** เรียกหลังเข้าสู่ระบบหรือสมัครสมาชิกสำเร็จ */
-  setSession: ({ user, accessToken }) => set({ user, accessToken, status: 'authed' }),
+  setSession: ({ user, accessToken }) => set({ user, ...withToken(accessToken), status: 'authed' }),
 
-  setAccessToken: (accessToken) => set({ accessToken }),
+  setAccessToken: (accessToken) => set(withToken(accessToken)),
 
   setUser: (user) => set({ user }),
 
-  clearSession: () => set({ user: null, accessToken: null, status: 'guest' }),
+  clearSession: () => set({ user: null, ...withToken(null), status: 'guest' }),
 
   /**
    * เปิดเว็บใหม่ = ยังไม่มี access token ใน memory ลองขอจาก refresh cookie ก่อน
@@ -38,9 +67,9 @@ export const useAuthStore = create((set, get) => ({
   bootstrap: async () => {
     try {
       const { data } = await refreshSession();
-      set({ user: data.user, accessToken: data.accessToken, status: 'authed' });
+      set({ user: data.user, ...withToken(data.accessToken), status: 'authed' });
     } catch {
-      set({ user: null, accessToken: null, status: 'guest' });
+      set({ user: null, ...withToken(null), status: 'guest' });
     }
   },
 

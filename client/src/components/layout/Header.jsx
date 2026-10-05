@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Clapperboard, LayoutDashboard, LogOut, Menu, Ticket, User, X } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore, useAuthUser, useIsAdmin, useIsAuthenticated } from '../../store/authStore.js';
@@ -11,7 +11,7 @@ import Button from '../ui/Button.jsx';
 
 const navClass = ({ isActive }) =>
   clsx(
-    'rounded-lg px-3 py-2 text-sm font-medium transition',
+    'whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition',
     isActive ? 'bg-surface-2 text-accent' : 'text-muted hover:text-fg',
   );
 
@@ -22,7 +22,23 @@ const Header = () => {
   const user = useAuthUser();
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // ปิดเมนูมือถือเมื่อเปลี่ยนหน้า — รวมการกด back ของเบราว์เซอร์ที่ไม่ได้ผ่าน onClick ของลิงก์ในเมนู
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Escape ปิดเมนูได้เหมือน Modal
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [menuOpen]);
 
   // ตัวเลขมาจาก store กลาง หน้า /notifications อ่านแจ้งเตือนเมื่อไหร่ กระดิ่งจะเปลี่ยนตามทันที
   const unread = useUnreadCount();
@@ -53,11 +69,11 @@ const Header = () => {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur print:hidden">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
-        <Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
-          <Clapperboard className="text-accent" size={22} />
-          <span className="text-lg">{t('common.appName')}</span>
+        <Link to="/" className="flex min-w-0 items-center gap-2 font-bold tracking-tight">
+          <Clapperboard className="shrink-0 text-accent" size={22} />
+          <span className="truncate text-lg">{t('common.appName')}</span>
         </Link>
 
         <nav className="ml-4 hidden items-center gap-1 md:flex">
@@ -76,7 +92,7 @@ const Header = () => {
           )}
         </nav>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={toggleLang}
@@ -90,7 +106,7 @@ const Header = () => {
             <>
               <Link
                 to="/notifications"
-                className="relative rounded-lg p-2 text-muted transition hover:bg-surface-2 hover:text-fg"
+                className="relative rounded-lg p-2.5 text-muted transition hover:bg-surface-2 hover:text-fg"
                 aria-label={t('nav.notifications')}
               >
                 <Bell size={18} />
@@ -102,13 +118,15 @@ const Header = () => {
               </Link>
 
               <div className="hidden items-center gap-2 md:flex">
+                {/* ช่วง md–lg ที่ว่างไม่พอ (เมนูผู้ดูแล + ชื่อยาว) แสดงแค่ไอคอน ชื่อยาวจอใหญ่ก็ตัดด้วย … */}
                 <Link
                   to="/profile"
                   className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-1.5 text-sm transition hover:text-accent"
                   title={t('nav.profile')}
+                  aria-label={t('nav.profile')}
                 >
-                  <User size={14} className="text-muted" />
-                  {user?.name}
+                  <User size={14} className="shrink-0 text-muted" />
+                  <span className="hidden max-w-40 truncate lg:inline">{user?.name}</span>
                 </Link>
                 <Button variant="ghost" size="sm" onClick={handleLogout} title={t('nav.logout')}>
                   <LogOut size={16} />
@@ -128,9 +146,11 @@ const Header = () => {
 
           <button
             type="button"
-            className="rounded-lg p-2 text-muted transition hover:bg-surface-2 hover:text-fg md:hidden"
+            className="rounded-lg p-2.5 text-muted transition hover:bg-surface-2 hover:text-fg md:hidden"
             onClick={() => setMenuOpen((open) => !open)}
             aria-label="เมนู"
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
           >
             {menuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -138,7 +158,7 @@ const Header = () => {
       </div>
 
       {menuOpen && (
-        <div className="border-t border-line bg-surface px-4 py-3 md:hidden">
+        <div id="mobile-menu" className="border-t border-line bg-surface px-4 py-3 md:hidden">
           <nav className="flex flex-col gap-1">
             <NavLink to="/" end className={navClass} onClick={() => setMenuOpen(false)}>
               {t('nav.home')}

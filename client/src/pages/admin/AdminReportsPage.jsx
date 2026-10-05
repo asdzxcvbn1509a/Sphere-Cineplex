@@ -61,19 +61,20 @@ const AdminReportsPage = () => {
     <div className="p-4 sm:p-6">
       <h1 className="mb-5 text-2xl font-bold sm:text-3xl">{t('admin.reports')}</h1>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div>
+      {/* มือถือ: ตัวเลือกการจัดกลุ่มกับปุ่ม CSV เต็มแถว ช่องวันที่สองช่องวางคู่กัน */}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+        <div className="col-span-2">
           <span className="mb-1.5 block text-sm font-medium text-muted">
             {t('admin.reportsPage.groupBy')}
           </span>
-          <div className="inline-flex rounded-xl border border-line bg-surface p-1">
+          <div className="flex w-full rounded-xl border border-line bg-surface p-1 sm:inline-flex sm:w-auto">
             {GROUPS.map((group) => (
               <button
                 key={group.key}
                 type="button"
                 onClick={() => setGroupBy(group.key)}
                 className={clsx(
-                  'rounded-lg px-3 py-1.5 text-sm font-medium transition',
+                  'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition sm:flex-none',
                   groupBy === group.key ? 'bg-accent text-ink' : 'text-muted hover:text-fg',
                 )}
               >
@@ -83,14 +84,14 @@ const AdminReportsPage = () => {
           </div>
         </div>
 
-        <Field label={t('admin.reportsPage.from')} className="w-40">
+        <Field label={t('admin.reportsPage.from')} className="sm:w-40">
           <Input
             type="date"
             value={range.from}
             onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))}
           />
         </Field>
-        <Field label={t('admin.reportsPage.to')} className="w-40">
+        <Field label={t('admin.reportsPage.to')} className="sm:w-40">
           <Input
             type="date"
             value={range.to}
@@ -98,7 +99,7 @@ const AdminReportsPage = () => {
           />
         </Field>
 
-        <Button variant="secondary" onClick={downloadCsv}>
+        <Button variant="secondary" className="col-span-2" onClick={downloadCsv}>
           <Download size={15} /> {t('admin.reportsPage.exportCsv')}
         </Button>
       </div>
@@ -139,8 +140,9 @@ const AdminReportsPage = () => {
             </div>
           )}
 
+          {/* มี 4 คอลัมน์ ลดระยะในเซลล์บนมือถือก็พอดีจอ ไม่ต้องเลื่อนตารางไปด้านข้าง */}
           <div className="card mb-6 overflow-x-auto">
-            <table className="w-full min-w-140 text-sm">
+            <table className="w-full text-sm sm:min-w-140 max-sm:[&_td]:px-2 max-sm:[&_th]:px-2">
               <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <th className="px-4 py-3 font-medium">
@@ -195,8 +197,9 @@ const AdminReportsPage = () => {
 
           <h2 className="mb-1.5 text-sm font-medium text-muted">{t('admin.reportsPage.occupancy')}</h2>
           <div className="card divide-y divide-line/60">
+            {/* มือถือแถบสัดส่วนลงไปเป็นเส้นบางเต็มแถวด้านล่าง แทนการซ่อนทิ้ง */}
             {occupancy.map((item) => (
-              <div key={item.showtimeId} className="flex items-center gap-4 px-4 py-3">
+              <div key={item.showtimeId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium sm:text-base">
                     {lang === 'en' ? item.movie.titleEn : item.movie.titleTh}
@@ -206,7 +209,7 @@ const AdminReportsPage = () => {
                   </p>
                 </div>
 
-                <div className="hidden h-3 w-48 overflow-hidden rounded-full bg-surface-2 sm:block">
+                <div className="order-last h-1.5 basis-full overflow-hidden rounded-full bg-surface-2 sm:order-0 sm:h-3 sm:w-48 sm:basis-auto">
                   <div
                     className={clsx(
                       'h-full rounded-full',

@@ -18,8 +18,18 @@ import Pagination from '../../components/ui/Pagination.jsx';
 import usePolling from '../../hooks/usePolling.js';
 import { formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
 
-/** สลิปที่ลูกค้าส่งหลังการจองหมดเวลาแล้ว และเอาที่นั่งเดิมคืนไม่ได้ — การจองยังเป็น EXPIRED */
-const isLateSlip = (payment) => payment.booking.status === 'EXPIRED';
+/** สลิปส่วนต่างเปลี่ยนที่นั่ง — อนุมัติแล้วย้ายที่นั่งจริงและออกใบเสร็จส่วนต่าง */
+const isTopUp = (payment) => payment.kind === 'SEAT_CHANGE_TOPUP';
+
+/**
+ * สลิปที่ส่งหลังหมดเวลาแล้วและเอาที่นั่งคืนไม่ได้ — อนุมัติ = เข้าคิวคืนเงิน
+ * ค่าตั๋ว: การจองยังเป็น EXPIRED · ส่วนต่างเปลี่ยนที่นั่ง: คำขอยังเป็น EXPIRED (การจองเป็น PAID ตามเดิม)
+ */
+const isLateSlip = (payment) => {
+  return isTopUp(payment)
+    ? payment.seatChange?.status === 'EXPIRED'
+    : payment.booking.status === 'EXPIRED';
+};
 
 const AdminPaymentsPage = () => {
   const { t, lang } = useI18n();
@@ -67,7 +77,9 @@ const AdminPaymentsPage = () => {
       toast.success(
         isLateSlip(payment)
           ? t('admin.paymentQueue.lateApproved', { code: payment.booking.code })
-          : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
+          : isTopUp(payment)
+            ? t('admin.paymentQueue.topUpApproved', { code: payment.booking.code })
+            : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
       );
       await load(true);
     } catch (error) {
@@ -110,6 +122,7 @@ const AdminPaymentsPage = () => {
           <article key={payment.id} className="card flex flex-col gap-4 p-4 sm:flex-row sm:p-6">
             <SlipImage
               bookingId={payment.booking.id}
+              paymentId={isTopUp(payment) ? payment.id : undefined}
               className="h-60 w-full shrink-0 rounded-lg border border-line bg-surface-2 sm:w-38"
             />
 
@@ -129,9 +142,14 @@ const AdminPaymentsPage = () => {
                 {formatDateTime(payment.booking.showtime.startsAt, lang)}
               </p>
 
+              {isTopUp(payment) && (
+                <p className="mt-3 rounded-lg border border-info/40 bg-info/10 px-3 py-2 text-xs text-info sm:text-sm">
+                  {t('admin.paymentQueue.topUp')}
+                </p>
+              )}
               {isLateSlip(payment) && (
                 <p className="mt-3 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent sm:text-sm">
-                  {t('admin.paymentQueue.lateSlip')}
+                  {isTopUp(payment) ? t('admin.paymentQueue.lateTopUp') : t('admin.paymentQueue.lateSlip')}
                 </p>
               )}
 
@@ -144,7 +162,9 @@ const AdminPaymentsPage = () => {
 
                 <dt className="text-muted">{t('ticket.seats')}</dt>
                 <dd className="text-right font-medium">
-                  {payment.booking.seats.map((seat) => seat.label).join(', ')}
+                  {isTopUp(payment)
+                    ? `${payment.seatChange.fromSeats.join(', ')} → ${payment.seatChange.toSeats.join(', ')}`
+                    : payment.booking.seats.map((seat) => seat.label).join(', ')}
                 </dd>
 
                 <dt className="text-muted">{t('payment.reference')}</dt>

@@ -1,4 +1,5 @@
 import * as paymentService from '../services/payments.js';
+import { sendSlip } from '../lib/slipStorage.js';
 
 // @ENDPOINT GET http://localhost:4000/api/payments/:bookingId
 export const getPayment = async (req, res, next) => {
@@ -27,15 +28,16 @@ export const uploadSlip = async (req, res, next) => {
   }
 };
 
-/** รูปสลิป — เจ้าของการจองหรือ admin เท่านั้น (client ดึงเป็น blob พร้อม auth header) */
+/** รูปสลิป — เจ้าของการจองหรือ admin เท่านั้น (client ดึงเป็น blob พร้อม auth header) · ?payment= = สลิปส่วนต่าง */
 // @ENDPOINT GET http://localhost:4000/api/payments/:bookingId/slip
 export const getSlipImage = async (req, res, next) => {
   try {
-    const filePath = await paymentService.getSlipFilePath({
+    const fileName = await paymentService.getSlipFileName({
       bookingId: req.params.bookingId,
+      paymentId: req.validatedQuery.payment,
       requester: req.user,
     });
-    res.sendFile(filePath);
+    await sendSlip(res, 'payment', fileName);
   } catch (error) {
     next(error);
   }
@@ -45,11 +47,12 @@ export const getSlipImage = async (req, res, next) => {
 // @ENDPOINT GET http://localhost:4000/api/payments/:bookingId/refund-slip
 export const getRefundSlipImage = async (req, res, next) => {
   try {
-    const filePath = await paymentService.getRefundSlipFilePath({
+    const fileName = await paymentService.getRefundSlipFileName({
       bookingId: req.params.bookingId,
+      paymentId: req.validatedQuery.payment,
       requester: req.user,
     });
-    res.sendFile(filePath);
+    await sendSlip(res, 'refund', fileName);
   } catch (error) {
     next(error);
   }

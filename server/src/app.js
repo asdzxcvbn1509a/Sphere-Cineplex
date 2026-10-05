@@ -11,6 +11,7 @@ import authRoutes from './routes/auth.js';
 import movieRoutes from './routes/movies.js';
 import showtimeRoutes from './routes/showtimes.js';
 import bookingRoutes from './routes/bookings.js';
+import seatChangeRoutes from './routes/seatChanges.js';
 import paymentRoutes from './routes/payments.js';
 import notificationRoutes from './routes/notifications.js';
 import adminRoutes from './routes/admin.js';
@@ -32,14 +33,25 @@ export const createApp = () => {
   app.use(cookieParser());
   if (isDev) app.use(morgan('dev'));
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, service: 'theatre-reservation-api', time: new Date().toISOString() });
+  app.get('/api/health', (req, res) => {
+    const forwardedFor = String(req.headers['x-forwarded-for'] ?? '');
+    res.json({
+      ok: true,
+      service: 'theatre-reservation-api',
+      time: new Date().toISOString(),
+      // ไว้ตั้ง TRUST_PROXY ตอนขึ้นระบบจริง (ดู DEPLOY.md) — เปิดผ่าน URL หน้าเว็บแล้วตั้ง TRUST_PROXY = proxyHops
+      // Vercel เขียนทับ X-Forwarded-For ให้เหลือแค่ไอพีของผู้ใช้ จำนวนรายการที่เห็นจึงเท่ากับจำนวน proxy ที่ต้องเชื่อพอดี
+      // ตั้งถูกแล้ว ip ต้องเป็นไอพีจริงของผู้เรียก ไม่ใช่ไอพีของ proxy ตัวใดตัวหนึ่ง
+      ip: req.ip,
+      proxyHops: forwardedFor.split(',').filter((part) => part.trim()).length,
+    });
   });
 
   app.use('/api/auth', authRoutes);
   app.use('/api/movies', movieRoutes);
   app.use('/api/showtimes', showtimeRoutes);
   app.use('/api/bookings', bookingRoutes);
+  app.use('/api/seat-changes', seatChangeRoutes);
   app.use('/api/payments', paymentRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/admin', adminRoutes);

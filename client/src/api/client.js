@@ -6,11 +6,29 @@ import { refreshSession } from './refresh.js';
  * access token อยู่ใน authStore ที่เดียว (เก็บใน memory ไม่แตะ localStorage)
  * interceptor อ่านผ่าน getState() ได้โดยตรงเพราะ zustand ไม่ผูกกับ React
  * ถ้ารีเฟรชหน้า เราขอ token ใหม่จาก /auth/refresh ซึ่งใช้ httpOnly cookie
+ * และต่ออายุให้ล่วงหน้าก่อน token หมดอายุ ใช้งานปกติจึงไม่เจอ 401 TOKEN_EXPIRED
  */
 export const api = axios.create({ baseURL: '/api', withCredentials: true });
 
-api.interceptors.request.use((config) => {
-  const { accessToken } = useAuthStore.getState();
+/**
+ * ถึงเวลาต่ออายุแล้ว (accessTokenRenewAt ใน authStore) ต่อก่อนส่ง — หลายคำขอพร้อมกันได้ refresh จริงครั้งเดียว
+ * ต่อไม่สำเร็จก็ส่งใบเดิมไป ให้ response interceptor จัดการ 401 ตามปกติ
+ * ไม่ clearSession ตรงนี้ เพราะเน็ตหลุดชั่วคราวไม่ควรทำให้หลุดจากระบบ
+ */
+const currentAccessToken = async () => {
+  const { accessToken, accessTokenRenewAt } = useAuthStore.getState();
+  if (!accessToken || !accessTokenRenewAt || Date.now() < accessTokenRenewAt) return accessToken;
+  try {
+    const { data } = await refreshSession();
+    useAuthStore.getState().setAccessToken(data.accessToken);
+    return data.accessToken;
+  } catch {
+    return accessToken;
+  }
+};
+
+api.interceptors.request.use(async (config) => {
+  const accessToken = await currentAccessToken();
   if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
   return config;
 });

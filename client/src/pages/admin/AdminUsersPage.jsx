@@ -144,8 +144,8 @@ const AdminUsersPage = () => {
       <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('admin.userPage.title')}</h1>
       <p className="mb-5 text-sm text-muted">{t('admin.userPage.subtitle')}</p>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Field label={t('admin.userPage.role')} className="w-44">
+      <div className="mb-4 grid gap-3 sm:flex sm:flex-wrap sm:items-end">
+        <Field label={t('admin.userPage.role')} className="sm:w-44">
           <Select
             value={filters.role}
             onChange={(event) =>
@@ -158,7 +158,7 @@ const AdminUsersPage = () => {
           </Select>
         </Field>
 
-        <Field label={t('common.search')} className="min-w-56 flex-1">
+        <Field label={t('common.search')} className="sm:min-w-56 sm:flex-1">
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
@@ -180,7 +180,8 @@ const AdminUsersPage = () => {
 
       {!state.loading && !state.error && (
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-200 text-sm">
+          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
+          <table className="stack-table w-full min-w-190 text-sm">
             <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">{t('admin.userPage.user')}</th>
@@ -212,8 +213,10 @@ const AdminUsersPage = () => {
                       )}
                       <p className="text-[11px] text-muted">{user.email}</p>
                     </td>
-                    <td className="px-4 py-3 text-muted">{user.phone}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-muted" data-label={t('register.phoneLabel')}>
+                      {user.phone}
+                    </td>
+                    <td className="px-4 py-3" data-label={t('admin.userPage.role')}>
                       <span
                         className={clsx(
                           'rounded-md border px-2 py-1 text-[11px]',
@@ -225,7 +228,7 @@ const AdminUsersPage = () => {
                         {t(`admin.userPage.role${user.role}`)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right" data-label={t('admin.userPage.bookings')}>
                       {user.bookingCount > 0 ? (
                         // ลิงก์ไปหน้าการจองพร้อมคำค้น จะได้ไม่ต้องพิมพ์เบอร์ซ้ำตอนลูกค้าโทรมาถาม
                         <Link
@@ -238,11 +241,11 @@ const AdminUsersPage = () => {
                         <span className="text-muted">0</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-[11px] text-muted">
+                    <td className="px-4 py-3 text-[11px] text-muted" data-label={t('admin.userPage.joined')}>
                       {formatDateTime(user.createdAt, lang)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex flex-wrap justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"

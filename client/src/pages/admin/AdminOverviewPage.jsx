@@ -44,12 +44,13 @@ const QueuePanel = ({ icon: Icon, title, to, rows }) => {
         </Link>
       </div>
 
+      {/* มือถือซ่อนชื่อลูกค้า เหลือรหัส ยอด และสถานะ พอดีจอโดยไม่ต้องเลื่อนตาราง */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-md text-sm">
+        <table className="w-full text-sm sm:min-w-md">
           <thead className="text-left text-xs text-muted">
             <tr>
               <th className="py-2 pr-3 font-medium">{t('payment.bookingCode')}</th>
-              <th className="py-2 pr-3 font-medium">{t('admin.paymentQueue.customer')}</th>
+              <th className="hidden py-2 pr-3 font-medium sm:table-cell">{t('admin.paymentQueue.customer')}</th>
               <th className="py-2 pr-3 font-medium">{t('bookings.total')}</th>
               <th className="py-2 font-medium">{t('common.status')}</th>
             </tr>
@@ -65,7 +66,7 @@ const QueuePanel = ({ icon: Icon, title, to, rows }) => {
             {rows.map((row) => (
               <tr key={row.id} className="border-t border-line/60">
                 <td className="py-2.5 pr-3 font-mono text-xs text-accent">{row.code}</td>
-                <td className="max-w-40 truncate py-2.5 pr-3">{row.customer}</td>
+                <td className="hidden max-w-40 truncate py-2.5 pr-3 sm:table-cell">{row.customer}</td>
                 <td className="py-2.5 pr-3">{formatMoney(row.amount, lang)}</td>
                 <td className="py-2.5">
                   <StatusBadge status={row.status} label={t(`admin.paymentStatus.${row.status}`)} />

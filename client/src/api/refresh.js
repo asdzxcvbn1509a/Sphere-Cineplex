@@ -44,12 +44,20 @@ const withCrossTabLock = (task) => {
   return task();
 };
 
-/** คืน axios response ของ /auth/refresh — { user, accessToken } อยู่ใน data */
+/**
+ * คืน axios response ของ /auth/refresh — { user, accessToken } อยู่ใน data
+ * เบราว์เซอร์นี้ไม่มีเซสชัน (server ตอบ 204) จะ reject เหมือนต่ออายุไม่สำเร็จ ผู้เรียกจัดการใน catch เดิมได้เลย
+ */
 export const refreshSession = () => {
   if (!inflight) {
-    inflight = withCrossTabLock(postRefresh).finally(() => {
-      inflight = null;
-    });
+    inflight = withCrossTabLock(postRefresh)
+      .then((response) => {
+        if (!response.data?.accessToken) throw new Error('NO_SESSION');
+        return response;
+      })
+      .finally(() => {
+        inflight = null;
+      });
   }
   return inflight;
 };

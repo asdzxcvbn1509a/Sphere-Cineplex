@@ -8,8 +8,8 @@ const templates = {
   PAYMENT_APPROVED: (ctx) => ({
     titleTh: 'ยืนยันการชำระเงินแล้ว',
     titleEn: 'Payment confirmed',
-    bodyTh: `การจอง ${ctx.code} ได้รับการยืนยันแล้ว เปิดดู E-Ticket ได้ทันที`,
-    bodyEn: `Booking ${ctx.code} is confirmed. Your e-ticket is ready.`,
+    bodyTh: `การจอง ${ctx.code} ได้รับการยืนยันแล้ว เปิดดู E-Ticket และใบเสร็จ${ctx.receiptNo ? ` ${ctx.receiptNo}` : ''} ได้ทันที`,
+    bodyEn: `Booking ${ctx.code} is confirmed. Your e-ticket and receipt${ctx.receiptNo ? ` ${ctx.receiptNo}` : ''} are ready.`,
   }),
   REFUND_COMPLETED: (ctx) => ({
     titleTh: 'คืนเงินเรียบร้อยแล้ว',
@@ -55,6 +55,50 @@ const templates = {
     titleEn: 'Your movie starts soon',
     bodyTh: `"${ctx.movieTh}" รอบ ${ctx.timeText} ที่ ${ctx.theatre} — เตรียม E-Ticket ให้พร้อมนะ`,
     bodyEn: `"${ctx.movieEn}" at ${ctx.timeText}, ${ctx.theatre} — have your e-ticket ready.`,
+  }),
+  // ย้ายเสร็จแล้ว — byAdmin = ผู้ดูแลย้ายให้ (เช่น ที่นั่งชำรุด) · diff ติดลบ = ส่วนต่างรอโอนคืน · receiptNo = ใบเสร็จส่วนต่าง
+  SEATS_CHANGED: (ctx) => {
+    const moveTh = `จาก ${ctx.from} เป็น ${ctx.to}`;
+    const moveEn = `from ${ctx.from} to ${ctx.to}`;
+    const extraTh =
+      (ctx.receiptNo ? ` ชำระส่วนต่าง ${ctx.diff} บาทแล้ว (ใบเสร็จ ${ctx.receiptNo})` : '') +
+      (ctx.diff < 0 ? ` ส่วนต่าง ${-ctx.diff} บาทจะโอนคืนเข้าบัญชีที่แจ้งไว้` : '');
+    const extraEn =
+      (ctx.receiptNo ? ` The ${ctx.diff} THB difference is paid (receipt ${ctx.receiptNo}).` : '') +
+      (ctx.diff < 0 ? ` We will refund the ${-ctx.diff} THB difference to your bank account.` : '');
+    return {
+      titleTh: 'เปลี่ยนที่นั่งแล้ว',
+      titleEn: 'Seats changed',
+      bodyTh: ctx.byAdmin
+        ? `ผู้ดูแลระบบย้ายที่นั่งของการจอง ${ctx.code} ${moveTh}${ctx.reason ? ` (${ctx.reason})` : ''} — E-Ticket ใช้ QR เดิมได้เลย`
+        : `การจอง ${ctx.code} เปลี่ยนที่นั่ง${moveTh} เรียบร้อยแล้ว${extraTh} — E-Ticket ใช้ QR เดิมได้เลย`,
+      bodyEn: ctx.byAdmin
+        ? `Our staff moved booking ${ctx.code} ${moveEn}${ctx.reason ? ` (${ctx.reason})` : ''}. Your e-ticket QR stays the same.`
+        : `Booking ${ctx.code} moved ${moveEn}.${extraEn} Your e-ticket QR stays the same.`,
+    };
+  },
+  // closed = คำขอปิดไปแล้ว (รอบเริ่มฉาย หรือเป็นสลิปที่ส่งหลังหมดเวลา) จึงไม่ได้ให้โอนใหม่
+  SEAT_CHANGE_REJECTED: (ctx) => ({
+    titleTh: 'สลิปส่วนต่างไม่ผ่านการตรวจสอบ',
+    titleEn: 'Seat change slip was rejected',
+    bodyTh: ctx.closed
+      ? `สลิปส่วนต่างเปลี่ยนที่นั่งของการจอง ${ctx.code} ไม่ผ่านการตรวจสอบ (${ctx.reason}) คำขอนี้ปิดแล้ว ที่นั่งเดิมยังเป็นของคุณ หากโอนเงินไปแล้วจริงกรุณาติดต่อเจ้าหน้าที่พร้อมรหัสการจอง`
+      : `สลิปส่วนต่างเปลี่ยนที่นั่งของการจอง ${ctx.code} ไม่ผ่านการตรวจสอบ (${ctx.reason}) กรุณาโอนและส่งสลิปใหม่อีกครั้ง — ระหว่างนี้ที่นั่งเดิมยังเป็นของคุณ`,
+    bodyEn: ctx.closed
+      ? `The seat change slip for booking ${ctx.code} was rejected (${ctx.reason}) and the request is closed. You keep your original seats. If you did transfer the money, please contact us with your booking code.`
+      : `The seat change slip for booking ${ctx.code} was rejected (${ctx.reason}). Please pay and upload the slip again — you keep your original seats meanwhile.`,
+  }),
+  SEAT_CHANGE_EXPIRED: (ctx) => ({
+    titleTh: 'หมดเวลาโอนส่วนต่าง',
+    titleEn: 'Seat change expired',
+    bodyTh: `คำขอเปลี่ยนที่นั่งของการจอง ${ctx.code} หมดเวลาโอนส่วนต่าง ที่นั่งเดิมยังเป็นของคุณตามเดิม`,
+    bodyEn: `The seat change for booking ${ctx.code} expired before the difference was paid. You keep your original seats.`,
+  }),
+  SEAT_CHANGE_LATE_REFUND: (ctx) => ({
+    titleTh: 'ได้รับส่วนต่างแล้ว — จะโอนคืนให้',
+    titleEn: 'Difference received — refund on the way',
+    bodyTh: `เราได้รับเงินส่วนต่าง ${ctx.amount} บาท ของการจอง ${ctx.code} แต่ที่นั่งใหม่ถูกปล่อยไปก่อนสลิปมาถึง จึงจะโอนคืนให้ ที่นั่งเดิมยังเป็นของคุณ กรุณาแจ้งบัญชีรับเงินคืนที่หน้า "การจองของฉัน"`,
+    bodyEn: `We received the ${ctx.amount} THB difference for booking ${ctx.code}, but the new seats were released before your slip arrived, so we will refund you. You keep your original seats. Please add your bank account on the "My bookings" page.`,
   }),
   SHOWTIME_CANCELLED: (ctx) => ({
     titleTh: 'รอบฉายถูกยกเลิก',

@@ -18,12 +18,13 @@ const PENDING_REFUND_WHERE = { status: 'REFUND_PENDING' };
 export const getQueueCounts = async () => {
   const [pendingSlips, refunds] = await Promise.all([
     prisma.payment.count({ where: PENDING_SLIP_WHERE }),
-    prisma.payment.aggregate({ where: PENDING_REFUND_WHERE, _count: true, _sum: { amount: true } }),
+    // ยอดที่ต้องโอนจริง (refundAmount) — การจองที่เคยเปลี่ยนที่นั่ง ยอดคืนไม่เท่ายอดที่จ่ายตอนจอง
+    prisma.payment.aggregate({ where: PENDING_REFUND_WHERE, _count: true, _sum: { refundAmount: true } }),
   ]);
   return {
     pendingSlips,
     pendingRefunds: refunds._count,
-    pendingRefundAmount: refunds._sum.amount ?? 0,
+    pendingRefundAmount: refunds._sum.refundAmount ?? 0,
   };
 };
 
@@ -32,6 +33,7 @@ const QUEUE_ROW_SELECT = {
   id: true,
   status: true,
   amount: true,
+  refundAmount: true,
   booking: { select: { id: true, code: true, user: { select: { name: true } } } },
 };
 
@@ -40,7 +42,8 @@ const toQueueRow = (payment) => ({
   bookingId: payment.booking.id,
   code: payment.booking.code,
   customer: payment.booking.user.name,
-  amount: payment.amount,
+  // แถวคืนเงินแสดงยอดที่ต้องโอนคืนจริง ส่วนแถวสลิปไม่มี refundAmount จึงเป็นยอดที่โอนเข้ามา
+  amount: payment.refundAmount ?? payment.amount,
   status: payment.status,
 });
 
@@ -171,16 +174,18 @@ export const getSalesReport = async ({ from, to, groupBy = 'day' } = {}) => {
         ? { refundDueAt: { ...(start && { gte: start }), ...(end && { lt: end }) } }
         : {}),
     },
-    select: { amount: true, status: true },
+    select: { amount: true, refundAmount: true, status: true },
   });
+  // ยอดที่โอนคืนจริง — การจองที่เคยเปลี่ยนที่นั่ง ยอดคืนไม่เท่ายอดที่จ่ายตอนจอง
+  const refundOf = (p) => p.refundAmount ?? p.amount;
 
   const refunds = {
     count: refundPayments.length,
-    amount: refundPayments.reduce((sum, p) => sum + p.amount, 0),
+    amount: refundPayments.reduce((sum, p) => sum + refundOf(p), 0),
     pendingCount: refundPayments.filter((p) => p.status === 'REFUND_PENDING').length,
     pendingAmount: refundPayments
       .filter((p) => p.status === 'REFUND_PENDING')
-      .reduce((sum, p) => sum + p.amount, 0),
+      .reduce((sum, p) => sum + refundOf(p), 0),
   };
 
   return {

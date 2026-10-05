@@ -78,6 +78,11 @@ Authorization: Bearer {{token}}
 GET {{host}}/bookings/{{bookingId}}/ticket
 Authorization: Bearer {{token}}
 
+### ── 10.1 ใบเสร็จรับเงิน (E-Receipt) — ออกตอนผู้ดูแลอนุมัติสลิป (A4) ──
+### ยังไม่มีใบเสร็จ (ยังไม่จ่าย / โอนหลังหมดเวลาแล้วรอคืนเงิน) → 403 RECEIPT_NOT_READY
+GET {{host}}/bookings/{{bookingId}}/receipt
+Authorization: Bearer {{token}}
+
 ### ── 11. ยกเลิกการจอง ─────────────────────────────────
 ### ใบที่จ่ายแล้วต้องส่ง refundBankName + refundAccountNo มาด้วย (ไม่งั้น 400 REFUND_ACCOUNT_REQUIRED)
 POST {{host}}/bookings/{{bookingId}}/cancel
@@ -93,6 +98,45 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "refundBankName": "กสิกรไทย", "refundAccountNo": "123-4-56789-0" }
+
+### ── 13. เปลี่ยนที่นั่ง (ใบที่จ่ายแล้ว — ทำหลัง A4 อนุมัติสลิป และก่อนข้อ 11 ยกเลิก) ──
+### seatIds = ชุดใหม่ทั้งชุด (รวมที่นั่งที่คงไว้) จำนวนต้องเท่าเดิม
+### ราคาเท่าเดิม/ถูกลง → ย้ายทันที (ถูกลงต้องส่ง refundBankName + refundAccountNo ส่วนต่างเข้าคิวคืนเงิน)
+### แพงขึ้น (เช่น ย้ายจากแถวหน้าไปแถวพรีเมียม) → seatChange.status = PENDING_PAYMENT ต้องโอนส่วนต่างที่ข้อ 13.1–13.2
+### 409 SEAT_TAKEN / SEAT_CHANGE_PENDING / SEAT_CHANGE_LIMIT · 403 SEAT_CHANGE_WINDOW_CLOSED (ต้องก่อนฉาย 30 นาที)
+# @name seatChange
+POST {{host}}/bookings/{{bookingId}}/seat-changes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "seatIds": ["{{seatmap.response.body.rows.0.seats.1.id}}"] }
+
+@seatChangeId = {{seatChange.response.body.seatChange.id}}
+
+### ── 13.1 คำขอเปลี่ยนที่นั่ง + QR ส่วนต่าง (holdSecondsLeft, canUploadSlip) ──
+# @name seatChangeDetail
+GET {{host}}/seat-changes/{{seatChangeId}}
+Authorization: Bearer {{token}}
+
+### ── 13.2 ส่งสลิปส่วนต่าง (แก้ path ให้ชี้ไฟล์รูปจริง) → เข้าคิวตรวจเดียวกับ A3 ──
+POST {{host}}/seat-changes/{{seatChangeId}}/slip
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="slip"; filename="slip.png"
+Content-Type: image/png
+
+< ./uploads/example-slip.png
+------Boundary--
+
+### ── 13.3 ยกเลิกคำขอที่ยังไม่ได้ส่งสลิป — ที่นั่งใหม่ที่กันไว้ถูกปล่อย ที่นั่งเดิมไม่ได้แตะ ──
+POST {{host}}/seat-changes/{{seatChangeId}}/cancel
+Authorization: Bearer {{token}}
+
+### ── 13.4 ใบเสร็จส่วนต่าง (หลังผู้ดูแลอนุมัติสลิปส่วนต่างที่ A4) ──
+GET {{host}}/bookings/{{bookingId}}/receipt?payment={{seatChangeDetail.response.body.seatChange.payment.id}}
+Authorization: Bearer {{token}}
 
 
 ### ══════════ ฝั่งผู้ดูแลระบบ ══════════
@@ -112,6 +156,7 @@ Authorization: Bearer {{adminToken}}
 
 ### ── A3. คิวสลิปรอตรวจสอบ (แบ่งหน้า: page, pageSize ≤ 100) ──
 ### รวมสลิปที่ส่งหลังหมดเวลา (booking.status = EXPIRED) — อนุมัติแล้วเข้าคิวคืนเงินแทนการออกตั๋ว
+### และสลิปส่วนต่างเปลี่ยนที่นั่ง (kind = SEAT_CHANGE_TOPUP) — อนุมัติแล้วย้ายที่นั่งจริงพร้อมออกใบเสร็จส่วนต่าง
 # @name queue
 GET {{host}}/admin/payments?status=PENDING_VERIFICATION&page=1
 Authorization: Bearer {{adminToken}}
@@ -130,6 +175,23 @@ Content-Type: application/json
 ### ── A6. การจองทั้งหมด (แบ่งหน้า — ได้ total/page/pageSize กลับมาด้วย) ──
 GET {{host}}/admin/bookings?page=1&pageSize=20
 Authorization: Bearer {{adminToken}}
+
+### ── A6.1 ใบเสร็จของการจองจากข้อ 6 — ผู้ดูแลเปิดใบเสร็จของลูกค้าได้ทุกใบ ──
+GET {{host}}/bookings/{{bookingId}}/receipt
+Authorization: Bearer {{adminToken}}
+
+### ── A6.2 ค้นการจองด้วยเลขที่ใบเสร็จ (q ค้นได้ทั้งรหัสการจอง เลขที่ใบเสร็จ ชื่อ และเบอร์) ──
+GET {{host}}/admin/bookings?q=RC-2026-000001
+Authorization: Bearer {{adminToken}}
+
+### ── A6.3 ย้ายที่นั่งแทนลูกค้า (ที่นั่งชำรุด / ลูกค้าโทรมาขอ) ──
+### โซนเดิมทุกที่เท่านั้น (400 SEAT_ZONE_MISMATCH) จึงไม่มีส่วนต่าง · ไม่ติดเส้นตายและโควตาของลูกค้า
+### reason แสดงในแจ้งเตือนที่ลูกค้าได้รับ
+POST {{host}}/admin/bookings/{{bookingId}}/change-seats
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "seatIds": ["{{seatmap.response.body.rows.0.seats.2.id}}"], "reason": "ที่นั่งเดิมชำรุด" }
 
 ### ── A7. คิวคืนเงิน ───────────────────────────────────
 GET {{host}}/admin/refunds?status=REFUND_PENDING&page=1

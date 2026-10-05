@@ -5,9 +5,13 @@ import { generateBookingCode, generatePaymentReference } from '../src/utils/code
 import { createPromptPayPayload } from '../src/utils/promptpay.js';
 import { BANGKOK_OFFSET_MS, bangkokDateKey } from '../src/utils/datetime.js';
 import { hashPassword } from '../src/utils/password.js';
+import { issueReceiptNo } from '../src/services/receipts.js';
 
-/** รหัสผ่านของบัญชีตัวอย่าง — ใช้เฉพาะตอนพัฒนา ระบบจริงต้องให้ผู้ใช้ตั้งเอง */
-const DEMO_PASSWORD = 'Password123';
+/**
+ * รหัสผ่านของบัญชีตัวอย่าง — Password123 เขียนอยู่ใน README ใช้ได้แค่ตอนพัฒนา
+ * seed เว็บที่เปิดให้คนนอกเข้าได้ต้องตั้ง SEED_PASSWORD ไม่งั้นใครก็ล็อกอินเป็นผู้ดูแลได้ (ดู DEPLOY.md)
+ */
+const DEMO_PASSWORD = process.env.SEED_PASSWORD || 'Password123';
 
 /** สร้าง Date จากวัน+ชั่วโมงตามเวลาไทย */
 const bangkokTime = (dateKey, hour, minute = 0) => {
@@ -130,6 +134,9 @@ const reset = async () => {
   await prisma.notification.deleteMany();
   await prisma.bookingSeat.deleteMany();
   await prisma.payment.deleteMany();
+  await prisma.seatChange.deleteMany();
+  // ตัวนับเลขใบเสร็จเริ่มใหม่ด้วย ใบตัวอย่างจะได้เริ่มที่ 000001
+  await prisma.receiptCounter.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.zonePrice.deleteMany();
   await prisma.showtime.deleteMany();
@@ -211,16 +218,19 @@ const main = async () => {
   }
   console.log(`   ✓ รอบฉาย ${showtimeCount} รอบ (${DAYS_AHEAD} วันข้างหน้า)`);
 
-  await seedSampleBookings(customer.id);
+  await seedSampleBookings(customer);
 
   console.log('\n✅ seed เสร็จสมบูรณ์');
   console.log('   ผู้ดูแลระบบ : admin@cinebook.test (หรือเบอร์ 0800000000)');
   console.log('   ผู้ใช้ทั่วไป : somchai@example.test (หรือเบอร์ 0891234567)');
-  console.log(`   รหัสผ่านทั้งสองบัญชี : ${DEMO_PASSWORD}\n`);
+  // รหัสที่ตั้งเองไม่พิมพ์ออกมา — กันไปค้างอยู่ใน log หรือประวัติเทอร์มินัล
+  console.log(
+    `   รหัสผ่านทั้งสองบัญชี : ${process.env.SEED_PASSWORD ? '(ตามค่า SEED_PASSWORD)' : DEMO_PASSWORD}\n`,
+  );
 };
 
-/** ใส่การจองที่ชำระแล้วไว้บ้าง เพื่อให้หน้ารายงานของ admin มีข้อมูลให้ดูทันที */
-const seedSampleBookings = async (userId) => {
+/** ใส่การจองที่ชำระแล้วไว้บ้าง เพื่อให้หน้ารายงานของ admin และหน้าใบเสร็จมีข้อมูลให้ดูทันที */
+const seedSampleBookings = async (customer) => {
   const showtimes = await prisma.showtime.findMany({
     take: 3,
     orderBy: { startsAt: 'asc' },
@@ -228,6 +238,7 @@ const seedSampleBookings = async (userId) => {
   });
 
   let created = 0;
+  const paid = [];
   for (const [index, showtime] of showtimes.entries()) {
     const seats = await prisma.seat.findMany({
       where: { theatreId: showtime.theatreId },
@@ -252,7 +263,7 @@ const seedSampleBookings = async (userId) => {
     const booking = await prisma.booking.create({
       data: {
         code: generateBookingCode(),
-        userId,
+        userId: customer.id,
         showtimeId: showtime.id,
         status: 'PAID',
         totalAmount: total,
@@ -269,9 +280,11 @@ const seedSampleBookings = async (userId) => {
       },
     });
 
-    await prisma.payment.create({
+    const payment = await prisma.payment.create({
       data: {
         bookingId: booking.id,
+        // ใบหลัก (ค่าตั๋วตอนจอง) — booking.payment อ่านผ่านตัวนี้
+        mainBookingId: booking.id,
         amount: total,
         qrPayload: createPromptPayPayload(total),
         reference: generatePaymentReference(),
@@ -280,10 +293,21 @@ const seedSampleBookings = async (userId) => {
         verifiedAt: paidAt,
       },
     });
+    paid.push({ paymentId: payment.id, paidAt, seatSnapshot });
     created += 1;
   }
 
-  console.log(`   ✓ ตัวอย่างการจองที่ชำระแล้ว ${created} รายการ`);
+  // ออกเลขใบเสร็จตามเวลาที่จ่ายจริง (เก่าไปใหม่) แบบเดียวกับตอนอนุมัติสลิป — ลูปข้างบนสร้างใบที่จ่ายล่าสุดก่อน
+  paid.sort((a, b) => a.paidAt - b.paidAt);
+  for (const { paymentId, paidAt, seatSnapshot } of paid) {
+    const receiptNo = await issueReceiptNo(prisma, paidAt);
+    await prisma.payment.update({
+      where: { id: paymentId },
+      data: { receiptNo, receiptName: customer.name, receiptSeats: seatSnapshot },
+    });
+  }
+
+  console.log(`   ✓ ตัวอย่างการจองที่ชำระแล้ว ${created} รายการ (พร้อมใบเสร็จ)`);
 };
 
 main()

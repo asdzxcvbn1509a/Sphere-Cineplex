@@ -50,7 +50,8 @@ const printToConsole = ({ to, subject, text }) => {
  */
 export const sendMail = async ({ to, subject, text, html }) => {
   if (!isMailConfigured) {
-    printToConsole({ to, subject, text });
+    // ตอนรันเทสต์ไม่ต้องพิมพ์ — ทุกการอนุมัติสลิปส่งใบเสร็จ ถ้าพิมพ์หมดผลเทสต์จะจมอยู่ใต้เนื้ออีเมล
+    if (env.NODE_ENV !== 'test') printToConsole({ to, subject, text });
     return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' };
   }
 

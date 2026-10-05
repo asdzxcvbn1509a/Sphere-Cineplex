@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { ArrowLeftRight, FileText, Search } from 'lucide-react';
 import { apiError } from '../../api/client.js';
 import { cancelBooking, listAllBookings } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
@@ -18,18 +18,50 @@ import Pagination from '../../components/ui/Pagination.jsx';
 import { formatDateTime, formatMoney } from '../../utils/format.js';
 
 const STATUSES = ['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID', 'CANCELLED', 'EXPIRED'];
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ตัวกรองเก็บไว้ใน URL ด้วย — เปิดใบเสร็จ/ย้ายที่นั่งในแท็บเดิมแล้วกดย้อนกลับ จะได้ตารางเดิมกลับมาครบ
+ * ค่าที่ server ไม่รับ (เช่นแก้ URL เอง) ปัดเป็นค่าเริ่มต้น จะได้ไม่ขึ้น 400 ทั้งหน้า
+ */
+const readFilters = (params) => {
+  const status = params.get('status') ?? '';
+  const date = params.get('date') ?? '';
+  return {
+    status: STATUSES.includes(status) ? status : '',
+    date: DATE_PATTERN.test(date) ? date : '',
+    q: (params.get('q') ?? '').trim(),
+    page: Math.max(1, Number.parseInt(params.get('page'), 10) || 1),
+  };
+};
+
+/** ใส่เฉพาะค่าที่ไม่ใช่ค่าเริ่มต้น — /admin/bookings เฉย ๆ = ไม่กรอง */
+const toSearchParams = ({ status, date, q, page }) => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (date) params.set('date', date);
+  if (q) params.set('q', q);
+  if (page > 1) params.set('page', String(page));
+  return params;
+};
+
+/** จำนวนครั้งที่ย้ายที่นั่งสำเร็จ (ทั้งลูกค้าย้ายเองและผู้ดูแลย้ายให้) */
+const movedCount = (booking) => {
+  return (booking.seatChange?.history ?? []).filter((change) => change.status === 'COMPLETED').length;
+};
 
 const AdminBookingsPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
   const [bookings, setBookings] = useState([]);
-  // ?q= มาจากลิงก์ในหน้าจัดการผู้ใช้ (กดที่จำนวนการจองแล้วมาดูรายการของคนนั้นเลย)
-  const [searchParams] = useSearchParams();
-  const initialQuery = searchParams.get('q') ?? '';
+  const location = useLocation();
+  // ตัวกรองเริ่มจาก URL — กลับมาจากใบเสร็จ/ย้ายที่นั่ง
+  // หรือ ?q= จากลิงก์ในหน้าจัดการผู้ใช้ (กดที่จำนวนการจองแล้วมาดูรายการของคนนั้นเลย)
+  const [searchParams, setSearchParams] = useSearchParams();
   // page อยู่ใน filters ด้วย — เปลี่ยนตัวกรองแล้วกลับหน้า 1 ได้ในการ set ครั้งเดียว ไม่โหลดซ้ำสองรอบ
-  const [filters, setFilters] = useState({ status: '', date: '', q: initialQuery, page: 1 });
+  const [filters, setFilters] = useState(() => readFilters(searchParams));
   const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
-  const [search, setSearch] = useState(initialQuery);
+  const [search, setSearch] = useState(filters.q);
   const [state, setState] = useState({ loading: true, error: null });
   const [cancelTarget, setCancelTarget] = useState(null);
   const [reason, setReason] = useState('');
@@ -39,9 +71,12 @@ const AdminBookingsPage = () => {
     setState({ loading: true, error: null });
     listAllBookings(filters)
       .then(({ data }) => {
-        // หน้าสุดท้ายว่างลงหลังทำรายการ (เช่นยกเลิกใบสุดท้ายของหน้า) — ถอยไปหน้าก่อนหน้าแทนโชว์ตารางว่าง
-        if (data.bookings.length === 0 && filters.page > 1) {
-          setFilters((current) => ({ ...current, page: current.page - 1 }));
+        // หน้าเกินหน้าสุดท้าย (ยกเลิกใบสุดท้ายของหน้า หรือ ?page= ใน URL เก่า) — ไปหน้าสุดท้ายที่มีข้อมูลแทนโชว์ตารางว่าง
+        // คิดจาก total ในคำตอบ ไม่ลบหนึ่งจากหน้าปัจจุบัน — ?page=500 ไปถึงในรอบเดียว
+        // และคำตอบซ้ำ (StrictMode โหลดสองรอบ) ไม่ถอยเลยไปถึงหน้า 0 ซึ่ง server ตอบ 422
+        const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+        if (data.bookings.length === 0 && filters.page > lastPage) {
+          setFilters((current) => (current.page > lastPage ? { ...current, page: lastPage } : current));
           return;
         }
         setBookings(data.bookings);
@@ -66,6 +101,18 @@ const AdminBookingsPage = () => {
     return () => clearTimeout(timer);
   }, [search]);
 
+  /**
+   * เขียนตัวกรองกลับลง URL ทุกครั้งที่เปลี่ยน — ย้อนกลับมาหน้านี้ก็ได้ตัวกรองและหน้าเดิม
+   * replace ไม่เพิ่มประวัติทุกครั้งที่พิมพ์/เปลี่ยนหน้า · preventScrollReset ไม่ให้ ScrollRestoration ดีดจอขึ้นบนสุด
+   * เทียบกับ URL ปัจจุบันก่อน — เขียนแล้วค่าตรงกันจึงไม่วนเขียนซ้ำ
+   */
+  useEffect(() => {
+    const next = toSearchParams(filters);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true, preventScrollReset: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
+
   const handleCancel = async () => {
     setBusy(true);
     try {
@@ -85,9 +132,9 @@ const AdminBookingsPage = () => {
     <div className="p-4 sm:p-6">
       <h1 className="mb-5 text-2xl font-bold sm:text-3xl">{t('admin.bookings')}</h1>
 
-      {/* ทุกช่องกรองทำงานทันทีที่เปลี่ยนค่า จึงไม่ต้องมีปุ่มค้นหาแล้ว */}
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Field label={t('common.status')} className="w-44">
+      {/* ทุกช่องกรองทำงานทันทีที่เปลี่ยนค่า จึงไม่ต้องมีปุ่มค้นหาแล้ว — มือถือวางสถานะคู่วันที่ ช่องค้นหาเต็มแถว */}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+        <Field label={t('common.status')} className="sm:w-44">
           <Select
             value={filters.status}
             onChange={(event) =>
@@ -103,7 +150,7 @@ const AdminBookingsPage = () => {
           </Select>
         </Field>
 
-        <Field label={t('movie.selectDate')} className="w-44">
+        <Field label={t('movie.selectDate')} className="sm:w-44">
           <Input
             type="date"
             value={filters.date}
@@ -113,7 +160,7 @@ const AdminBookingsPage = () => {
           />
         </Field>
 
-        <Field label={t('common.search')} className="min-w-56 flex-1">
+        <Field label={t('common.search')} className="col-span-2 sm:min-w-56 sm:flex-1">
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
@@ -123,7 +170,7 @@ const AdminBookingsPage = () => {
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="TRS-XXXXXX / 08X-XXX-XXXX"
+              placeholder="TRS-XXXXXX / RC-… / 08X-XXX-XXXX"
               className="pl-9"
             />
           </div>
@@ -135,7 +182,8 @@ const AdminBookingsPage = () => {
 
       {!state.loading && !state.error && (
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-200 text-sm">
+          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
+          <table className="stack-table w-full min-w-190 text-sm">
             <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">{t('payment.bookingCode')}</th>
@@ -159,33 +207,71 @@ const AdminBookingsPage = () => {
                 <tr key={booking.id} className="border-b border-line/60 last:border-0">
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs text-accent">{booking.code}</span>
+                    {booking.payment?.receiptNo && (
+                      <p className="font-mono text-[11px] text-fg/80">{booking.payment.receiptNo}</p>
+                    )}
                     <p className="text-[11px] text-muted">{formatDateTime(booking.createdAt, lang)}</p>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" data-label={t('admin.paymentQueue.customer')}>
                     {booking.user?.name}
                     <p className="text-[11px] text-muted">{booking.user?.phone}</p>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" data-label={t('admin.showtimes')}>
                     {lang === 'en' ? booking.showtime.movie.titleEn : booking.showtime.movie.titleTh}
                     <p className="text-[11px] text-muted">
                       {booking.showtime.theatre.name} · {formatDateTime(booking.showtime.startsAt, lang)}
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="px-4 py-3 text-muted" data-label={t('ticket.seats')}>
                     {booking.seats.map((seat) => seat.label).join(', ')}
+                    {/* เคยย้ายที่นั่ง / มีคำขอรอโอนส่วนต่าง — ลูกค้าโทรมาถามจะได้เห็นทันทีว่าที่นั่งเปลี่ยนมาแล้ว */}
+                    {booking.seatChange?.open && (
+                      <p className="text-[11px] text-accent">{t('seatChange.awaitingPayment')}</p>
+                    )}
+                    {movedCount(booking) > 0 && (
+                      <p className="text-[11px]">{t('seatChange.movedCount', { count: movedCount(booking) })}</p>
+                    )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" data-label={t('common.status')}>
                     <StatusBadge status={booking.status} label={t(`bookings.status${booking.status}`)} />
                   </td>
-                  <td className="px-4 py-3 text-right text-base font-bold">
+                  <td className="px-4 py-3 text-right text-base font-bold" data-label={t('bookings.total')}>
                     {formatMoney(booking.totalAmount, lang)}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    {['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID'].includes(booking.status) && (
-                      <Button variant="ghost" size="sm" onClick={() => setCancelTarget(booking)}>
-                        <span className="text-danger">{t('common.cancel')}</span>
-                      </Button>
-                    )}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {/*
+                        เปิดในแท็บเดิม — ตัวกรองอยู่ใน URL กดย้อนกลับก็ได้ตารางเดิม
+                        state.from ให้ breadcrumb "การจอง" ของหน้าปลายทางพากลับมาหน้าเดิมพร้อมตัวกรองด้วย
+                      */}
+                      {booking.payment?.receiptNo && (
+                        <Button
+                          as={Link}
+                          to={`/booking/${booking.id}/receipt`}
+                          state={{ from: location }}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          <FileText size={14} /> {t('bookings.viewReceipt')}
+                        </Button>
+                      )}
+                      {booking.status === 'PAID' && !booking.seatChange?.open && (
+                        <Button
+                          as={Link}
+                          to={`/admin/bookings/${booking.id}/change-seats`}
+                          state={{ from: location }}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          <ArrowLeftRight size={14} /> {t('seatChange.action')}
+                        </Button>
+                      )}
+                      {['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID'].includes(booking.status) && (
+                        <Button variant="ghost" size="sm" onClick={() => setCancelTarget(booking)}>
+                          <span className="text-danger">{t('common.cancel')}</span>
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

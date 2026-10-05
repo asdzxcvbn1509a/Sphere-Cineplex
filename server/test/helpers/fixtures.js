@@ -85,7 +85,10 @@ const TINY_PNG = Buffer.from(
   'base64',
 );
 
-/** เลียนแบบสิ่งที่ multer ส่งต่อมาให้ service: ไฟล์ถูกเขียนลงโฟลเดอร์จริงแล้ว + path/filename */
+/**
+ * เลียนแบบสิ่งที่ middleware อัปโหลดส่งต่อมาให้ service: ไฟล์ถูกเก็บลงที่เก็บแล้ว (เทสต์ใช้ดิสก์) + filename
+ * path มีไว้ให้เทสต์เช็กว่าไฟล์ยังอยู่หรือถูกลบไปแล้ว — service เองใช้แค่ filename
+ */
 export const makeSlipFile = async ({ kind = 'payment', content = TINY_PNG, ext = '.png' } = {}) => {
   const dir = kind === 'refund' ? REFUND_SLIP_DIR : PAYMENT_SLIP_DIR;
   await fs.mkdir(dir, { recursive: true });
@@ -113,11 +116,17 @@ export const submitSlip = async (booking, user) => {
 export const createPaidBooking = async ({ user, admin, showtime, seats }) => {
   const booking = await book({ user, showtime, seats });
   await submitSlip(booking, user);
-  const payment = await prisma.payment.findUnique({ where: { bookingId: booking.id } });
+  const payment = await paymentOf(booking.id);
   return approvePayment({ paymentId: payment.id, adminId: admin.id });
 };
 
-export const paymentOf = (bookingId) => prisma.payment.findUnique({ where: { bookingId } });
+/** ใบชำระเงินหลัก (ค่าตั๋วตอนจอง) — รายการส่วนต่างจากการเปลี่ยนที่นั่งใช้ paymentOfSeatChange */
+export const paymentOf = (bookingId) => prisma.payment.findUnique({ where: { mainBookingId: bookingId } });
+
+/** รายการเงินส่วนต่างของคำขอเปลี่ยนที่นั่ง (โอนเพิ่มหรือคืน) */
+export const paymentOfSeatChange = (seatChangeId) => {
+  return prisma.payment.findUnique({ where: { seatChangeId } });
+};
 
 export const bookingOf = (bookingId) => prisma.booking.findUnique({ where: { id: bookingId } });
 

@@ -146,6 +146,17 @@ export const cancelBooking = async (bookingId, reason) => {
   });
 };
 
+/**
+ * ย้ายที่นั่งแทนลูกค้า — โซนเดิมทุกที่เท่านั้น (400 SEAT_ZONE_MISMATCH) จึงไม่มีส่วนต่างราคา
+ * ไม่ติดเส้นตายและโควตาของลูกค้า · reason แสดงในแจ้งเตือนที่ลูกค้าได้รับ
+ */
+export const changeSeats = async (bookingId, { seatIds, reason }) => {
+  return await api.post(`/admin/bookings/${bookingId}/change-seats`, {
+    seatIds,
+    ...(reason && { reason }),
+  });
+};
+
 // ---------- ตรวจสลิป ----------
 
 /**

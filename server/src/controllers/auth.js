@@ -5,6 +5,10 @@ const setRefreshCookie = (res, token) => {
   res.cookie(REFRESH_COOKIE, token, refreshCookieOptions());
 };
 
+const clearRefreshCookie = (res) => {
+  res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(), maxAge: undefined });
+};
+
 // @ENDPOINT POST http://localhost:4000/api/auth/register
 export const register = async (req, res, next) => {
   try {
@@ -36,13 +40,24 @@ export const login = async (req, res, next) => {
 // @ENDPOINT POST http://localhost:4000/api/auth/refresh
 export const refresh = async (req, res, next) => {
   try {
+    const presented = req.cookies?.[REFRESH_COOKIE];
+    // ไม่มี cookie = ผู้ใช้ทั่วไปที่ยังไม่ล็อกอิน ไม่ใช่ข้อผิดพลาด — หน้าเว็บถามที่นี่ทุกครั้งที่เปิด
+    // ถ้าตอบ 401 คนที่ยังไม่ล็อกอินทุกคนจะเห็น error สีแดงใน console ทุกครั้งที่โหลดหน้า
+    if (!presented) {
+      res.status(204).end();
+      return;
+    }
+
     const { refreshToken, ...rest } = await authService.rotateSession(
-      req.cookies?.[REFRESH_COOKIE],
+      presented,
       req.headers['user-agent'],
     );
     setRefreshCookie(res, refreshToken);
     res.json(rest);
   } catch (error) {
+    // ใบนี้ใช้ต่อไม่ได้แล้ว (ไม่รู้จัก/หมดอายุ/ถูกเพิกถอน) ลบทิ้ง — ไม่งั้นเบราว์เซอร์ส่งใบเสียมาได้ 401 ซ้ำทุกครั้งที่เปิดหน้า
+    // ไม่ลบตอน 409 REFRESH_RACE: อีกแท็บเพิ่งได้ใบใหม่ไป cookie ในเบราว์เซอร์ตอนนี้เป็นใบดีแล้ว
+    if (error?.status === 401) clearRefreshCookie(res);
     next(error);
   }
 };
@@ -51,7 +66,7 @@ export const refresh = async (req, res, next) => {
 export const logout = async (req, res, next) => {
   try {
     await authService.revokeSession(req.cookies?.[REFRESH_COOKIE]);
-    res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(), maxAge: undefined });
+    clearRefreshCookie(res);
     res.json({ ok: true });
   } catch (error) {
     next(error);

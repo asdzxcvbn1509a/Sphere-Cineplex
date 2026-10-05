@@ -1,4 +1,5 @@
 import { releaseExpiredHolds } from '../services/bookings.js';
+import { releaseExpiredSeatChanges } from '../services/seatChanges.js';
 import { sendShowtimeReminders } from './reminders.js';
 
 const timers = [];
@@ -27,6 +28,7 @@ const scheduleJob = (name, task, intervalMs) => {
 
 export const startBackgroundJobs = () => {
   scheduleJob('ปล่อยที่นั่งที่หมดเวลาชำระเงิน', releaseExpiredHolds, 30 * 1000);
+  scheduleJob('ปล่อยที่นั่งของคำขอเปลี่ยนที่นั่งที่ไม่ได้โอนส่วนต่าง', releaseExpiredSeatChanges, 30 * 1000);
   scheduleJob('แจ้งเตือนก่อนรอบฉาย', sendShowtimeReminders, 60 * 1000);
 };
 

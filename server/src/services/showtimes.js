@@ -82,7 +82,8 @@ export const getShowtimeById = async (id) => {
 /**
  * ผังที่นั่งของรอบฉาย
  * ทุกแถวใน BookingSeat = ที่นั่งที่ยังถูกยึดอยู่จริง (การจองที่ยกเลิก/หมดอายุจะถูกลบทิ้ง)
- * จึงแยกได้แค่ว่าเป็น BOOKED (จ่ายแล้ว) หรือ HELD (กำลังรอชำระ/รอตรวจสลิป)
+ * จึงแยกได้แค่ว่าเป็น BOOKED (จ่ายแล้ว) หรือ HELD (กำลังรอชำระ/รอตรวจสลิป
+ * รวมที่นั่งใหม่ที่กันไว้ให้คำขอเปลี่ยนที่นั่งที่ยังรอโอนส่วนต่าง แม้การจองนั้นจะจ่ายแล้วก็ตาม)
  */
 export const getSeatMap = async (showtimeId) => {
   const showtime = await prisma.showtime.findUnique({
@@ -102,12 +103,15 @@ export const getSeatMap = async (showtimeId) => {
     }),
     prisma.bookingSeat.findMany({
       where: { showtimeId },
-      select: { seatId: true, booking: { select: { status: true } } },
+      select: { seatId: true, seatChangeId: true, booking: { select: { status: true } } },
     }),
   ]);
 
   const statusBySeatId = new Map(
-    occupied.map((row) => [row.seatId, row.booking.status === 'PAID' ? 'BOOKED' : 'HELD']),
+    occupied.map((row) => [
+      row.seatId,
+      row.booking.status === 'PAID' && !row.seatChangeId ? 'BOOKED' : 'HELD',
+    ]),
   );
 
   const prices = toPriceMap(showtime.zonePrices, showtime.basePrice);

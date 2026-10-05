@@ -3,6 +3,7 @@ import * as theatreService from '../services/theatres.js';
 import * as showtimeService from '../services/showtimes.js';
 import * as bookingService from '../services/bookings.js';
 import * as paymentService from '../services/payments.js';
+import * as seatChangeService from '../services/seatChanges.js';
 import * as reportService from '../services/reports.js';
 import * as userService from '../services/users.js';
 
@@ -231,6 +232,22 @@ export const cancelBooking = async (req, res, next) => {
       reason: req.body.reason,
     });
     res.json({ booking });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** ย้ายที่นั่งแทนลูกค้า (ที่นั่งชำรุด ลูกค้าโทรมาขอ) — โซนเดิมเท่านั้น ไม่ติดเส้นตาย/โควตาของลูกค้า */
+// @ENDPOINT POST http://localhost:4000/api/admin/bookings/:id/change-seats
+export const changeSeats = async (req, res, next) => {
+  try {
+    const result = await seatChangeService.adminChangeSeats({
+      bookingId: req.params.id,
+      adminId: req.user.id,
+      seatIds: req.body.seatIds,
+      reason: req.body.reason,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

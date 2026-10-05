@@ -4,16 +4,9 @@
  *
  * ส่งตามภาษาที่ผู้ใช้กำลังเปิดหน้าเว็บอยู่ตอนกดขอลิงก์ ไม่ใช่ภาษาของเซิร์ฟเวอร์
  */
+import { escapeHtml } from './html.js';
 
 const APP_NAME = 'CineBook';
-
-const escapeHtml = (value) => {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-};
 
 const COPY = {
   th: {

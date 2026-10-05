@@ -1,0 +1,39 @@
+# Render Blueprint ของ API — สร้างด้วย Dashboard → New → Blueprint แล้วเลือก repo นี้ (ขั้นตอนเต็มดู DEPLOY.md)
+# หน้าเว็บ (client/) ไม่ได้อยู่ที่นี่ ขึ้น Vercel แยกต่างหาก
+services:
+  - type: web
+    name: theatre-reservation-api
+    runtime: node
+    region: singapore # ให้อยู่ region เดียวกับ Supabase — ทุก request คุยกับฐานหลายรอบ ข้ามทวีปจะช้าทุกหน้า
+    plan: free
+    rootDir: server
+    # --include=dev: prisma CLI เป็น devDependency และ NODE_ENV=production ทำให้ npm ci ข้ามกลุ่มนี้ไป
+    # db:deploy รันเฉพาะ migration ที่ยังไม่เคยรัน จึงปลอดภัยที่จะรันทุกครั้งที่ build
+    # ห้ามใส่ db:seed ตรงนี้เด็ดขาด — seed ล้างทุกตารางก่อนสร้างข้อมูลตัวอย่าง จะกลายเป็นล้างฐานจริงทุกครั้งที่ deploy
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run db:deploy
+    # ไม่ใช้ npm start เพราะเป็น node --watch สำหรับตอนพัฒนา
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # จำนวน proxy หน้า API (Vercel → Cloudflare ของ Render → load balancer ของ Render)
+      # ค่าที่ถูกต้องดูได้จาก proxyHops ของ <URL Vercel>/api/health — แก้ที่ไฟล์นี้แล้ว push
+      # (ค่าที่กำหนดในไฟล์นี้จะเขียนทับค่าที่แก้ใน dashboard ทุกครั้งที่ Blueprint sync)
+      - key: TRUST_PROXY
+        value: "3"
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # sync: false = Render ถามค่าตอนสร้าง Blueprint ครั้งแรก แล้วแก้ต่อใน dashboard ได้
+      - key: DATABASE_URL # Session pooler ของ Supabase (ไม่ใช่ direct connection — Render ต่อ IPv6 ไม่ได้)
+        sync: false
+      - key: CLIENT_ORIGIN # URL ของหน้าเว็บบน Vercel เช่น https://<project>.vercel.app
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: PROMPTPAY_ID # QR ชำระเงินใช้เลขนี้จริง — ต้องเป็นเลขพร้อมเพย์ของคุณเอง
+        sync: false

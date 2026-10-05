@@ -4,8 +4,9 @@ const localeOf = (lang) => {
   return lang === 'en' ? 'en-GB' : 'th-TH';
 };
 
-export const formatMoney = (amount, lang = 'th') => {
-  return new Intl.NumberFormat(localeOf(lang)).format(Number(amount ?? 0));
+/** options ส่งต่อให้ Intl.NumberFormat เช่น ใบเสร็จใช้ทศนิยม 2 ตำแหน่ง */
+export const formatMoney = (amount, lang = 'th', options) => {
+  return new Intl.NumberFormat(localeOf(lang), options).format(Number(amount ?? 0));
 };
 
 export const formatDate = (value, lang = 'th', options) => {

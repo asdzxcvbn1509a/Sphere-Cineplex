@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import {
   BarChart3,
   Clapperboard,
@@ -46,14 +46,32 @@ const AdminLayout = () => {
   // ลูกค้าส่งสลิปหรือกดยกเลิกเข้ามาได้ตลอด แม้ผู้ดูแลจะเปิดค้างอยู่หน้าอื่น
   usePolling(refreshCounts, 30000, true);
 
+  // จอเล็กเมนูเป็นแถบเลื่อนแนวนอน — เปิดหน้าไหนก็เลื่อนเมนูของหน้านั้นมาไว้กลางแถบ (เช่นเปิด /admin/reports ตรง ๆ)
+  const navRef = useRef(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector('[aria-current="page"]');
+    if (!active || nav.scrollWidth <= nav.clientWidth) return;
+    nav.scrollTo({ left: active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2 });
+  }, [location.pathname]);
+
   // ใช้ header เดียวกับฝั่งผู้ใช้ ปุ่มกลับหน้าแรก สลับภาษา และชื่อผู้ใช้จึงไม่ต้องมีซ้ำใน sidebar
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
+      {/* เปิดหน้าใหม่ให้เริ่มที่บนสุด ไม่ค้างตำแหน่งที่เลื่อนไว้ในหน้าก่อน */}
+      <ScrollRestoration />
       <Header />
 
       <div className="flex flex-1 flex-col lg:flex-row">
         <aside className="border-b border-line bg-surface lg:w-48 lg:shrink-0 lg:border-b-0 lg:border-r">
-          <nav className="flex gap-1 overflow-x-auto px-3 py-3 lg:flex-col lg:overflow-visible">
+          {/*
+            จอใหญ่เมนูติดใต้ header ตอนเลื่อนรายการยาว ๆ ไม่ต้องเลื่อนกลับขึ้นไปเปลี่ยนหน้า
+            สูงไม่เกินพื้นที่ใต้ header — จอเตี้ย (เช่นซูมเบราว์เซอร์) จะเลื่อนในเมนูได้ ไม่บังเมนูท้าย ๆ
+          */}
+          <nav
+            ref={navRef}
+            className="relative flex gap-1 overflow-x-auto px-3 py-3 lg:sticky lg:top-16 lg:max-h-[calc(100dvh-4rem)] lg:flex-col lg:overflow-y-auto"
+          >
             {items.map(({ to, end, key, icon: Icon, badge }) => {
               const count = badge ? counts[badge] : 0;
               return (
@@ -85,7 +103,8 @@ const AdminLayout = () => {
           </nav>
         </aside>
 
-        <main className="min-w-0 flex-1 bg-ink">
+        {/* เว้นที่ให้แถบสรุปของหน้าย้ายที่นั่ง — ใส่ที่ main ไม่ใช่ root พื้นเมนูข้างจะได้ยืดลงไปถึงล่างสุด */}
+        <main className="min-w-0 flex-1 bg-ink pb-(--bottom-bar,0px)">
           <Outlet />
         </main>
       </div>

@@ -8,7 +8,7 @@ import EmptyState from '../components/ui/EmptyState.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 
-const gridClass = 'grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 lg:gap-5';
+const gridClass = 'grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-6 lg:gap-5';
 
 const HomePage = () => {
   const { t } = useI18n();
@@ -43,9 +43,10 @@ const HomePage = () => {
   const comingSoon = filtered.filter((movie) => movie.status === 'COMING_SOON');
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <section className="mb-8 overflow-hidden rounded-3xl border border-line bg-linear-to-br from-surface via-surface to-accent/10 px-6 py-10 sm:px-10 sm:py-14">
-        <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{t('home.heroTitle')}</h1>
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
+      {/* มือถือย่อ hero ลง โปสเตอร์แถวแรกจะโผล่ขึ้นมาในจอแรกเลย */}
+      <section className="mb-6 overflow-hidden rounded-3xl border border-line bg-linear-to-br from-surface via-surface to-accent/10 px-5 py-8 sm:mb-8 sm:px-10 sm:py-14">
+        <h1 className="text-2xl font-bold leading-tight sm:text-4xl">{t('home.heroTitle')}</h1>
         <p className="mt-3 max-w-2xl text-sm text-muted sm:text-base">{t('home.heroSubtitle')}</p>
 
         <div className="relative mt-6 max-w-2xl">

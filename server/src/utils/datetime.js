@@ -37,6 +37,18 @@ export const formatBangkokShort = (date, lang = 'th') => {
   }).format(new Date(date));
 };
 
+/** วันเวลาแบบเต็มตามเวลาไทย ใช้ในอีเมลใบเสร็จ เช่น "2 ตุลาคม 2569 เวลา 19:05" / "2 October 2026 at 19:05" */
+export const formatBangkokLong = (date, lang = 'th') => {
+  return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date));
+};
+
 export const addMinutes = (date, minutes) => {
   return new Date(new Date(date).getTime() + minutes * 60 * 1000);
 };

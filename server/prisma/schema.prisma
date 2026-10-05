@@ -52,6 +52,29 @@ enum PaymentStatus {
   REFUNDED
 }
 
+/// ชนิดของรายการเงิน — การจองหนึ่งใบมีได้หลายรายการ (ค่าตั๋วตอนจอง + ส่วนต่างจากการเปลี่ยนที่นั่ง)
+enum PaymentKind {
+  /// ค่าตั๋วตอนจอง — มีใบเดียวต่อการจองเสมอ
+  BOOKING
+  /// ลูกค้าโอนส่วนต่างเพิ่มเพราะย้ายไปที่นั่งที่แพงกว่า (ตรวจสลิปและออกใบเสร็จแบบเดียวกับค่าตั๋ว)
+  SEAT_CHANGE_TOPUP
+  /// ส่วนต่างที่ต้องโอนคืนเพราะย้ายไปที่นั่งที่ถูกกว่า — ไม่มีเงินขาเข้า เข้าคิวคืนเงินตั้งแต่สร้าง
+  SEAT_CHANGE_REFUND
+}
+
+enum SeatChangeStatus {
+  /// ย้ายไปที่นั่งที่แพงกว่า — กันที่นั่งใหม่ไว้รอโอนส่วนต่าง ระหว่างนี้ที่นั่งเดิมยังเป็นของลูกค้า
+  PENDING_PAYMENT
+  /// ส่งสลิปส่วนต่างแล้ว รอผู้ดูแลตรวจ (หยุดนับถอยหลัง)
+  PENDING_VERIFICATION
+  /// ย้ายเสร็จแล้ว
+  COMPLETED
+  /// ลูกค้ายกเลิกคำขอเอง หรือการจอง/รอบถูกยกเลิกระหว่างรอ
+  CANCELLED
+  /// ไม่ได้โอนส่วนต่างภายในเวลา หรือสลิปถูกปฏิเสธหลังรอบเริ่มฉาย
+  EXPIRED
+}
+
 enum NotificationType {
   PAYMENT_APPROVED
   REFUND_COMPLETED
@@ -63,14 +86,22 @@ enum NotificationType {
   SHOWTIME_CANCELLED
   /// สลิปมาหลังหมดเวลาและที่นั่งไม่ว่างแล้ว — ผู้ดูแลยืนยันยอดแล้ว จึงเข้าคิวคืนเงิน
   LATE_PAYMENT_REFUND
+  /// ย้ายที่นั่งเสร็จแล้ว (ลูกค้าย้ายเอง หรือผู้ดูแลย้ายให้)
+  SEATS_CHANGED
+  /// สลิปส่วนต่างของการเปลี่ยนที่นั่งไม่ผ่านการตรวจสอบ
+  SEAT_CHANGE_REJECTED
+  /// ไม่ได้โอนส่วนต่างภายในเวลา — คำขอเปลี่ยนที่นั่งปิด ที่นั่งเดิมยังอยู่
+  SEAT_CHANGE_EXPIRED
+  /// โอนส่วนต่างหลังหมดเวลาและที่นั่งใหม่ไม่ว่างแล้ว — ผู้ดูแลยืนยันยอดแล้ว จึงคืนส่วนต่างให้
+  SEAT_CHANGE_LATE_REFUND
 }
 
 model User {
-  id String @id @default(cuid())
+  id           String   @id @default(cuid())
   /// ชื่อผู้ใช้หลักตอนเข้าสู่ระบบ เก็บเป็นตัวพิมพ์เล็กเสมอ จะได้ไม่มีบัญชีซ้ำแค่เพราะพิมพ์ใหญ่/เล็กต่างกัน
-  email String @unique
+  email        String   @unique
   /// ล็อกอินด้วยเบอร์แทนอีเมลก็ได้ และใช้เป็นช่องทางติดต่อเวลาการจองมีปัญหา
-  phone String @unique
+  phone        String   @unique
   /// bcrypt hash เท่านั้น — ไม่เคยเก็บรหัสผ่านจริงลงฐานข้อมูล
   passwordHash String
   /// ฝังอยู่ใน access token — เพิ่มค่าเมื่อเปลี่ยน/รีเซ็ตรหัสผ่าน แล้ว access token เก่าทุกใบใช้ไม่ได้ทันที
@@ -85,8 +116,9 @@ model User {
   refreshTokens    RefreshToken[]
   passwordResets   PasswordResetToken[]
   notifications    Notification[]
-  verifiedPayments Payment[]      @relation("PaymentVerifier")
-  refundedPayments Payment[]      @relation("PaymentRefunder")
+  verifiedPayments Payment[]            @relation("PaymentVerifier")
+  refundedPayments Payment[]            @relation("PaymentRefunder")
+  seatChangesMade  SeatChange[]         @relation("SeatChangeAdmin")
 }
 
 /// refresh token แบบ rotate — เก็บ sha256 hash เท่านั้น
@@ -228,10 +260,14 @@ model Booking {
   /// เวลาที่หมดเวลาชำระเงิน — ใช้นับช่วงผ่อนผันให้ลูกค้าที่โอนแล้วแต่ส่งสลิปไม่ทัน
   expiredAt      DateTime?
 
-  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  showtime Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
-  seats    BookingSeat[]
-  payment  Payment?
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showtime    Showtime      @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  seats       BookingSeat[]
+  /// ค่าตั๋วตอนจอง — ใบหลักที่หน้าชำระเงิน การยกเลิก และใบเสร็จอ้างถึง
+  payment     Payment?      @relation("BookingMainPayment")
+  /// ทุกรายการเงินของการจองนี้ (ใบหลัก + ส่วนต่างจากการเปลี่ยนที่นั่ง)
+  payments    Payment[]     @relation("BookingPayments")
+  seatChanges SeatChange[]
 
   @@index([userId, status])
   @@index([status, holdExpiresAt])
@@ -241,26 +277,40 @@ model Booking {
 /// ที่นั่งที่ถูกจอง — @@unique([showtimeId, seatId]) คือด่านกันจองซ้ำระดับฐานข้อมูล
 /// เมื่อ booking ถูกยกเลิก/หมดอายุ แถวเหล่านี้จะถูกลบเพื่อคืนที่นั่งเข้าระบบ
 model BookingSeat {
-  id         String @id @default(cuid())
-  bookingId  String
-  showtimeId String
-  seatId     String
-  price      Int
+  id           String  @id @default(cuid())
+  bookingId    String
+  showtimeId   String
+  seatId       String
+  price        Int
+  /// ไม่ว่าง = ที่นั่งใหม่ที่กันไว้ให้คำขอเปลี่ยนที่นั่งที่ยังรอโอนส่วนต่าง (ยังไม่ใช่ที่นั่งของการจองจริง)
+  /// ย้ายสำเร็จแล้วค่าจะถูกล้างเป็น null ส่วนคำขอที่ไม่สำเร็จแถวจะถูกลบทิ้ง
+  seatChangeId String?
 
-  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  showtime Showtime @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
-  seat     Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  booking    Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  showtime   Showtime    @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  seat       Seat        @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  seatChange SeatChange? @relation(fields: [seatChangeId], references: [id], onDelete: Cascade)
 
   @@unique([showtimeId, seatId])
   @@index([bookingId])
+  @@index([seatChangeId])
 }
 
+/// รายการเงินของการจอง — ใบหลัก (ค่าตั๋วตอนจอง) มีใบเดียวต่อการจอง
+/// ส่วนต่างจากการเปลี่ยนที่นั่งเป็นรายการแยก เพื่อให้ใช้คิวตรวจสลิป คิวคืนเงิน และเลขที่ใบเสร็จชุดเดียวกัน
 model Payment {
   id              String        @id @default(cuid())
-  bookingId       String        @unique
+  /// การจองที่เป็นเจ้าของรายการนี้ — ทุกรายการเงินผูกกับการจองเสมอ (คิวของผู้ดูแลอ่านผ่านตัวนี้)
+  bookingId       String
+  /// ตั้งเฉพาะใบหลัก (kind = BOOKING) — booking.payment จึงยังชี้ใบหลักได้ตรง ๆ แบบหนึ่งต่อหนึ่ง
+  mainBookingId   String?       @unique
+  kind            PaymentKind   @default(BOOKING)
+  /// คำขอเปลี่ยนที่นั่งที่ทำให้เกิดรายการนี้ — ตั้งเฉพาะรายการส่วนต่าง
+  seatChangeId    String?       @unique
   method          String        @default("PROMPTPAY")
   amount          Int
-  qrPayload       String
+  /// รายการคืนส่วนต่างไม่มีเงินขาเข้า จึงไม่มี QR
+  qrPayload       String?
   reference       String
   slipPath        String?
   slipUploadedAt  DateTime?
@@ -268,9 +318,20 @@ model Payment {
   verifiedById    String?
   verifiedAt      DateTime?
   rejectReason    String?
+  /// ---------- ใบเสร็จรับเงิน ----------
+  /// เลขที่ใบเสร็จ เช่น RC-2026-000123 — ออกตอนผู้ดูแลอนุมัติสลิปแล้วการจองเป็น PAID เท่านั้น
+  /// สลิปที่ส่งหลังหมดเวลาแล้วเข้าคิวคืนเงินทันทีไม่มีเลขนี้ เพราะไม่ได้ขายตั๋วให้
+  receiptNo       String?       @unique
+  /// สำเนาชื่อผู้จ่าย ณ ตอนออกใบเสร็จ — ผู้ใช้แก้ชื่อทีหลังได้ แต่ใบเสร็จที่ออกไปแล้วต้องไม่เปลี่ยนตาม
+  receiptName     String?
+  /// สำเนาที่นั่ง ณ ตอนออกใบเสร็จ (ใบหลัก) — เปลี่ยนที่นั่งทีหลังได้ แต่ใบเสร็จที่ออกไปแล้วต้องไม่เปลี่ยนตาม
+  receiptSeats    Json?
   /// ---------- การคืนเงิน ----------
   /// ระบบไม่ได้ตัดเงินเอง ผู้ดูแลโอนคืนผ่านแอปธนาคารแล้วมาบันทึกหลักฐานที่นี่
   refundDueAt     DateTime?
+  /// ยอดที่ต้องโอนคืน — ตั้งทุกครั้งที่เข้า REFUND_PENDING และอาจไม่เท่า amount
+  /// (ยกเลิกการจองที่เคยเปลี่ยนที่นั่ง = ยอดสุทธิของการจอง ซึ่งรวมส่วนต่างที่จ่ายเพิ่มและหักส่วนที่คืนไปแล้ว)
+  refundAmount    Int?
   /// บัญชีที่ลูกค้าแจ้งไว้ตอนยกเลิก เพื่อให้ผู้ดูแลโอนคืนได้ถูกบัญชี
   refundBankName  String?
   refundAccountNo String?
@@ -281,11 +342,61 @@ model Payment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  verifiedBy User?   @relation("PaymentVerifier", fields: [verifiedById], references: [id])
-  refundedBy User?   @relation("PaymentRefunder", fields: [refundedById], references: [id])
+  booking    Booking     @relation("BookingPayments", fields: [bookingId], references: [id], onDelete: Cascade)
+  mainOf     Booking?    @relation("BookingMainPayment", fields: [mainBookingId], references: [id], onDelete: Cascade)
+  seatChange SeatChange? @relation(fields: [seatChangeId], references: [id], onDelete: Cascade)
+  verifiedBy User?       @relation("PaymentVerifier", fields: [verifiedById], references: [id])
+  refundedBy User?       @relation("PaymentRefunder", fields: [refundedById], references: [id])
 
   @@index([status])
+  @@index([bookingId])
+}
+
+/// คำขอเปลี่ยนที่นั่งของการจองที่จ่ายแล้ว — หนึ่งแถวต่อหนึ่งครั้ง และเก็บไว้เป็นประวัติ (ใครย้าย จากไหนไปไหน ส่วนต่างเท่าไหร่)
+/// ลูกค้าย้ายเองได้จำกัดครั้งต่อการจอง (นับจากตารางนี้) ส่วนผู้ดูแลย้ายแทนได้โดยไม่นับโควตา
+model SeatChange {
+  id            String           @id @default(cuid())
+  bookingId     String
+  status        SeatChangeStatus
+  /// seatSnapshot ก่อนและหลังย้าย — รูปแบบเดียวกับ Booking.seatSnapshot
+  fromSeats     Json
+  toSeats       Json
+  fromAmount    Int
+  toAmount      Int
+  /// toAmount − fromAmount: บวก = ลูกค้าโอนเพิ่ม · ลบ = คืนให้ลูกค้า · 0 = ย้ายฟรี
+  diffAmount    Int
+  /// นับถอยหลังเฉพาะตอนรอโอนส่วนต่าง — null = ไม่ได้นับ
+  holdExpiresAt DateTime?
+  /// เวลาที่หมดเวลาโอนส่วนต่าง — ใช้นับช่วงผ่อนผันส่งสลิปช้าเหมือนการจอง
+  expiredAt     DateTime?
+  completedAt   DateTime?
+  /// เหตุผลที่ผู้ดูแลย้ายให้ (ลูกค้าเห็นในแจ้งเตือน)
+  reason        String?
+  /// เหตุที่คำขอจบโดยไม่ได้ย้าย
+  closeReason   String?
+  byAdmin       Boolean          @default(false)
+  adminId       String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  admin     User?         @relation("SeatChangeAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  /// ส่วนต่างที่ต้องโอนเพิ่มหรือคืน — ย้ายฟรีไม่มีรายการเงิน
+  payment   Payment?
+  /// ที่นั่งใหม่ที่กันไว้ระหว่างรอโอนส่วนต่าง
+  heldSeats BookingSeat[]
+
+  @@index([bookingId, status])
+  @@index([status, holdExpiresAt])
+}
+
+/// ตัวนับเลขที่ใบเสร็จ แยกตามปี (ปี ค.ศ. ตามเวลาไทย) จึงขึ้นชุดใหม่ทุกปี
+/// เพิ่มค่าใน transaction เดียวกับการอนุมัติสลิป ถ้าอนุมัติไม่สำเร็จค่าที่เพิ่มก็ย้อนกลับด้วย เลขจึงไม่ข้าม
+/// (SEQUENCE ของ PostgreSQL ไม่ย้อนตาม rollback — ทุกครั้งที่อนุมัติไม่ผ่านจะมีเลขหายไปหนึ่งเลข)
+model ReceiptCounter {
+  year   Int @id
+  /// เลขล่าสุดที่ออกไปแล้วของปีนั้น
+  lastNo Int
 }
 
 model Notification {

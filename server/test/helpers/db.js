@@ -41,6 +41,9 @@ export const setupDatabase = () => {
 const TABLES = [
   'Notification',
   'Payment',
+  'SeatChange',
+  // ไม่ล้างตัวนับ เลขที่ใบเสร็จจะต่อเนื่องข้ามเคส — เทสต์ที่ตรวจว่าใบแรกได้ 000001 จะพังตามลำดับการรัน
+  'ReceiptCounter',
   'BookingSeat',
   'Booking',
   'ZonePrice',

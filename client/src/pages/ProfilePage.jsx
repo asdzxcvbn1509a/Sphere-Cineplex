@@ -16,6 +16,7 @@ const ProfilePage = () => {
   const { t } = useI18n();
   const user = useAuthUser();
   const setUser = useAuthStore((state) => state.setUser);
+  const setAccessToken = useAuthStore((state) => state.setAccessToken);
   const toast = useToast();
 
   const [name, setName] = useState(user?.name ?? '');
@@ -72,7 +73,9 @@ const ProfilePage = () => {
 
     setSavingPassword(true);
     try {
-      await changePasswordApi(passwordForm);
+      const { data } = await changePasswordApi(passwordForm);
+      // ใบเดิมถูกเพิกถอนทันทีที่เปลี่ยนรหัส ใช้ใบใหม่ที่ server ส่งมา คำขอถัดไปจะได้ไม่โดน 401
+      setAccessToken(data.accessToken);
       setPasswordForm(EMPTY_PASSWORD_FORM);
       toast.success(t('profile.passwordSaved'));
     } catch (error) {
@@ -89,95 +92,98 @@ const ProfilePage = () => {
       <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('profile.title')}</h1>
       <p className="mb-6 text-sm text-muted sm:text-base">{t('profile.subtitle')}</p>
 
-      <section className="card p-5 sm:p-7">
-        <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
-          <UserRound size={20} className="text-accent" /> {t('profile.accountSection')}
-        </h2>
+      {/* จอใหญ่วางสองการ์ดคู่กัน ช่องกรอกจะไม่ยืดยาวเต็มหน้า */}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <section className="card p-5 sm:p-7">
+          <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
+            <UserRound size={20} className="text-accent" /> {t('profile.accountSection')}
+          </h2>
 
-        <form onSubmit={saveName} className="mt-4 flex flex-col gap-4">
-          <Field label={t('register.nameLabel')} required error={nameError}>
-            <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} />
-          </Field>
+          <form onSubmit={saveName} className="mt-4 flex flex-col gap-4">
+            <Field label={t('register.nameLabel')} required error={nameError}>
+              <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} />
+            </Field>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-              <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
-                <Mail size={14} /> {t('register.emailLabel')}
-              </p>
-              <p className="mt-1 truncate text-sm sm:text-base">{user?.email}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
+                <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
+                  <Mail size={14} /> {t('register.emailLabel')}
+                </p>
+                <p className="mt-1 truncate text-sm sm:text-base">{user?.email}</p>
+              </div>
+              <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
+                <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
+                  <Phone size={14} /> {t('register.phoneLabel')}
+                </p>
+                <p className="mt-1 text-sm sm:text-base">{user?.phone}</p>
+              </div>
             </div>
-            <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-              <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
-                <Phone size={14} /> {t('register.phoneLabel')}
-              </p>
-              <p className="mt-1 text-sm sm:text-base">{user?.phone}</p>
+            <p className="text-xs text-muted sm:text-sm">{t('profile.contactLocked')}</p>
+
+            <div>
+              <Button type="submit" loading={savingName} disabled={name.trim() === user?.name}>
+                {t('common.save')}
+              </Button>
             </div>
-          </div>
-          <p className="text-xs text-muted sm:text-sm">{t('profile.contactLocked')}</p>
+          </form>
+        </section>
 
-          <div>
-            <Button type="submit" loading={savingName} disabled={name.trim() === user?.name}>
-              {t('common.save')}
-            </Button>
-          </div>
-        </form>
-      </section>
+        <section className="card p-5 sm:p-7">
+          <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
+            <KeyRound size={20} className="text-accent" /> {t('profile.passwordSection')}
+          </h2>
+          <p className="mt-1 flex items-start gap-1.5 text-xs text-muted sm:text-sm">
+            <ShieldCheck size={14} className="mt-0.5 shrink-0" /> {t('profile.passwordNotice')}
+          </p>
 
-      <section className="card mt-4 p-5 sm:p-7">
-        <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
-          <KeyRound size={20} className="text-accent" /> {t('profile.passwordSection')}
-        </h2>
-        <p className="mt-1 flex items-start gap-1.5 text-xs text-muted sm:text-sm">
-          <ShieldCheck size={14} className="mt-0.5 shrink-0" /> {t('profile.passwordNotice')}
-        </p>
+          <form onSubmit={savePassword} className="mt-4 flex flex-col gap-4">
+            <Field
+              label={t('profile.currentPassword')}
+              required
+              error={passwordError.currentPassword}
+            >
+              <PasswordInput
+                autoComplete="current-password"
+                value={passwordForm.currentPassword}
+                onChange={setPasswordField('currentPassword')}
+              />
+            </Field>
 
-        <form onSubmit={savePassword} className="mt-4 flex flex-col gap-4">
-          <Field
-            label={t('profile.currentPassword')}
-            required
-            error={passwordError.currentPassword}
-          >
-            <PasswordInput
-              autoComplete="current-password"
-              value={passwordForm.currentPassword}
-              onChange={setPasswordField('currentPassword')}
-            />
-          </Field>
+            <Field
+              label={t('profile.newPassword')}
+              required
+              error={passwordError.newPassword}
+              hint={t('register.passwordHint')}
+            >
+              <PasswordInput
+                autoComplete="new-password"
+                value={passwordForm.newPassword}
+                onChange={setPasswordField('newPassword')}
+              />
+            </Field>
 
-          <Field
-            label={t('profile.newPassword')}
-            required
-            error={passwordError.newPassword}
-            hint={t('register.passwordHint')}
-          >
-            <PasswordInput
-              autoComplete="new-password"
-              value={passwordForm.newPassword}
-              onChange={setPasswordField('newPassword')}
-            />
-          </Field>
+            <Field label={t('register.confirmLabel')} required error={passwordError.confirm}>
+              <PasswordInput
+                autoComplete="new-password"
+                value={passwordForm.confirm}
+                onChange={setPasswordField('confirm')}
+              />
+            </Field>
 
-          <Field label={t('register.confirmLabel')} required error={passwordError.confirm}>
-            <PasswordInput
-              autoComplete="new-password"
-              value={passwordForm.confirm}
-              onChange={setPasswordField('confirm')}
-            />
-          </Field>
+            {passwordError.form && (
+              <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+                {passwordError.form}
+              </p>
+            )}
 
-          {passwordError.form && (
-            <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-              {passwordError.form}
-            </p>
-          )}
-
-          <div>
-            <Button type="submit" loading={savingPassword}>
-              {t('profile.changePassword')}
-            </Button>
-          </div>
-        </form>
-      </section>
+            <div>
+              <Button type="submit" loading={savingPassword}>
+                {t('profile.changePassword')}
+              </Button>
+            </div>
+          </form>
+        </section>
+      </div>
     </div>
   );
 };

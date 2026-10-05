@@ -24,9 +24,9 @@
 }
 
 @layer base {
+  /* ไม่ตั้ง scroll-behavior: smooth — ScrollRestoration เลื่อนกลับบนสุดทุกครั้งที่เปลี่ยนหน้า ถ้าเปิดไว้จะเห็นหน้าไหลขึ้นช้า ๆ */
   html {
     color-scheme: dark;
-    scroll-behavior: smooth;
   }
 
   body {
@@ -68,14 +68,25 @@
     border-radius: var(--radius-card);
   }
 
+  /*
+    font-size ตายตัว 16px — iOS ซูมหน้าเข้าเองเมื่อแตะช่องที่ตัวอักษรเล็กกว่านั้น
+    (ช่องที่อยู่ในกล่อง text-sm เช่นฟอร์มบัญชีรับเงินคืนจะได้ขนาดตามกล่องถ้าไม่ตั้งไว้)
+    min-height กัน input วันที่ที่ยังว่างบน iOS ยุบเตี้ยกว่าช่องอื่น
+  */
   .input-base {
     width: 100%;
+    min-height: 2.75rem;
     background-color: var(--color-surface-2);
     border: 1px solid var(--color-line);
     border-radius: 0.625rem;
     padding: 0.625rem 0.875rem;
+    font-size: 1rem;
     color: var(--color-fg);
     transition: border-color 150ms ease;
+  }
+  /* iOS จัดค่าวันที่ไว้กลางช่อง — ให้ชิดซ้ายเหมือนช่องอื่น */
+  .input-base::-webkit-date-and-time-value {
+    text-align: left;
   }
   .input-base::placeholder {
     color: color-mix(in srgb, var(--color-muted) 75%, transparent);
@@ -95,6 +106,76 @@
     );
     border-radius: 100% 100% 0 0 / 100% 100% 0 0;
     filter: blur(0.5px);
+  }
+}
+
+/*
+  ตารางฝั่งผู้ดูแลบนจอที่แคบกว่า lg — แสดงแต่ละแถวเป็นการ์ดแทนการเลื่อนตารางไปด้านข้าง
+  <td> ที่ใส่ data-label (ชื่อคอลัมน์) จะมีหัวข้อเล็ก ๆ กำกับด้านบน ส่วนช่องที่ไม่ใส่
+  (ชื่อรายการช่องแรก ปุ่มจัดการ แถว "ไม่มีข้อมูล") กินเต็มความกว้างการ์ด
+  เขียนไว้นอก @layer เพื่อให้ชนะ utility ของตารางจอใหญ่ที่ใส่ไว้ในแท็กอยู่แล้ว (px-4 py-3 text-right min-w-*)
+*/
+@media (width < 64rem) {
+  .stack-table {
+    display: block;
+    min-width: 0;
+  }
+
+  /* ซ่อนหัวตารางจากตา แต่ screen reader ยังอ่านได้ */
+  .stack-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .stack-table tbody {
+    display: block;
+  }
+
+  .stack-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+    padding: 1rem;
+  }
+
+  .stack-table td {
+    display: block;
+    padding: 0;
+  }
+
+  .stack-table td[data-label] {
+    text-align: left;
+  }
+
+  /* หน้าตาเดียวกับหัวคอลัมน์ของตารางจอใหญ่ (text-xs uppercase tracking-wide) */
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .stack-table td:not([data-label]) {
+    grid-column: 1 / -1;
+  }
+
+  .stack-table td[colspan] {
+    padding-block: 1.5rem;
+  }
+}
+
+/* แท็บเล็ตกว้างพอวางข้อมูล 4 ช่องต่อบรรทัด การ์ดจะได้ไม่สูงเกินไป */
+@media (40rem <= width < 64rem) {
+  .stack-table tr {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -119,5 +200,25 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+  พิมพ์ / บันทึก PDF (หน้าใบเสร็จ) — ธีมมืดพิมพ์ออกมาจะได้ตัวอักษรสีอ่อนบนกระดาษขาวจนแทบอ่านไม่ออก
+  จึงสลับเป็นพื้นขาวตัวดำตอนพิมพ์ ส่วนแถบเมนู ท้ายหน้า ปุ่ม และ toast ซ่อนด้วย print:hidden ที่ตัว component
+*/
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: #fff;
+    color: #000;
   }
 }

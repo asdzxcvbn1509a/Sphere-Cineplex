@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Clock, Sofa } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { CalendarDays, Clock, Sofa } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { getMovie } from '../api/movies.js';
 import { listShowtimes } from '../api/showtimes.js';
 import { useI18n } from '../context/I18nContext.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import { bangkokDateKey, buildDateStrip, formatDate, formatMoney, formatTime, formatWeekday } from '../utils/format.js';
 
 const MovieDetailPage = () => {
   const { movieId } = useParams();
-  const navigate = useNavigate();
   const { t, lang, pick } = useI18n();
 
   const [movie, setMovie] = useState(null);
@@ -74,27 +74,28 @@ const MovieDetailPage = () => {
         )}
 
         <div className="relative mx-auto max-w-6xl px-4 pb-6 pt-6">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-fg"
-          >
-            <ArrowLeft size={16} /> {t('common.back')}
-          </button>
+          <Breadcrumb
+            className="mb-5"
+            items={[{ label: t('nav.home'), to: '/' }, { label: pick(movie, 'title') }]}
+          />
 
-          <div className="flex flex-col gap-6 sm:flex-row sm:gap-10">
+          {/*
+            มือถือ: โปสเตอร์เล็กข้างชื่อเรื่อง เรื่องย่อเต็มความกว้างด้านล่าง — เลื่อนถึงแถบเลือกวันได้เร็วขึ้น
+            จอใหญ่: โปสเตอร์คอลัมน์ซ้ายสูงสองแถว ชื่อเรื่องกับเรื่องย่ออยู่คอลัมน์ขวาแบบเดิม
+          */}
+          <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 gap-y-5 sm:grid-cols-[14.5rem_minmax(0,1fr)] sm:grid-rows-[auto_1fr] sm:gap-x-10 sm:gap-y-6">
             <img
               src={movie.posterUrl}
               alt={pick(movie, 'title')}
-              className="w-40 shrink-0 self-start rounded-2xl border border-line object-cover shadow-2xl sm:w-58"
+              className="w-full self-start rounded-xl border border-line object-cover shadow-2xl sm:row-span-2 sm:rounded-2xl"
             />
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold sm:text-4xl">{pick(movie, 'title')}</h1>
-              <p className="mt-1 text-base text-muted">
+            <div className="min-w-0 self-center sm:self-start">
+              <h1 className="text-xl font-bold sm:text-4xl">{pick(movie, 'title')}</h1>
+              <p className="mt-1 text-sm text-muted sm:text-base">
                 {lang === 'th' ? movie.titleEn : movie.titleTh}
               </p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:mt-4">
                 <span className="rounded-md border border-accent/40 px-2 py-1 font-bold text-accent">
                   {movie.rating}
                 </span>
@@ -107,8 +108,10 @@ const MovieDetailPage = () => {
                   </span>
                 ))}
               </div>
+            </div>
 
-              <h2 className="mt-6 text-sm font-semibold text-muted">{t('movie.synopsis')}</h2>
+            <div className="col-span-2 sm:col-span-1 sm:col-start-2">
+              <h2 className="text-sm font-semibold text-muted">{t('movie.synopsis')}</h2>
               <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-fg/90">
                 {pick(movie, 'synopsis')}
               </p>

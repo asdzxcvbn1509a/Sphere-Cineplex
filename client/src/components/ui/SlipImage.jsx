@@ -11,8 +11,9 @@ import Spinner from './Spinner.jsx';
  *
  * kind = 'payment' คือสลิปที่ลูกค้าโอนเข้ามา (ผู้ดูแลใช้ตรวจ)
  * kind = 'refund'  คือสลิปที่ผู้ดูแลโอนคืน (ลูกค้าเปิดดูเป็นหลักฐานได้)
+ * paymentId = รายการส่วนต่างเปลี่ยนที่นั่งของการจองนี้ (ไม่ส่ง = ใบหลัก ค่าตั๋วตอนจอง)
  */
-const SlipImage = ({ bookingId, kind = 'payment', className }) => {
+const SlipImage = ({ bookingId, paymentId, kind = 'payment', className }) => {
   const { t } = useI18n();
   const [src, setSrc] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -22,7 +23,7 @@ const SlipImage = ({ bookingId, kind = 'payment', className }) => {
     let cancelled = false;
     const fetchBlob = kind === 'refund' ? getRefundSlipBlob : getSlipBlob;
 
-    fetchBlob(bookingId)
+    fetchBlob(bookingId, paymentId)
       .then(({ data }) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(data);
@@ -34,7 +35,7 @@ const SlipImage = ({ bookingId, kind = 'payment', className }) => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [bookingId, kind]);
+  }, [bookingId, paymentId, kind]);
 
   if (failed) {
     return (

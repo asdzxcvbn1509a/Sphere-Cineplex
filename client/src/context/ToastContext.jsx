@@ -52,8 +52,9 @@ export const ToastProvider = ({ children }) => {
         z สูงกว่า Modal (z-50) หนึ่งขั้น เพราะ Modal ถูก render ผ่าน portal ไปที่ document.body
         จึงอยู่หลัง toast ใน DOM ถ้า z เท่ากันจะชนะการซ้อน แล้ว backdrop-blur ของมันจะเบลอ toast ทับ
         toast เป็นข้อความแจ้งผลที่ต้องอ่านออกเสมอ จึงต้องลอยอยู่บนสุด
+        ระยะจากขอบล่างบวกความสูงแถบสรุป (--bottom-bar จาก BottomBar) — หน้าเลือกที่นั่งจะได้ไม่มี toast ทับปุ่มยืนยัน
       */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-60 flex flex-col items-center gap-2 px-4">
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--bottom-bar,0px)+1rem)] z-60 flex flex-col items-center gap-2 px-4 print:hidden">
         {toasts.map((toast) => {
           const Icon = icons[toast.type] ?? Info;
           return (

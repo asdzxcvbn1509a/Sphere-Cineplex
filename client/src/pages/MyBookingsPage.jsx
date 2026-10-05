@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CreditCard, Landmark, ReceiptText, Ticket, TicketX, Upload } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CreditCard,
+  FileText,
+  Landmark,
+  ReceiptText,
+  Ticket,
+  TicketX,
+  Upload,
+} from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { cancelBooking, listMyBookings, updateRefundAccount } from '../api/bookings.js';
@@ -32,6 +41,7 @@ const MyBookingsPage = () => {
   const [cancelling, setCancelling] = useState(false);
   const [refundForm, setRefundForm] = useState(EMPTY_REFUND_FORM);
   const [formError, setFormError] = useState({});
+  // { bookingId, payment, paymentId } — paymentId ใส่เฉพาะสลิปคืนส่วนต่างเปลี่ยนที่นั่ง (ไม่ใส่ = ใบหลักของการจอง)
   const [slipTarget, setSlipTarget] = useState(null);
   // แจ้ง/แก้บัญชีรับเงินคืนภายหลัง — ใบที่ผู้ดูแลยกเลิกแทนไม่มีบัญชีติดมา
   const [accountTarget, setAccountTarget] = useState(null);
@@ -54,10 +64,31 @@ const MyBookingsPage = () => {
   /** ข้อความมุมขวาล่างของการ์ด — บอกว่าตอนนี้ยกเลิกได้ไหม และเพราะอะไร */
   const cancelHint = (booking) => {
     if (booking.status === 'PENDING_VERIFICATION') return t('bookings.cancelAwaitingReview');
+    if (booking.seatChange?.open?.status === 'PENDING_VERIFICATION') {
+      return t('bookings.cancelAwaitingTopUp');
+    }
     if (booking.status === 'PAID' && !booking.canCancel) {
       return t('bookings.cancelBlocked', { hours: booking.cancelCutoffHours });
     }
     return t('bookings.cancelPolicy', { hours: booking.cancelCutoffHours });
+  };
+
+  /**
+   * บอกว่ายังเปลี่ยนที่นั่งได้อีกกี่ครั้ง หรือทำไมเปลี่ยนไม่ได้แล้ว — เฉพาะใบที่จ่ายแล้ว ยังไม่ถึงรอบ และไม่มีคำขอค้าง
+   * (คำขอที่ค้างอยู่มีป้าย/ปุ่มของตัวเองในแถบด้านล่างแล้ว)
+   */
+  const seatChangeHint = (booking) => {
+    const info = booking.seatChange;
+    if (!info || booking.status !== 'PAID' || info.open) return null;
+    if (new Date(booking.showtime.startsAt) <= new Date()) return null;
+    if (info.canChange) {
+      return t('seatChange.policy', { left: info.changesLeft, minutes: info.cutoffMinutes });
+    }
+    if (info.blockedReason === 'LIMIT') return t('seatChange.blockedLIMIT', { max: info.maxChanges });
+    if (info.blockedReason === 'WINDOW_CLOSED') {
+      return t('seatChange.blockedWINDOW_CLOSED', { minutes: info.cutoffMinutes });
+    }
+    return null;
   };
 
   const openCancel = (booking) => {
@@ -74,10 +105,12 @@ const MyBookingsPage = () => {
     return value;
   };
 
-  const openAccount = (booking) => {
-    setAccountForm(
-      refundFormFromAccount(booking.payment?.refundBankName, booking.payment?.refundAccountNo),
-    );
+  /**
+   * payment = รายการที่ลูกค้ากดแจ้งบัญชี (ใบหลัก หรือส่วนต่างเปลี่ยนที่นั่ง) ใช้เติมค่าเดิมในฟอร์ม
+   * บันทึกแล้ว server ใช้บัญชีนี้กับทุกรายการที่รอโอนคืนของการจองนี้
+   */
+  const openAccount = (booking, payment = booking.payment) => {
+    setAccountForm(refundFormFromAccount(payment?.refundBankName, payment?.refundAccountNo));
     setAccountErrors({});
     setAccountTarget(booking);
   };
@@ -155,16 +188,18 @@ const MyBookingsPage = () => {
       <div className="flex flex-col gap-4">
         {bookings.map((booking) => (
           <article key={booking.id} className="card overflow-hidden">
-            <div className="flex gap-3 p-4 sm:gap-5 sm:p-6">
+            {/* มือถือ: ยอดรวมอยู่ใต้รายละเอียดข้างโปสเตอร์ ไม่เป็นคอลัมน์ขวาที่บีบชื่อเรื่องจนเหลือไม่กี่ตัวอักษร */}
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-5 sm:p-6">
               <img
                 src={booking.showtime.movie.posterUrl}
                 alt=""
-                className="h-28 w-19 shrink-0 rounded-lg object-cover sm:h-45 sm:w-30"
+                className="row-span-2 h-28 w-19 rounded-lg object-cover sm:h-45 sm:w-30"
               />
 
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <h2 className="truncate font-semibold sm:text-lg">
+              <div className="min-w-0">
+                {/* มือถือป้ายสถานะขึ้นบรรทัดของตัวเองเหนือชื่อเรื่อง */}
+                <div className="flex flex-col-reverse items-start gap-1 sm:flex-row sm:justify-between sm:gap-2">
+                  <h2 className="min-w-0 max-w-full truncate font-semibold sm:text-lg">
                     {pick(booking.showtime.movie, 'title')}
                   </h2>
                   <StatusBadge
@@ -189,7 +224,7 @@ const MyBookingsPage = () => {
                 </p>
               </div>
 
-              <div className="shrink-0 text-right">
+              <div className="flex items-baseline gap-2 self-end sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:block sm:self-start sm:text-right">
                 <p className="text-xs text-muted sm:text-sm">{t('bookings.total')}</p>
                 <p className="font-bold text-accent sm:text-xl">
                   {formatMoney(booking.totalAmount, lang)}
@@ -201,6 +236,12 @@ const MyBookingsPage = () => {
               {booking.status === 'PAID' && (
                 <Button as={Link} to={`/booking/${booking.id}/ticket`} size="sm">
                   <Ticket size={14} /> {t('bookings.viewTicket')}
+                </Button>
+              )}
+              {/* ใบเสร็จยังเปิดได้หลังยกเลิก/คืนเงิน เพราะเป็นหลักฐานว่าเคยจ่ายเงินจริง */}
+              {booking.payment?.receiptNo && (
+                <Button as={Link} to={`/booking/${booking.id}/receipt`} size="sm" variant="secondary">
+                  <FileText size={14} /> {t('bookings.viewReceipt')}
                 </Button>
               )}
               {(booking.status === 'PENDING_PAYMENT' || booking.status === 'PENDING_VERIFICATION') && (
@@ -217,6 +258,29 @@ const MyBookingsPage = () => {
               {booking.status === 'EXPIRED' && booking.payment?.status === 'PENDING_VERIFICATION' && (
                 <span className="rounded-md border border-info/40 bg-info/10 px-2.5 py-1.5 text-xs text-info sm:text-sm">
                   {t('bookings.lateSlipWaiting')}
+                </span>
+              )}
+              {booking.seatChange?.canChange && (
+                <Button as={Link} to={`/booking/${booking.id}/change-seats`} size="sm" variant="secondary">
+                  <ArrowLeftRight size={14} /> {t('seatChange.action')}
+                </Button>
+              )}
+              {/* คำขอเปลี่ยนที่นั่งที่ยังรอโอนส่วนต่าง — พากลับไปหน้าชำระได้ตรง ๆ ไม่ต้องจำว่าค้างอยู่ตรงไหน */}
+              {booking.seatChange?.open?.status === 'PENDING_PAYMENT' && (
+                <Button
+                  as={Link}
+                  to={`/booking/${booking.id}/seat-change/${booking.seatChange.open.id}`}
+                  size="sm"
+                >
+                  <CreditCard size={14} />{' '}
+                  {t('seatChange.payDifference', {
+                    amount: formatMoney(booking.seatChange.open.diffAmount, lang),
+                  })}
+                </Button>
+              )}
+              {booking.seatChange?.open?.status === 'PENDING_VERIFICATION' && (
+                <span className="rounded-md border border-info/40 bg-info/10 px-2.5 py-1.5 text-xs text-info sm:text-sm">
+                  {t('seatChange.pendingReview')}
                 </span>
               )}
               {booking.canCancel && (
@@ -262,12 +326,80 @@ const MyBookingsPage = () => {
               )}
               {/* หลักฐานการโอนคืนเป็นเรื่องเงินของลูกค้าเอง จึงให้เปิดดูได้เหมือนที่ผู้ดูแลเห็น */}
               {booking.payment?.hasRefundSlip && (
-                <Button variant="secondary" size="sm" onClick={() => setSlipTarget(booking)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSlipTarget({ bookingId: booking.id, payment: booking.payment })}
+                >
                   <ReceiptText size={14} /> {t('bookings.viewRefundSlip')}
                 </Button>
               )}
 
-              <span className="ml-auto text-xs text-muted sm:text-sm">{cancelHint(booking)}</span>
+              {/* เงินจากการเปลี่ยนที่นั่ง — ใบเสร็จส่วนต่างที่โอนเพิ่ม หรือส่วนต่างที่รอ/โอนคืนแล้ว */}
+              {(booking.seatChange?.history ?? []).map((change) => {
+                const money = change.payment;
+                if (!money) return null;
+                if (money.receiptNo) {
+                  return (
+                    <Button
+                      key={change.id}
+                      as={Link}
+                      to={`/booking/${booking.id}/receipt?payment=${money.id}`}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      <FileText size={14} /> {t('seatChange.viewReceipt')}
+                    </Button>
+                  );
+                }
+                if (money.status !== 'REFUND_PENDING' && money.status !== 'REFUNDED') return null;
+                const refundAmount = formatMoney(money.refundAmount ?? money.amount, lang);
+                return (
+                  <Fragment key={change.id}>
+                    <span
+                      className={clsx(
+                        'rounded-md border px-2.5 py-1.5 text-xs sm:text-sm',
+                        money.status === 'REFUNDED'
+                          ? 'border-success/40 bg-success/10 text-success'
+                          : 'border-accent/40 bg-accent/10 text-accent',
+                      )}
+                    >
+                      {t(
+                        money.status === 'REFUNDED'
+                          ? 'seatChange.refundChipDone'
+                          : 'seatChange.refundChipPending',
+                        { amount: refundAmount },
+                      )}
+                    </span>
+                    {/* บัญชีใช้ร่วมกันทุกรายการที่รอคืนของการจองนี้ — ถ้าใบหลักก็รอคืนอยู่ ปุ่มของใบหลักด้านบนพอแล้ว */}
+                    {money.status === 'REFUND_PENDING' && booking.payment?.status !== 'REFUND_PENDING' && (
+                      <Button variant="secondary" size="sm" onClick={() => openAccount(booking, money)}>
+                        <Landmark size={14} />{' '}
+                        {money.refundAccountNo
+                          ? t('bookings.refundAccountEdit')
+                          : t('bookings.refundAccountAdd')}
+                      </Button>
+                    )}
+                    {money.hasRefundSlip && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          setSlipTarget({ bookingId: booking.id, payment: money, paymentId: money.id })
+                        }
+                      >
+                        <ReceiptText size={14} /> {t('bookings.viewRefundSlip')}
+                      </Button>
+                    )}
+                  </Fragment>
+                );
+              })}
+
+              {/* มือถือขึ้นบรรทัดใหม่ชิดซ้ายเต็มความกว้าง อ่านต่อจากปุ่มได้ง่ายกว่าตัวหนังสือชิดขวา */}
+              <span className="flex w-full flex-col text-xs text-muted sm:ml-auto sm:w-auto sm:items-end sm:text-right sm:text-sm">
+                <span>{cancelHint(booking)}</span>
+                {seatChangeHint(booking) && <span>{seatChangeHint(booking)}</span>}
+              </span>
             </div>
           </article>
         ))}
@@ -279,7 +411,12 @@ const MyBookingsPage = () => {
         title={t('bookings.refundSlipTitle')}
         size="sm"
       >
-        <SlipImage bookingId={slipTarget?.id} kind="refund" className="h-80 w-full" />
+        <SlipImage
+          bookingId={slipTarget?.bookingId}
+          paymentId={slipTarget?.paymentId}
+          kind="refund"
+          className="h-80 w-full"
+        />
         {slipTarget?.payment?.refundNote && (
           <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
             {slipTarget.payment.refundNote}

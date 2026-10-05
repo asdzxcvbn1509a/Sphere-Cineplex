@@ -23,6 +23,7 @@ import {
   deleteShowtime,
   listAllBookings,
   cancelBooking,
+  changeSeats,
   listPayments,
   listRefunds,
   completeRefund,
@@ -135,6 +136,12 @@ const cancelSchema = z.object({
   reason: z.string().trim().max(200).optional(),
 });
 
+// ย้ายที่นั่งแทนลูกค้า — ชุดที่นั่งใหม่ทั้งชุด (โซนเดียวกับเดิมทุกที่ service เป็นคนบังคับ) และเหตุผลที่ลูกค้าจะเห็นในแจ้งเตือน
+const changeSeatsSchema = z.object({
+  seatIds: z.array(z.string().min(1)).min(1, 'กรุณาเลือกที่นั่ง'),
+  reason: z.string().trim().max(200).optional(),
+});
+
 const paymentListQuery = z.object({
   status: z
     .enum(['AWAITING_SLIP', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'ALL'])
@@ -215,6 +222,8 @@ router.delete('/showtimes/:id', deleteShowtime);
 // @ENDPOINT http://localhost:4000/api/admin/bookings
 router.get('/bookings', validate({ query: bookingListQuery }), listAllBookings);
 router.post('/bookings/:id/cancel', validate({ body: cancelSchema }), cancelBooking);
+// @ENDPOINT http://localhost:4000/api/admin/bookings/:id/change-seats
+router.post('/bookings/:id/change-seats', validate({ body: changeSeatsSchema }), changeSeats);
 // @ENDPOINT http://localhost:4000/api/admin/queue-counts
 router.get('/queue-counts', getQueueCounts);
 

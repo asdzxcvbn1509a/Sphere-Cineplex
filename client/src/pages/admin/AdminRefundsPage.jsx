@@ -21,6 +21,12 @@ import { formatDateTime, formatMoney } from '../../utils/format.js';
 
 const TABS = ['REFUND_PENDING', 'REFUNDED'];
 
+/** ยอดที่ต้องโอนคืนจริง — การจองที่เคยเปลี่ยนที่นั่ง ยอดคืนไม่เท่ายอดที่จ่ายตอนจอง */
+const refundOf = (item) => item.refundAmount ?? item.amount;
+
+/** รายการส่วนต่างจากการเปลี่ยนที่นั่ง — สลิปคืนเงินต้องอ้าง id ของรายการนี้ ไม่ใช่ใบหลักของการจอง */
+const isSeatChangeMoney = (item) => item.kind && item.kind !== 'BOOKING';
+
 const AdminRefundsPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
@@ -171,6 +177,15 @@ const AdminRefundsPage = () => {
               <StatusBadge status={item.status} label={t(`admin.refundPage.tab${item.status}`)} />
             </div>
 
+            {/* แยกให้เห็นว่าคืนเพราะอะไร — คืนส่วนต่างเปลี่ยนที่นั่งไม่ได้แปลว่าลูกค้ายกเลิกการจอง */}
+            {isSeatChangeMoney(item) && (
+              <p className="mt-2 inline-flex rounded-md border border-info/40 bg-info/10 px-2 py-0.5 text-xs text-info sm:text-sm">
+                {t(`admin.refundPage.kind${item.kind}`)}
+                {item.seatChange &&
+                  ` · ${item.seatChange.fromSeats.join(', ')} → ${item.seatChange.toSeats.join(', ')}`}
+              </p>
+            )}
+
             <p className="mt-2 text-base font-bold sm:text-lg">
               {lang === 'en'
                 ? item.booking.showtime.movie.titleEn
@@ -193,10 +208,15 @@ const AdminRefundsPage = () => {
                 {item.booking.seats.map((seat) => seat.label).join(', ')}
               </dd>
 
-              <dt className="text-muted">{t('admin.refundPage.cancelledAt')}</dt>
+              <dt className="text-muted">
+                {isSeatChangeMoney(item) ? t('admin.refundPage.changedAt') : t('admin.refundPage.cancelledAt')}
+              </dt>
               <dd className="text-right font-semibold">
                 {/* สลิปที่โอนมาหลังหมดเวลาไม่มีวันยกเลิก — ใช้เวลาที่เข้าคิวคืนเงินแทน */}
-                {formatDateTime(item.booking.cancelledAt ?? item.refundDueAt, lang)}
+                {formatDateTime(
+                  isSeatChangeMoney(item) ? item.refundDueAt : (item.booking.cancelledAt ?? item.refundDueAt),
+                  lang,
+                )}
                 {item.booking.status === 'EXPIRED' && item.booking.cancelReason && (
                   <span className="block text-xs font-normal text-muted">{item.booking.cancelReason}</span>
                 )}
@@ -229,9 +249,13 @@ const AdminRefundsPage = () => {
             <div className="mt-6 flex items-center justify-between gap-2 rounded-lg bg-surface-2 px-4 py-2.5 sm:px-6">
               <span className="text-sm text-muted sm:text-lg">{t('admin.refundPage.amount')}</span>
               <span className="text-xl font-bold text-accent sm:text-3xl">
-                {formatMoney(item.amount, lang)} {t('common.baht')}
+                {formatMoney(refundOf(item), lang)} {t('common.baht')}
               </span>
             </div>
+            {/* ยกเลิกการจองที่เคยเปลี่ยนที่นั่ง — คืนยอดสุทธิครั้งเดียว ไม่ใช่ยอดที่จ่ายตอนจอง */}
+            {!isSeatChangeMoney(item) && refundOf(item) !== item.amount && (
+              <p className="mt-1 text-right text-xs text-muted">{t('admin.refundPage.netOfSeatChanges')}</p>
+            )}
 
             {item.status === 'REFUND_PENDING' ? (
               <Button variant="success" className="mt-3 w-full" onClick={() => openTarget(item)}>
@@ -274,7 +298,7 @@ const AdminRefundsPage = () => {
       >
         <p className="mb-3 text-sm text-muted">
           {t(editing ? 'admin.refundPage.editBody' : 'admin.refundPage.confirmBody', {
-            amount: formatMoney(target?.amount ?? 0, lang),
+            amount: formatMoney(target ? refundOf(target) : 0, lang),
             name: target?.booking.user.name ?? '',
           })}
         </p>
@@ -307,7 +331,7 @@ const AdminRefundsPage = () => {
           )}
         >
           <Upload size={18} className="text-muted" />
-          <span className={clsx('text-xs', file ? 'text-fg' : 'text-muted')}>
+          <span className={clsx('text-xs wrap-anywhere', file ? 'text-fg' : 'text-muted')}>
             {file
               ? file.name
               : t(
@@ -343,7 +367,12 @@ const AdminRefundsPage = () => {
       >
         {slipTarget && (
           <>
-            <SlipImage bookingId={slipTarget.booking.id} kind="refund" className="h-80 w-full" />
+            <SlipImage
+              bookingId={slipTarget.booking.id}
+              paymentId={isSeatChangeMoney(slipTarget) ? slipTarget.id : undefined}
+              kind="refund"
+              className="h-80 w-full"
+            />
             {slipTarget.refundNote && (
               <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
                 {slipTarget.refundNote}

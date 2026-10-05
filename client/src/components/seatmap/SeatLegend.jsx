@@ -3,8 +3,11 @@ import { X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { formatMoney } from '../../utils/format.js';
 
-/** คำอธิบายสีที่นั่ง + ราคาต่อโซน (ผลสำรวจระบุว่าต้องเห็นราคาแต่ละโซนทันที) */
-const SeatLegend = ({ prices }) => {
+/**
+ * คำอธิบายสีที่นั่ง + ราคาต่อโซน (ผลสำรวจระบุว่าต้องเห็นราคาแต่ละโซนทันที)
+ * showOwn = หน้าเปลี่ยนที่นั่ง มีที่นั่งเดิมของการจองแสดงแยกไว้
+ */
+const SeatLegend = ({ prices, showOwn = false }) => {
   const { t, lang } = useI18n();
 
   return (
@@ -17,6 +20,12 @@ const SeatLegend = ({ prices }) => {
         <span className="h-5 w-5 rounded border border-accent bg-accent" />
         {t('seats.selected')}
       </span>
+      {showOwn && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-5 w-5 rounded border border-dashed border-accent bg-accent/10" />
+          {t('seatChange.original')}
+        </span>
+      )}
       <span className="inline-flex items-center gap-1.5">
         <span className="flex h-5 w-5 items-center justify-center rounded border border-danger/25 bg-danger/10 text-danger/60">
           <X size={11} strokeWidth={3} />

@@ -10,11 +10,6 @@ export const login = async ({ identifier, password }) => {
   return await api.post('/auth/login', { identifier, password });
 };
 
-/** ต่ออายุเซสชันจาก refresh cookie — interceptor ใน client.js เรียกให้เองเมื่อเจอ 401 */
-export const refreshSession = async () => {
-  return await api.post('/auth/refresh');
-};
-
 export const logout = async () => {
   return await api.post('/auth/logout');
 };
@@ -26,6 +21,7 @@ export const getMe = async () => {
 /**
  * เปลี่ยนรหัสผ่านของตัวเอง — สำเร็จแล้วเซสชันบนเครื่องอื่นจะถูกเพิกถอนทั้งหมด
  * แต่เครื่องที่กดเปลี่ยนยังใช้งานต่อได้ ไม่ต้องล็อกอินใหม่
+ * ได้ `accessToken` ใบใหม่กลับมาด้วย เพราะใบเดิมใช้ไม่ได้ทันทีที่เปลี่ยนรหัส
  */
 export const changePassword = async ({ currentPassword, newPassword }) => {
   return await api.patch('/auth/password', { currentPassword, newPassword });

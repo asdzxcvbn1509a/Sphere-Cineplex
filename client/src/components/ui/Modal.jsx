@@ -32,7 +32,8 @@ const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
         role="dialog"
         aria-modal="true"
         className={clsx(
-          'animate-fade-up card relative max-h-[92vh] w-full overflow-y-auto rounded-b-none sm:rounded-2xl',
+          // dvh = ความสูงที่เห็นจริงบนมือถือ (vh รวมส่วนที่แถบ URL บังอยู่ ปุ่มท้ายหน้าต่างจะหลุดจอ)
+          'animate-fade-up card relative max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-b-none sm:rounded-2xl',
           size === 'sm' && 'sm:max-w-md',
           size === 'md' && 'sm:max-w-xl',
           size === 'lg' && 'sm:max-w-3xl',
@@ -51,8 +52,9 @@ const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>
+        {/* มือถือ: ปุ่มขยายเต็มแถวให้กดง่าย และตกบรรทัดได้เมื่อมีหลายปุ่ม (เช่นลบภาพยนตร์ที่มีการจอง) — จอใหญ่ชิดขวาตามเดิม */}
         {footer && (
-          <div className="sticky bottom-0 flex justify-end gap-2 border-t border-line bg-surface-2/95 px-5 py-4 backdrop-blur">
+          <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-line bg-surface-2/95 px-5 py-4 backdrop-blur *:grow sm:*:grow-0">
             {footer}
           </div>
         )}

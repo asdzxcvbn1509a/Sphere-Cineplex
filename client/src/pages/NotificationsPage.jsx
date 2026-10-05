@@ -17,6 +17,21 @@ const typeTone = {
   BOOKING_CANCELLED: 'border-l-muted',
   BOOKING_EXPIRED: 'border-l-muted',
   SHOWTIME_REMINDER: 'border-l-accent',
+  SEATS_CHANGED: 'border-l-success',
+  SEAT_CHANGE_REJECTED: 'border-l-danger',
+  SEAT_CHANGE_EXPIRED: 'border-l-muted',
+};
+
+/** แจ้งเตือนที่บอกว่าตั๋วพร้อมหรือที่นั่งเปลี่ยนแล้ว พาไปหน้าตั๋ว */
+const TICKET_TYPES = ['PAYMENT_APPROVED', 'SHOWTIME_REMINDER', 'SEATS_CHANGED'];
+
+/** หน้าที่แจ้งเตือนพาไป — เรื่องส่วนต่างเปลี่ยนที่นั่งไปหน้าคำขอนั้น ที่เหลือไปหน้าชำระเงินของการจอง */
+const linkFor = (item) => {
+  const { bookingId, seatChangeId } = item.data ?? {};
+  if (!bookingId) return null;
+  if (TICKET_TYPES.includes(item.type)) return `/booking/${bookingId}/ticket`;
+  if (seatChangeId) return `/booking/${bookingId}/seat-change/${seatChangeId}`;
+  return `/booking/${bookingId}/payment`;
 };
 
 const NotificationsPage = () => {
@@ -41,7 +56,7 @@ const NotificationsPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="mb-5 flex items-start justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl">{t('notifications.title')}</h1>
           {unreadCount > 0 && (
@@ -67,7 +82,7 @@ const NotificationsPage = () => {
       <div className="flex flex-col gap-2">
         {items.map((item) => {
           const unread = !item.readAt;
-          const bookingId = item.data?.bookingId;
+          const to = linkFor(item);
           const content = (
             <>
               <div className="flex items-start justify-between gap-3">
@@ -87,10 +102,10 @@ const NotificationsPage = () => {
             unread && 'bg-surface-2/60',
           );
 
-          return bookingId ? (
+          return to ? (
             <Link
               key={item.id}
-              to={`/booking/${bookingId}/${item.type === 'PAYMENT_APPROVED' || item.type === 'SHOWTIME_REMINDER' ? 'ticket' : 'payment'}`}
+              to={to}
               className={className}
               onClick={() => unread && markRead(item.id)}
             >

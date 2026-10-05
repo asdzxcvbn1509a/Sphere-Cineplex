@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock3, RefreshCw, TimerReset } from 'lucide-react';
+import { Clock3, RefreshCw, TimerReset } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getSeatMap } from '../api/showtimes.js';
-import { cancelBooking, createBooking } from '../api/bookings.js';
+import { cancelBooking, createBooking, listMyBookings } from '../api/bookings.js';
 import { useIsAuthenticated } from '../store/authStore.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import BottomBar from '../components/layout/BottomBar.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
@@ -62,6 +64,35 @@ const SeatSelectionPage = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // กลับมาหน้านี้ทั้งที่ใบเดิมของรอบนี้ยังไม่จ่าย — เปิดกล่องให้เลือกตั้งแต่เปิดหน้า
+  // ไม่ต้องให้เลือกที่นั่งใหม่จนกดยืนยันแล้วค่อยเจอ 409 PENDING_BOOKING_EXISTS (server ยังเป็นด่านจริงอยู่)
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    let ignore = false;
+    listMyBookings('upcoming')
+      .then(({ data }) => {
+        // เงื่อนไขเดียวกับ assertCanHoldMoreSeats ฝั่ง server — holdSecondsLeft นับด้วยนาฬิกา server
+        const unpaid = data.bookings.find(
+          (booking) =>
+            booking.status === 'PENDING_PAYMENT' &&
+            booking.holdSecondsLeft > 0 &&
+            booking.showtime.id === showtimeId,
+        );
+        if (!ignore && unpaid) {
+          setPendingBooking({
+            bookingId: unpaid.id,
+            seats: (unpaid.seats ?? []).map((seat) => seat.label),
+          });
+        }
+      })
+      .catch(() => {
+        // เช็กไม่สำเร็จก็ไม่เป็นไร กดยืนยันแล้ว server ตอบ 409 ให้เปิดกล่องเดิมอยู่ดี
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [isAuthenticated, showtimeId]);
 
   const seatsById = useMemo(() => {
     const map = new Map();
@@ -141,14 +172,15 @@ const SeatSelectionPage = () => {
   const { showtime } = seatMap;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-40 pt-6">
-      <button
-        type="button"
-        onClick={() => navigate(-1)}
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-fg"
-      >
-        <ArrowLeft size={16} /> {t('common.back')}
-      </button>
+    <div className="mx-auto max-w-6xl px-4 pb-10 pt-6">
+      <Breadcrumb
+        className="mb-4"
+        items={[
+          { label: t('nav.home'), to: '/' },
+          { label: pick(showtime.movie, 'title'), to: `/movies/${showtime.movie.id}` },
+          { label: t('seats.title') },
+        ]}
+      />
 
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -177,13 +209,14 @@ const SeatSelectionPage = () => {
       </div>
 
       {/* แถบสรุปติดขอบล่าง — ราคาต้องอัปเดตทันทีที่แตะที่นั่ง ตามที่ผลสำรวจระบุ */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm text-muted">
+      <BottomBar>
+        <div className="min-w-0">
+          {/* มือถือวางป้ายกับรายการที่นั่งบรรทัดเดียวกัน แถบจะเตี้ยลงและบังผังน้อยลง */}
+          <div className="flex items-baseline gap-2 sm:block">
+            <p className="shrink-0 text-sm text-muted">
               {t('seats.selectedSeats')} ({selected.length}/{MAX_SEATS})
             </p>
-            <p className="truncate font-semibold">
+            <p className="min-w-0 truncate font-semibold">
               {selectedSeats.length > 0
                 ? selectedSeats
                     .map((seat) => `${seat.rowLabel}${seat.seatNumber}`)
@@ -191,32 +224,32 @@ const SeatSelectionPage = () => {
                     .join(', ')
                 : '—'}
             </p>
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
-              <TimerReset size={13} className="shrink-0" />
-              {t('seats.holdNotice', { minutes: HOLD_MINUTES })}
+          </div>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+            <TimerReset size={13} className="shrink-0" />
+            {t('seats.holdNotice', { minutes: HOLD_MINUTES })}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className="text-xs text-muted">{t('seats.totalPrice')}</p>
+            <p className="text-xl font-bold text-accent">
+              {formatMoney(total, lang)} <span className="text-sm">{t('common.baht')}</span>
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-xs text-muted">{t('seats.totalPrice')}</p>
-              <p className="text-xl font-bold text-accent">
-                {formatMoney(total, lang)} <span className="text-sm">{t('common.baht')}</span>
-              </p>
-            </div>
-
-            <Button
-              size="lg"
-              className="flex-1 sm:flex-none"
-              loading={submitting}
-              disabled={selected.length === 0}
-              onClick={handleConfirm}
-            >
-              {t('seats.continue')}
-            </Button>
-          </div>
+          <Button
+            size="lg"
+            className="flex-1 sm:flex-none"
+            loading={submitting}
+            disabled={selected.length === 0}
+            onClick={handleConfirm}
+          >
+            {t('seats.continue')}
+          </Button>
         </div>
-      </div>
+      </BottomBar>
 
       <Modal
         open={Boolean(pendingBooking)}

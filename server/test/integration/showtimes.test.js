@@ -167,18 +167,28 @@ describe('ด่านกันลบข้อมูลที่ยังผู�
     await assert.rejects(deleteTheatre(theatre.id), apiErrorWith('THEATRE_HAS_BOOKINGS', 409));
   });
 
-  test('ลบหนังถาวรไม่ได้ถ้ายังมีเงินรอโอนคืน แต่ลบได้เมื่อทุกอย่างจบแล้ว', async () => {
+  test('ลบหนังถาวรไม่ได้ถ้ายังมีการจองค้าง แต่ลบได้เมื่อจบแล้วและไม่เคยออกใบเสร็จ', async () => {
+    const { movie, showtime, seats } = await createShowtimeFixture();
+    const user = await createUser();
+    const pending = await book({ user, showtime, seats: [seats[0]] });
+
+    await assert.rejects(deleteMovie(movie.id, { force: true }), apiErrorWith('MOVIE_HAS_OPEN_BOOKINGS', 409));
+
+    // ยกเลิกแล้ว ไม่มีอะไรค้างและไม่มีใบเสร็จ → ผู้ดูแลยืนยันลบถาวรได้
+    await cancelBooking({ bookingId: pending.id, userId: user.id });
+    const result = await deleteMovie(movie.id, { force: true });
+    assert.equal(result.deleted, true);
+  });
+
+  test('ลบหนังที่ออกใบเสร็จไปแล้วถาวรไม่ได้ แม้คืนเงินครบแล้ว — ใบเสร็จต้องอยู่เป็นหลักฐาน', async () => {
     const { movie, showtime, seats } = await createShowtimeFixture();
     const [admin, user] = await Promise.all([createAdmin(), createUser()]);
     const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[0]] });
     await cancelBooking({ bookingId: paid.id, byAdmin: true });
+    await prisma.payment.update({ where: { mainBookingId: paid.id }, data: { status: 'REFUNDED' } });
 
-    await assert.rejects(deleteMovie(movie.id, { force: true }), apiErrorWith('MOVIE_HAS_OPEN_BOOKINGS', 409));
-
-    // โอนคืนเสร็จแล้ว ไม่มีอะไรค้าง → ผู้ดูแลยืนยันลบถาวรได้
-    await prisma.payment.update({ where: { bookingId: paid.id }, data: { status: 'REFUNDED' } });
-    const result = await deleteMovie(movie.id, { force: true });
-    assert.equal(result.deleted, true);
+    await assert.rejects(deleteMovie(movie.id, { force: true }), apiErrorWith('MOVIE_HAS_RECEIPTS', 409));
+    assert.equal(await prisma.movie.count({ where: { id: movie.id } }), 1);
   });
 });
 

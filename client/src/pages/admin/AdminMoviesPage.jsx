@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { apiError } from '../../api/client.js';
 import { createMovie, deleteMovie, listMovies, updateMovie } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
@@ -33,6 +33,7 @@ const AdminMoviesPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
   const [movies, setMovies] = useState([]);
+  const [query, setQuery] = useState('');
   const [state, setState] = useState({ loading: true, error: null });
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyMovie);
@@ -55,6 +56,17 @@ const AdminMoviesPage = () => {
   };
 
   useEffect(load, []);
+
+  // ได้หนังครบทุกเรื่องมาอยู่แล้ว จึงกรองฝั่ง client แบบหน้าแรก — ผลขึ้นทันที และคำค้นไม่หายตอน load() ใหม่หลังบันทึก/ลบ
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return movies;
+    return movies.filter(
+      (movie) =>
+        movie.titleTh.toLowerCase().includes(keyword) ||
+        movie.titleEn.toLowerCase().includes(keyword),
+    );
+  }, [movies, query]);
 
   const openCreate = () => {
     setForm(emptyMovie);
@@ -147,12 +159,29 @@ const AdminMoviesPage = () => {
         </Button>
       </div>
 
+      <Field label={t('common.search')} className="mb-4 max-w-md">
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            size={15}
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('home.searchPlaceholder')}
+            className="pl-9"
+          />
+        </div>
+      </Field>
+
       {state.loading && <LoadingBlock label={t('common.loading')} />}
       {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
 
       {!state.loading && !state.error && (
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-180 text-sm sm:text-base">
+          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
+          <table className="stack-table w-full min-w-180 text-sm sm:text-base">
             <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">{t('admin.movieForm.titleTh')}</th>
@@ -164,7 +193,14 @@ const AdminMoviesPage = () => {
               </tr>
             </thead>
             <tbody>
-              {movies.map((movie) => (
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-muted">
+                    {query.trim() ? t('home.noResults') : t('common.empty')}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((movie) => (
                 <tr key={movie.id} className="border-b border-line/60 last:border-0">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -175,14 +211,20 @@ const AdminMoviesPage = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-muted">{movie.durationMin} {t('movie.minutesUnit')}</td>
-                  <td className="px-4 py-3 text-muted">{movie.genres.join(', ')}</td>
-                  <td className="px-4 py-3 text-muted">{formatDate(movie.releaseDate, lang)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-muted" data-label={t('movie.duration')}>
+                    {movie.durationMin} {t('movie.minutesUnit')}
+                  </td>
+                  <td className="px-4 py-3 text-muted" data-label={t('admin.movieForm.genres')}>
+                    {movie.genres.join(', ')}
+                  </td>
+                  <td className="px-4 py-3 text-muted" data-label={t('admin.movieForm.releaseDate')}>
+                    {formatDate(movie.releaseDate, lang)}
+                  </td>
+                  <td className="px-4 py-3" data-label={t('common.status')}>
                     <StatusBadge status={movie.status} label={t(`admin.movieStatus.${movie.status}`)} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end gap-1">
                       <Button variant="ghost" size="sm" onClick={() => openEdit(movie)}>
                         <Pencil size={14} />
                       </Button>

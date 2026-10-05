@@ -13,6 +13,9 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import PaymentPage from './pages/PaymentPage.jsx';
 import TicketPage from './pages/TicketPage.jsx';
+import ReceiptPage from './pages/ReceiptPage.jsx';
+import ChangeSeatsPage from './pages/ChangeSeatsPage.jsx';
+import SeatChangePaymentPage from './pages/SeatChangePaymentPage.jsx';
 import MyBookingsPage from './pages/MyBookingsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import NotificationsPage from './pages/NotificationsPage.jsx';
@@ -67,6 +70,32 @@ const router = createBrowserRouter([
         ),
       },
       {
+        path: 'booking/:bookingId/change-seats',
+        element: (
+          <ProtectedRoute>
+            <ChangeSeatsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        // ชำระส่วนต่างของคำขอเปลี่ยนที่นั่งที่ย้ายไปที่แพงกว่า
+        path: 'booking/:bookingId/seat-change/:changeId',
+        element: (
+          <ProtectedRoute>
+            <SeatChangePaymentPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        // ผู้ดูแลเปิดใบเสร็จของลูกค้าได้ด้วย (server ตรวจสิทธิ์เจ้าของหรือ ADMIN)
+        path: 'booking/:bookingId/receipt',
+        element: (
+          <ProtectedRoute>
+            <ReceiptPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: 'my-bookings',
         element: (
           <ProtectedRoute>
@@ -107,6 +136,8 @@ const router = createBrowserRouter([
       { path: 'theatres', element: <AdminTheatresPage /> },
       { path: 'showtimes', element: <AdminShowtimesPage /> },
       { path: 'bookings', element: <AdminBookingsPage /> },
+      // ย้ายที่นั่งแทนลูกค้า — หน้าเดียวกับฝั่งลูกค้าในโหมดผู้ดูแล (โซนเดิมเท่านั้น + เหตุผล)
+      { path: 'bookings/:bookingId/change-seats', element: <ChangeSeatsPage admin /> },
       { path: 'users', element: <AdminUsersPage /> },
       { path: 'payments', element: <AdminPaymentsPage /> },
       { path: 'refunds', element: <AdminRefundsPage /> },

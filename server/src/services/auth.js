@@ -213,8 +213,8 @@ export const changePassword = async ({ userId, currentPassword, newPassword, kee
   }
 
   // tokenVersion +1 = access token ทุกใบที่ออกก่อนหน้าใช้ไม่ได้ทันที
-  // เครื่องที่กดเปลี่ยนเองได้ 401 ครั้งเดียวแล้วต่ออายุด้วย refresh token ที่เก็บไว้ (keepToken) ต่อได้เลย
-  await prisma.user.update({
+  // เครื่องที่กดเปลี่ยนเองได้ใบใหม่กลับไปในคำตอบเลย ไม่ต้องไปเจอ 401 ก่อน (refresh token ของเครื่องนี้ก็ยังใช้ได้ — keepToken)
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { passwordHash: await hashPassword(newPassword), tokenVersion: { increment: 1 } },
   });
@@ -228,7 +228,7 @@ export const changePassword = async ({ userId, currentPassword, newPassword, kee
     data: { revokedAt: new Date() },
   });
 
-  return { ok: true };
+  return { ok: true, accessToken: signAccessToken(updated) };
 };
 
 /**

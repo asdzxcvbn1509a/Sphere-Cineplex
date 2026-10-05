@@ -24,6 +24,33 @@ export const getTicket = async (bookingId) => {
 };
 
 /**
+ * ใบเสร็จรับเงิน — ออกตอนผู้ดูแลอนุมัติสลิป เปิดได้ทั้งเจ้าของการจองและผู้ดูแล
+ * paymentId = ใบเสร็จส่วนต่างเปลี่ยนที่นั่ง (ไม่ส่ง = ใบเสร็จค่าตั๋วตอนจอง)
+ * ยังไม่มีใบเสร็จ (ยังไม่จ่าย หรือเป็นเงินที่โอนหลังหมดเวลาแล้วรอคืน) → 403 error.code = 'RECEIPT_NOT_READY'
+ */
+export const getReceipt = async (bookingId, paymentId) => {
+  return await api.get(`/bookings/${bookingId}/receipt`, {
+    params: paymentId ? { payment: paymentId } : undefined,
+  });
+};
+
+/**
+ * ขอเปลี่ยนที่นั่ง — seatIds คือชุดใหม่ทั้งชุด (รวมที่นั่งที่คงไว้) จำนวนต้องเท่าเดิม
+ *
+ * - ราคาเท่าเดิม/ถูกลง → ย้ายทันที (ถูกลงต้องส่งบัญชีรับเงินคืนมาด้วย ไม่งั้น 400 'REFUND_ACCOUNT_REQUIRED')
+ * - แพงขึ้น → seatChange.status = 'PENDING_PAYMENT' ไปโอนส่วนต่างที่ /booking/:id/seat-change/:seatChangeId
+ * - 409 'SEAT_TAKEN' (details.seats) · 'SEAT_CHANGE_PENDING' (details.seatChangeId) · 'SEAT_CHANGE_LIMIT'
+ *   และ 403 'SEAT_CHANGE_WINDOW_CLOSED'
+ */
+export const requestSeatChange = async (bookingId, { seatIds, refundBankName, refundAccountNo }) => {
+  return await api.post(`/bookings/${bookingId}/seat-changes`, {
+    seatIds,
+    ...(refundBankName && { refundBankName }),
+    ...(refundAccountNo && { refundAccountNo }),
+  });
+};
+
+/**
  * ยกเลิกการจอง
  *
  * - เลยกำหนด 3 ชม. → 403 error.code = 'CANCEL_WINDOW_CLOSED'

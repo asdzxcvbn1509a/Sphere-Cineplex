@@ -210,12 +210,13 @@ const AdminShowtimesPage = () => {
     <div className="p-4 sm:p-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold sm:text-3xl">{t('admin.showtimes')}</h1>
-        <div className="flex items-center gap-2">
+        {/* มือถือช่องวันที่ยืดเต็มแถวข้างปุ่มเพิ่ม จอใหญ่กว้างเท่าที่ต้องใช้ */}
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <Input
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
-            className="w-auto"
+            className="min-w-0 flex-1 sm:w-auto sm:flex-none"
           />
           <Button onClick={openCreate} disabled={movies.length === 0 || activeTheatres.length === 0}>
             <Plus size={16} /> {t('common.create')}
@@ -228,7 +229,8 @@ const AdminShowtimesPage = () => {
 
       {!state.loading && !state.error && (
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-180 text-sm sm:text-base">
+          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
+          <table className="stack-table w-full min-w-180 text-sm sm:text-base">
             <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.startsAt')}</th>
@@ -265,27 +267,27 @@ const AdminShowtimesPage = () => {
                       />
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" data-label={t('admin.showtimeForm.movie')}>
                     {lang === 'en' ? showtime.movie.titleEn : showtime.movie.titleTh}
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="px-4 py-3 text-muted" data-label={t('admin.showtimeForm.theatre')}>
                     {showtime.theatre.name}
                     <span className="ml-1 text-xs">({showtime.theatre.screenType})</span>
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="px-4 py-3 text-muted" data-label={t('admin.showtimeForm.basePrice')}>
                     {formatMoney(showtime.basePrice, lang)}
                     <span className="ml-1 text-xs">
                       / {formatMoney(showtime.prices.PREMIUM, lang)} / {formatMoney(showtime.prices.SOFA, lang)}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" data-label={t('seats.available')}>
                     <span className={showtime.availableSeats === 0 ? 'text-danger' : 'text-success'}>
                       {showtime.availableSeats}
                     </span>
                     <span className="text-muted"> / {showtime.totalSeats}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end gap-1">
                       {showtime.status === 'SCHEDULED' && (
                         <Button
                           variant="ghost"

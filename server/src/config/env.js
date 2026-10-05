@@ -51,10 +51,22 @@ const envSchema = z.object({
   MAX_PENDING_BOOKINGS_PER_USER: z.coerce.number().int().positive().default(3),
   // หลังหมดเวลาชำระเงินแล้วยังส่งสลิปได้อีกกี่นาที (0 = ปิด) — สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
   // ที่นั่งยังว่างก็ได้ที่นั่งเดิมคืน ไม่ว่างแล้วผู้ดูแลยืนยันยอดแล้วคืนเงินให้ เงินจึงไม่หลุดนอกระบบ
+  // (ใช้กับสลิปส่วนต่างของการเปลี่ยนที่นั่งด้วย)
   LATE_SLIP_GRACE_MINUTES: z.coerce.number().int().nonnegative().default(30),
+  // ลูกค้าเปลี่ยนที่นั่งเองได้ถึงก่อนรอบฉายกี่นาที — ย้ายในโซนเดิมไม่มีเงินเกี่ยว จึงผ่อนกว่าการยกเลิก (CANCEL_CUTOFF_HOURS)
+  SEAT_CHANGE_CUTOFF_MINUTES: z.coerce.number().int().nonnegative().default(30),
+  // ลูกค้าเปลี่ยนที่นั่งเองได้กี่ครั้งต่อการจอง — กันการสลับไปมาจนที่นั่งกระพริบให้คนอื่นจองไม่ได้
+  // (คำขอที่หมดเวลา/ยกเลิกไม่นับ และผู้ดูแลย้ายให้ไม่นับ)
+  MAX_SEAT_CHANGES_PER_BOOKING: z.coerce.number().int().positive().default(2),
 
   PROMPTPAY_ID: z.string().min(8).default('0812345678'),
   PROMPTPAY_MERCHANT_NAME: z.string().default('THEATRE RESERVATION'),
+
+  // ---------- ใบเสร็จรับเงิน ----------
+  // ชื่อผู้ออกใบเสร็จ ใช้ทั้งหน้าใบเสร็จและอีเมล — ค่าเริ่มต้นตรงกับชื่อที่ลูกค้าเห็นบนหน้าเว็บ (common.appName)
+  RECEIPT_ISSUER_NAME: z.string().trim().min(1).default('Sphere Cineplex'),
+  // ที่อยู่ผู้ออกใบเสร็จ — ไม่ตั้ง = ไม่แสดงบรรทัดที่อยู่บนใบเสร็จ
+  RECEIPT_ISSUER_ADDRESS: z.string().trim().optional(),
 
   // ---------- อีเมลขาออก ----------
   // ไม่ตั้ง SMTP_HOST = ยังไม่ส่งอีเมลจริง ระบบจะพิมพ์เนื้อเมลลง console ให้แทน (ใช้ตอนพัฒนา)
@@ -71,9 +83,27 @@ const envSchema = z.object({
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_SLIP_SIZE_MB: z.coerce.number().positive().default(5),
 
+  // ---------- ที่เก็บสลิปบน Supabase Storage ----------
+  // ไม่ตั้ง SUPABASE_URL = เก็บสลิปลงดิสก์ใต้ UPLOAD_DIR (ใช้ตอนพัฒนาและรันเทสต์)
+  // โฮสต์ที่ดิสก์ไม่ถาวร (เช่น Render) ต้องตั้ง ไม่งั้นสลิปหายทุกครั้งที่ deploy หรือ restart
+  SUPABASE_URL: z.string().trim().url('SUPABASE_URL ต้องเป็น URL เช่น https://<ref>.supabase.co').optional(),
+  // secret key (sb_secret_…) หรือ service_role key แบบเดิม — ข้าม RLS ได้ทั้งหมด จึงอยู่ฝั่ง server เท่านั้น
+  SUPABASE_SECRET_KEY: z.string().trim().min(1).optional(),
+  // ต้องเป็น bucket แบบ private — สลิปเปิดดูได้ผ่าน API ที่ตรวจสิทธิ์เท่านั้น
+  SUPABASE_SLIP_BUCKET: z.string().trim().min(1).default('slips'),
+
   // ใครอยู่หน้า API บ้าง — ใช้ตัดสินว่าจะเชื่อ X-Forwarded-For แค่ไหน (ดู utils/trustProxy.js)
   // ค่าเริ่มต้น loopback = เชื่อเฉพาะ reverse proxy บนเครื่องเดียวกัน ปลอดภัยทั้งตอนพัฒนาและตอนขึ้นจริงแบบทั่วไป
   TRUST_PROXY: z.string().default('loopback'),
+}).superRefine((value, ctx) => {
+  // ตั้งมาแค่ครึ่งเดียวถือว่าตั้งผิด — ปล่อยผ่านเงียบ ๆ แล้วสลิปตกไปอยู่บนดิสก์ จะรู้ตัวอีกทีก็ตอนสลิปหายหลัง deploy
+  if (Boolean(value.SUPABASE_URL) !== Boolean(value.SUPABASE_SECRET_KEY)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [value.SUPABASE_URL ? 'SUPABASE_SECRET_KEY' : 'SUPABASE_URL'],
+      message: 'ต้องตั้ง SUPABASE_URL และ SUPABASE_SECRET_KEY คู่กัน (หรือเว้นว่างทั้งคู่เพื่อเก็บสลิปลงดิสก์)',
+    });
+  }
 });
 
 /**
@@ -100,6 +130,9 @@ export const isDev = env.NODE_ENV === 'development';
 
 /** ตั้ง SMTP_HOST แล้วเท่านั้นถึงจะส่งอีเมลจริง ไม่งั้น mailer จะพิมพ์ลง console ให้แทน */
 export const isMailConfigured = Boolean(env.SMTP_HOST);
+
+/** ตั้ง SUPABASE_URL แล้วสลิปไปอยู่บน Supabase Storage ไม่งั้นเก็บลงดิสก์ใต้ UPLOAD_DIR (ดู lib/slipStorage.js) */
+export const isSupabaseConfigured = Boolean(env.SUPABASE_URL);
 
 /**
  * ไม่ใช้ z.coerce.boolean() เพราะ coerce ตีความสตริง 'false' เป็น true
