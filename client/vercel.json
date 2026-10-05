@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://theatre-reservation-api.onrender.com"
+      "destination": "https://theatre-reservation-api.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
