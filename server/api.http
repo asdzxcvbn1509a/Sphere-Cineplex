@@ -1,7 +1,7 @@
 ### Theatre Reservation System — ตัวอย่างการเรียก API
 ### เปิดไฟล์นี้ใน VS Code แล้วติดตั้งส่วนขยาย "REST Client" จากนั้นกด "Send Request" เหนือแต่ละบล็อก
 ### ทำตามลำดับจากบนลงล่าง เพราะบล็อกหลัง ๆ ใช้ค่าจากบล็อกก่อนหน้า
-### บัญชีด้านล่างมาจาก npm run db:seed (ดูตาราง "บัญชีสำหรับทดลอง" ใน README)
+### บัญชีด้านล่างมาจาก npm run db:seed (ดูตาราง "Demo accounts" ใน README)
 
 @host = http://localhost:4000/api
 @userLogin = somchai@example.test

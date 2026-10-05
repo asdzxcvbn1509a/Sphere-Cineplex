@@ -1,636 +1,636 @@
 # 🎬 Theatre Reservation System (CineBook)
 
-ระบบจองที่นั่งโรงภาพยนตร์แบบ full-stack — ผู้ใช้เลือกเรื่อง วัน รอบฉาย และที่นั่ง ชำระเงินผ่าน PromptPay QR แล้วรับ E-Ticket พร้อมใบเสร็จรับเงิน (E-Receipt) และเปลี่ยนที่นั่งภายหลังได้ ส่วนผู้ดูแลระบบจัดการโรงภาพยนตร์ รอบฉาย ตรวจสลิป และดูรายงานยอดขาย
+A full-stack movie theatre seat booking system — users pick a movie, date, showtime and seats, pay with a PromptPay QR, then get an E-Ticket along with a receipt (E-Receipt), and can change seats afterwards. Admins manage theatres and showtimes, review payment slips and view sales reports
 
-ออกแบบ UX/UI ตามผลสำรวจผู้ใช้จริง 30 คน (รายละเอียดใน [chat_history.md](chat_history.md))
+UX/UI designed from a survey of 30 real users (details in [chat_history.md](chat_history.md))
 
-> **การชำระเงิน** — QR สร้างตามมาตรฐาน EMVCo ของ PromptPay จริง ปลายทางคือหมายเลขพร้อมเพย์ที่ตั้งไว้ใน `PROMPTPAY_ID` ของ `server/.env`
-> ระบบไม่ได้ต่อกับธนาคารเพื่อตรวจยอดเข้าอัตโนมัติ การยืนยันการชำระเงินจึงทำโดยผู้ดูแลระบบตรวจสลิปที่ลูกค้าอัปโหลดเข้ามา
+> **Payments** — the QR follows PromptPay's real EMVCo standard; the destination is the PromptPay number set in `PROMPTPAY_ID` in `server/.env`
+> The system isn't connected to a bank to detect incoming transfers automatically, so payments are confirmed by an admin reviewing the slip the customer uploads
 >
-> ⚠️ **ก่อนเปิดใช้งานจริง** ต้องเปลี่ยน `PROMPTPAY_ID` เป็นหมายเลขบัญชีจริง สร้าง `JWT_*_SECRET` ใหม่ ตั้งค่า `SMTP_*` ให้ส่งอีเมลได้จริง (ไม่งั้นคนที่ลืมรหัสผ่านจะไม่ได้รับลิงก์ และลูกค้าไม่ได้รับใบเสร็จทางอีเมล) ตั้ง `NODE_ENV=production` ตั้ง `TRUST_PROXY` ให้ตรงกับ proxy ที่อยู่หน้า API (ไม่งั้น rate limit นับไอพีผิด) และให้บริการผ่าน HTTPS (refresh cookie ถึงจะถูกส่งแบบ `Secure`)
+> ⚠️ **Before going live** you must change `PROMPTPAY_ID` to a real account number, generate new `JWT_*_SECRET`s, configure `SMTP_*` so email really gets sent (otherwise people who forget their password won't get the link, and customers won't get receipts by email), set `NODE_ENV=production`, set `TRUST_PROXY` to match the proxies in front of the API (otherwise rate limits count the wrong IPs), and serve over HTTPS (only then is the refresh cookie sent as `Secure`)
 
 ---
 
-## เทคโนโลยีที่ใช้
+## Tech stack
 
-| ส่วน | เทคโนโลยี |
+| Part | Technology |
 |---|---|
 | Frontend | Vite 7 · React 19 (JavaScript) · React Router 7 · TailwindCSS 4 |
 | Backend | Node.js · Express 5 (ESM) |
 | Database | PostgreSQL · Prisma ORM 6 |
-| Auth | สมัครสมาชิก/เข้าสู่ระบบด้วยอีเมลหรือเบอร์โทร + รหัสผ่าน (bcrypt) · JWT access token 15 นาที + refresh token 7 วัน แบบ rotate · ลืมรหัสผ่านผ่านลิงก์ทางอีเมล |
-| อีเมล | nodemailer ต่อ SMTP — ไม่ตั้งค่าไว้จะพิมพ์เนื้ออีเมลลง console แทน |
-| Payment | PromptPay QR (EMVCo payload) + อัปโหลดสลิปให้ Admin ตรวจ |
-| ภาษา | ไทย / อังกฤษ สลับได้ทั้งระบบ |
+| Auth | Sign up / log in with email or phone + password (bcrypt) · 15-minute JWT access token + 7-day rotating refresh token · Forgot password via an emailed link |
+| Email | nodemailer over SMTP — when not configured, email content is printed to the console instead |
+| Payment | PromptPay QR (EMVCo payload) + slip upload for admin review |
+| Language | Thai / English, switchable across the whole system |
 
 ---
 
-## ความต้องการของระบบ
+## Requirements
 
-- Node.js 20 ขึ้นไป (พัฒนาและทดสอบบน Node 24)
-- PostgreSQL 14 ขึ้นไป ติดตั้งบนเครื่อง (ทดสอบบน PostgreSQL 18)
+- Node.js 20 or later (developed and tested on Node 24)
+- PostgreSQL 14 or later, installed locally (tested on PostgreSQL 18)
 
 ---
 
-## ติดตั้งและรัน
+## Install and run
 
-> `client/` และ `server/` เป็นโปรเจกต์อิสระคนละชุด มี `package.json` และ `node_modules` ของตัวเอง ไม่มี workspace ครอบที่ root
+> `client/` and `server/` are separate, independent projects, each with its own `package.json` and `node_modules`. There's no workspace at the root
 >
-> หัวข้อนี้คือการรันบนเครื่องตัวเอง ส่วนการขึ้นระบบจริง (Vercel + Render + Supabase) ดู [DEPLOY.md](DEPLOY.md)
+> This section covers running on your own machine. For going live (Vercel + Render + Supabase), see [DEPLOY.md](DEPLOY.md)
 
-### 1. ติดตั้ง dependencies (ทำทั้งสองโฟลเดอร์)
+### 1. Install dependencies (in both folders)
 
 ```bash
 cd server && npm install
 cd ../client && npm install
 ```
 
-### 2. เตรียมฐานข้อมูล
+### 2. Prepare the database
 
-สร้างฐานข้อมูลเปล่าใน PostgreSQL (ทำครั้งเดียว)
+Create an empty database in PostgreSQL (one time only)
 
 ```bash
-# Windows PowerShell — เปลี่ยน path ตามเวอร์ชัน PostgreSQL ที่ติดตั้ง
+# Windows PowerShell — adjust the path to your installed PostgreSQL version
 & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -c "CREATE DATABASE theatre_reservation_v2"
 ```
 
-### 3. ตั้งค่า environment
+### 3. Configure the environment
 
 ```bash
 cp server/.env.example server/.env     # Windows: copy server\.env.example server\.env
 ```
 
-แก้ไข `server/.env`:
+Edit `server/.env`:
 
-- `DATABASE_URL` — ใส่รหัสผ่านของ user `postgres` แทน `<PASSWORD>`
-- `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` — สร้างค่าใหม่ด้วย
+- `DATABASE_URL` — replace `<PASSWORD>` with the password of the `postgres` user
+- `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` — generate new values with
 
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   ```
 
-- `SMTP_*` — ข้ามได้ตอนพัฒนา เพราะยังไม่ตั้งค่าระบบจะพิมพ์อีเมล (พร้อมลิงก์ตั้งรหัสผ่านใหม่) ลง console ของเซิร์ฟเวอร์ให้แทน
-  แต่**ต้องตั้งก่อนเปิดใช้งานจริง** ไม่งั้นคนที่ลืมรหัสผ่านจะไม่ได้รับลิงก์
-- `SUPABASE_*` — ข้ามได้ตอนพัฒนา เพราะยังไม่ตั้งค่าสลิปจะถูกเก็บลงดิสก์ที่ `server/uploads/`
-  แต่**ต้องตั้งก่อนขึ้นโฮสต์ที่ดิสก์ไม่ถาวร** เช่น Render (ดู [ที่เก็บสลิป](#ที่เก็บสลิป))
+- `SMTP_*` — can be skipped during development: while it's unset, the system prints emails (including password reset links) to the server console instead
+  But it **must be set before going live**, otherwise people who forget their password won't get the link
+- `SUPABASE_*` — can be skipped during development: while it's unset, slips are stored on disk in `server/uploads/`
+  But it **must be set before deploying to a host without a persistent disk**, such as Render (see [Slip storage](#slip-storage))
 
-### 4. สร้างตารางและใส่ข้อมูลตัวอย่าง
+### 4. Create the tables and load sample data
 
 ```bash
 cd server
-npm run db:migrate      # สร้างตารางตาม prisma/schema.prisma
-npm run db:seed         # หนัง 6 เรื่อง, โรง 3 โรง, รอบฉาย 7 วันข้างหน้า
+npm run db:migrate      # create tables from prisma/schema.prisma
+npm run db:seed         # 6 movies, 3 theatres, showtimes for the next 7 days
 ```
 
-### 5. รันระบบ
+### 5. Run the system
 
-เปิด **สองเทอร์มินัล** แล้วรันแยกฝั่ง
+Open **two terminals** and run each side separately
 
 ```bash
-# เทอร์มินัลที่ 1 — API ที่ port 4000
+# Terminal 1 — API on port 4000
 cd server
 npm start
 ```
 
 ```bash
-# เทอร์มินัลที่ 2 — เว็บที่ port 5173
+# Terminal 2 — web app on port 5173
 cd client
 npm start
 ```
 
-ทั้งสองโฟลเดอร์ใช้ `npm start` หรือ `npm run dev` ก็ได้ ผลลัพธ์เหมือนกัน (แก้โค้ดแล้วรีโหลดให้อัตโนมัติทั้งคู่)
+Both folders accept either `npm start` or `npm run dev` with the same result (both reload automatically when you edit code)
 
-เปิด <http://localhost:5173>
+Open <http://localhost:5173>
 
-### บัญชีสำหรับทดลอง
+### Demo accounts
 
-| บทบาท | อีเมล | เบอร์โทร | รหัสผ่าน | หมายเหตุ |
+| Role | Email | Phone | Password | Notes |
 |---|---|---|---|---|
-| ผู้ดูแลระบบ | `admin@cinebook.test` | `0800000000` | `Password123` | เข้าหน้า `/admin` ได้ |
-| ผู้ใช้ทั่วไป | `somchai@example.test` | `0891234567` | `Password123` | มีประวัติการจองตัวอย่าง |
-| ผู้ใช้ใหม่ | — | — | — | สมัครเองที่ `/register` |
+| Admin | `admin@cinebook.test` | `0800000000` | `Password123` | Can access `/admin` |
+| Regular user | `somchai@example.test` | `0891234567` | `Password123` | Has sample booking history |
+| New user | — | — | — | Sign up yourself at `/register` |
 
-ช่องแรกของหน้าเข้าสู่ระบบกรอกได้ทั้ง**อีเมลหรือเบอร์โทรศัพท์** ระบบดูจากเครื่องหมาย `@` ว่าจะค้นด้วยอะไร
-ผู้ใช้จะได้ไม่ต้องจำว่าตอนสมัครกรอกอะไรไว้ ส่วนเบอร์โทรจะถูกจัดรูปให้เป็น 10 หลักเสมอ (`089-123-4567` = `0891234567`)
+The first field on the login page accepts either an **email or a phone number**; the system looks for an `@` to decide which one to search by
+so users don't have to remember which one they signed up with. Phone numbers are always normalized to 10 digits (`089-123-4567` = `0891234567`)
 
-ในโหมด development หน้าเข้าสู่ระบบมีปุ่มลัดสำหรับกรอกบัญชีตัวอย่างทั้งสองข้างต้นให้อัตโนมัติ (ไม่แสดงตอน build จริง)
+In development mode the login page has shortcut buttons that fill in the two sample accounts above (not shown in production builds)
 
-ตั้ง `SEED_PASSWORD` ตอนรัน seed ได้ ถ้าต้องการใช้รหัสอื่นแทน `Password123` — **ต้องตั้งทุกครั้งที่ seed เว็บที่คนนอกเข้าได้** เพราะรหัสในตารางนี้ใครก็อ่านได้ (ดู [DEPLOY.md](DEPLOY.md))
-
----
-
-## คำสั่งที่ใช้บ่อย
-
-| ใน `server/` | ทำอะไร |
-|---|---|
-| `npm start` (หรือ `npm run dev`) | รัน API พร้อม auto-restart เมื่อแก้ไฟล์ |
-| `npm run start:prod` | รัน API แบบไม่ watch ไฟล์ (สำหรับ production) |
-| `npm run db:migrate` | สร้าง/อัปเดตตารางจาก schema |
-| `npm run db:seed` | ล้างข้อมูลแล้วใส่ข้อมูลตัวอย่างใหม่ |
-| `npm run db:studio` | เปิด Prisma Studio ดูข้อมูลในฐานข้อมูล |
-| `npm run db:reset` | ลบทุกตารางแล้ว migrate + seed ใหม่ |
-| `npm test` | รัน unit test (ไม่ต้องใช้ฐานข้อมูล) |
-| `npm run test:int` | รัน integration test กับฐานข้อมูลทดสอบแยก (ดู [การทดสอบ](#การทดสอบ)) |
-
-| ใน `client/` | ทำอะไร |
-|---|---|
-| `npm start` (หรือ `npm run dev`) | รันเว็บที่ port 5173 |
-| `npm run build` | build ไปที่ `client/dist` |
-| `npm run preview` | ดูผลลัพธ์ที่ build แล้ว |
+You can set `SEED_PASSWORD` when running the seed to use a password other than `Password123` — **you must set it every time you seed a site outsiders can reach**, because anyone can read the password in this table (see [DEPLOY.md](DEPLOY.md))
 
 ---
 
-## Flow การทำงานหลัก
+## Common commands
+
+| In `server/` | What it does |
+|---|---|
+| `npm start` (or `npm run dev`) | Run the API with auto-restart on file changes |
+| `npm run start:prod` | Run the API without watching files (for production) |
+| `npm run db:migrate` | Create/update tables from the schema |
+| `npm run db:seed` | Wipe the data and load fresh sample data |
+| `npm run db:studio` | Open Prisma Studio to browse the database |
+| `npm run db:reset` | Drop every table, then migrate + seed again |
+| `npm test` | Run unit tests (no database needed) |
+| `npm run test:int` | Run integration tests against a separate test database (see [Testing](#testing)) |
+
+| In `client/` | What it does |
+|---|---|
+| `npm start` (or `npm run dev`) | Run the web app on port 5173 |
+| `npm run build` | Build into `client/dist` |
+| `npm run preview` | Preview the built output |
+
+---
+
+## Main flow
 
 ```
-เลือกหนัง → เลือกวัน/รอบ → เลือกที่นั่ง ─┐
-                                          │ (ยังไม่ต้องล็อกอิน)
-                          กดยืนยัน ───────┴─→ เข้าสู่ระบบ / สมัครสมาชิก
-                                                      │
-                        PENDING_PAYMENT ←─────────────┘  กันที่นั่ง 10 นาที
-                              │
-                   ผู้ใช้อัปโหลดสลิป
-                              ↓
-                   PENDING_VERIFICATION   ← หยุดนับถอยหลัง ที่นั่งถูกกันไว้ต่อ
-                                          ช่วงนี้ผู้ใช้ยกเลิกเองไม่ได้ ต้องรอผลก่อน
-                        ┌─────┴─────┐
-              Admin อนุมัติ      Admin ปฏิเสธ
-                    ↓                 ↓
-                  PAID        PENDING_PAYMENT (ให้เวลาใหม่ 10 นาที)
-                    ↓
-     ออก E-Ticket + ใบเสร็จเลขที่ RC-2026-000123 (ส่งอีเมลใบเสร็จให้ด้วย)
-                    ↓
-     ยกเลิกฟรีได้ถ้าเหลือเวลาก่อนฉาย ≥ 3 ชั่วโมง → คืนที่นั่งเข้าระบบ
-                    ↓  ผู้ใช้แจ้งธนาคาร + เลขที่บัญชีตอนกดยกเลิก
-                    ↓
-     payment: APPROVED → REFUND_PENDING เข้าคิว /admin/refunds
-                    ↓
-     ผู้ดูแลโอนคืนผ่านแอปธนาคารเอง แล้วกดบันทึก (แนบสลิปได้)
-                    ↓
-     payment: REFUNDED + แจ้งเตือนผู้ใช้
+Pick movie → pick date/showtime → pick seats ─┐
+                                              │ (no login needed yet)
+                               Confirm ───────┴─→ Log in / Sign up
+                                                         │
+                        PENDING_PAYMENT ←────────────────┘  seats held for 10 minutes
+                               │
+                      User uploads a slip
+                               ↓
+                     PENDING_VERIFICATION   ← countdown stops, seats stay held
+                                              the user can't cancel until the result is in
+                       ┌───────┴───────┐
+                Admin approves   Admin rejects
+                       ↓               ↓
+                      PAID      PENDING_PAYMENT (another 10 minutes)
+                       ↓
+     E-Ticket + receipt no. RC-2026-000123 issued (receipt also emailed)
+                       ↓
+     Free cancellation if ≥ 3 hours before the showtime → seats released back to the system
+                       ↓  user gives bank + account number when cancelling
+                       ↓
+     payment: APPROVED → REFUND_PENDING, queued at /admin/refunds
+                       ↓
+     Admin refunds by transfer in their own banking app, then records it (slip can be attached)
+                       ↓
+     payment: REFUNDED + user notified
 ```
 
-**ที่นั่งหมดเวลา:** background job ตรวจทุก 30 วินาที ถ้าเลยเวลาชำระเงินจะเปลี่ยนเป็น `EXPIRED` ปล่อยที่นั่งคืน และแจ้งเตือนผู้ใช้
-คนที่โอนเงินไปแล้วแต่ส่งสลิปไม่ทันยังส่งได้อีก 30 นาที (ดู [ส่งสลิปหลังหมดเวลา](#ส่งสลิปหลังหมดเวลา))
+**Expired holds:** a background job checks every 30 seconds; once a booking is past its payment deadline it becomes `EXPIRED`, its seats are released and the user is notified
+Anyone who already transferred the money but didn't upload the slip in time can still upload it for another 30 minutes (see [Late slip submission](#late-slip-submission))
 
-**ปฏิเสธสลิปหลังรอบเริ่มฉาย:** ไม่กลับไป `PENDING_PAYMENT` แต่ปิดการจองเป็น `EXPIRED` และคืนที่นั่ง — ไม่มีประโยชน์ที่จะให้เวลาจ่ายใหม่ 10 นาทีกับรอบที่ฉายไปแล้ว
+**Slip rejected after the showtime starts:** the booking doesn't go back to `PENDING_PAYMENT`; it's closed as `EXPIRED` and the seats are released — there's no point giving another 10 minutes to pay for a showtime that's already playing
 
-**ยกเลิกทั้งรอบ:** ผู้ดูแลยกเลิกรอบที่มีคนจองได้ในคราวเดียว ทุกใบถูกปิด ใบที่จ่ายแล้วเข้าคิวคืนเงิน (ดู [ยกเลิกทั้งรอบฉาย](#ยกเลิกทั้งรอบฉาย))
+**Cancelling a whole showtime:** an admin can cancel a showtime that has bookings in a single action. Every booking is closed, and paid ones go to the refund queue (see [Cancelling a whole showtime](#cancelling-a-whole-showtime))
 
-**เปลี่ยนที่นั่ง:** ใบที่จ่ายแล้วเปลี่ยนที่นั่งเองได้ก่อนฉาย 30 นาที ย้ายข้ามโซนได้ — แพงขึ้นโอนส่วนต่าง ถูกลงได้ส่วนต่างคืน (ดู [เปลี่ยนที่นั่ง](#เปลี่ยนที่นั่ง))
+**Changing seats:** paid bookings can change their own seats until 30 minutes before the showtime, across zones too — pricier seats mean transferring the difference, cheaper ones get the difference back (see [Seat changes](#seat-changes))
 
 ---
 
-## จุดออกแบบที่ควรรู้
+## Design notes
 
-### การกันจองที่นั่งซ้ำ (race condition)
+### Preventing double booking (race condition)
 
-ตาราง `BookingSeat` มี `@@unique([showtimeId, seatId])` — PostgreSQL เป็นผู้การันตีว่าที่นั่งหนึ่งในรอบฉายหนึ่งมีได้เพียงการจองเดียว ถ้าผู้ใช้สองคนกดยืนยันที่นั่งเดียวกันพร้อมกัน ฝั่งที่ช้ากว่าจะได้ HTTP 409 `SEAT_TAKEN` พร้อมรายชื่อที่นั่งที่ถูกตัดหน้า ไม่ใช่การเช็คด้วย `SELECT` แล้วค่อย `INSERT` ซึ่งมีช่องว่างให้แทรกได้
+The `BookingSeat` table has `@@unique([showtimeId, seatId])` — PostgreSQL itself guarantees that a seat in a showtime can belong to only one booking. If two users confirm the same seat at the same time, the slower one gets HTTP 409 `SEAT_TAKEN` along with the list of seats that were taken first. This is not a `SELECT` check followed by an `INSERT`, which leaves a gap for another request to slip in
 
-เมื่อการจองถูกยกเลิกหรือหมดอายุ แถวใน `BookingSeat` จะถูก **ลบ** เพื่อคืนที่นั่งเข้าระบบ ข้อมูลที่นั่งสำหรับแสดงประวัติเก็บไว้แยกใน `Booking.seatSnapshot`
+When a booking is cancelled or expires, its `BookingSeat` rows are **deleted** to release the seats. The seat details shown in booking history are kept separately in `Booking.seatSnapshot`
 
-### การเปลี่ยนสถานะพร้อมกัน
+### Concurrent status changes
 
-ทุกจุดที่เปลี่ยนสถานะการจอง/การชำระเงิน (หมดเวลา ส่งสลิป อนุมัติ ปฏิเสธ ยกเลิก บันทึกคืนเงิน) เขียนแบบ **compare-and-set**
-คือใส่สถานะที่คาดไว้ลงใน `WHERE` ของคำสั่ง update แล้วเช็กว่าโดนแถวจริงไหม — ไม่ใช่อ่านมาเช็กก่อนแล้วค่อยเขียนทับ
-ถ้ามีอีกรายการชิงเปลี่ยนสถานะไปก่อนในเสี้ยววินาทีเดียวกัน ฝั่งที่ช้ากว่าจะได้ 409 และทั้ง transaction ถูกยกเลิก
+Every place that changes a booking/payment status (expiry, slip upload, approve, reject, cancel, record refund) is written as **compare-and-set**:
+the expected status goes into the `WHERE` of the update, and the code checks that a row was actually hit — not reading and checking first, then overwriting
+If another operation grabs the status change first in the same split second, the slower one gets 409 and its whole transaction is rolled back
 
-| สถานการณ์ | ถ้าไม่ทำแบบนี้ |
+| Scenario | Without this |
 |---|---|
-| job หมดเวลาทำงานพอดีกับที่ลูกค้ากดส่งสลิป | การจองถูกทับเป็น `EXPIRED` ที่นั่งถูกปล่อย แต่สลิปหายจากคิวตรวจ — เงินหลุดนอกระบบ |
-| ผู้ดูแลคนหนึ่งอนุมัติ อีกคนกดยกเลิกพร้อมกัน | การจองเป็น `PAID` ทั้งที่ที่นั่งถูกปล่อยให้คนอื่นจองซ้ำไปแล้ว |
-| กดบันทึกคืนเงินซ้ำ | ลูกค้าได้แจ้งเตือนสองครั้ง สลิปใบแรกกลายเป็นไฟล์กำพร้า |
-| กดเปลี่ยนที่นั่งซ้ำพร้อมกัน (สองแท็บ) | คำขอที่ช้ากว่าลบที่นั่งตามชุดเก่า แล้วจองชุดใหม่ทับ — เหลือที่นั่งค้างที่ไม่มีใครจ่าย (การเปลี่ยนที่นั่งล็อกแถวการจองแล้วเช็กว่าที่นั่งยังเป็นชุดเดิมก่อนเสมอ) |
+| The expiry job runs at the exact moment a customer uploads a slip | The booking is overwritten as `EXPIRED` and the seats are released, but the slip disappears from the review queue — money falls outside the system |
+| One admin approves while another cancels at the same time | The booking becomes `PAID` even though its seats were already released for someone else to book |
+| Recording a refund twice | The customer gets two notifications, and the first slip becomes an orphaned file |
+| Submitting a seat change twice at once (two tabs) | The slower request deletes seats based on the old set, then books its new set on top — leaving held seats that nobody pays for (a seat change always locks the booking row and checks the seats are still the same set first) |
 
-ทุกรายการล็อกตามลำดับเดียวกัน `Showtime` (แบบแชร์) → `Booking` → `SeatChange` → `BookingSeat` → `Payment` → `ReceiptCounter` และบันทึกที่นั่งเรียงตาม id — ลำดับเดียวกันทั้งระบบจึงไม่เกิด deadlock
-(ตัวนับเลขที่ใบเสร็จ `ReceiptCounter` ถูกล็อกเป็นลำดับสุดท้ายเสมอ และไม่มีที่ไหนล็อกตัวนับก่อน)
-(ถ้า PostgreSQL ยังต้องตัดสินให้ฝั่งหนึ่งแพ้ ผู้ใช้จะได้ 409 `WRITE_CONFLICT` ให้ลองใหม่ ไม่ใช่ 500)
-ส่วนการสร้างการจองล็อกแถวรอบฉายแบบแชร์ (`FOR SHARE`) ไว้ระหว่างบันทึก การจองที่เข้ามาตอนผู้ดูแลกำลังยกเลิกรอบจึงหลุดเข้าไปไม่ได้
+Every operation locks in the same order — `Showtime` (shared) → `Booking` → `SeatChange` → `BookingSeat` → `Payment` → `ReceiptCounter` — and writes seats sorted by id. With one order across the whole system, deadlocks can't happen
+(The receipt number counter `ReceiptCounter` is always locked last, and nothing locks the counter before anything else)
+(If PostgreSQL still has to pick a loser, the user gets 409 `WRITE_CONFLICT` to retry, not a 500)
+Creating a booking holds a shared lock on the showtime row (`FOR SHARE`) while it writes, so a booking that arrives while an admin is cancelling the showtime can't slip through
 
-เคสพวกนี้มี integration test ยิงพร้อมกันจริงกับ PostgreSQL ครอบไว้ทุกตัว (`server/test/integration/`)
+Every one of these cases is covered by integration tests that fire truly concurrent requests at PostgreSQL (`server/test/integration/`)
 
-### นโยบายกักที่นั่ง
+### Seat hold limits
 
-การจองที่ยังไม่จ่ายถือที่นั่งไว้ 10 นาที ถ้าไม่จำกัด บัญชีเดียวก็วนจองกักได้ทั้งโรง
+An unpaid booking holds its seats for 10 minutes. Without limits, a single account could keep booking to hold an entire theatre
 
-- **รอบเดียวกันมีใบที่ยังไม่จ่ายอยู่** → หน้าผังที่นั่งขึ้นหน้าต่างให้เลือก "ไปชำระเงินใบเดิม" หรือ "ยกเลิกใบเดิม"
-  ส่วนใหญ่เกิดจากกด back ออกจากหน้าชำระเงินมาเลือกใหม่ — เดิมที่นั่งชุดแรกของตัวเองจะค้างอยู่ 10 นาทีโดยไม่รู้ตัว
-  หน้าเว็บเช็กใบค้างของตัวเองตั้งแต่เปิดหน้า (จากรายการจองของฉัน) หน้าต่างจึงขึ้นทันทีโดยไม่ต้องเลือกที่นั่งใหม่ก่อน
-  ส่วน server ยังเป็นด่านจริงด้วย 409 `PENDING_BOOKING_EXISTS` (เช่น ปิดหน้าต่างแล้วกดยืนยันต่อ หรือจองจากอีกแท็บ)
-  (ใบที่ส่งสลิปแล้วไม่นับ จองเพิ่มให้เพื่อนในรอบเดียวกันได้ตามปกติ)
-- **ถือที่นั่งค้างรวมทุกรอบเกิน `MAX_PENDING_BOOKINGS_PER_USER`** (ค่าเริ่มต้น 3 นับทั้งรอชำระและรอตรวจสลิป) → 409 `TOO_MANY_PENDING_BOOKINGS`
-- `POST /api/bookings` จำกัด 10 ครั้งที่จองสำเร็จต่อบัญชีใน 10 นาที กันสคริปต์จอง-ยกเลิกวนให้ที่นั่งกระพริบจนคนอื่นจองไม่ได้
+- **An unpaid booking already exists for the same showtime** → the seat map shows a dialog offering "Pay for that booking" or "Cancel it"
+  This mostly happens when someone presses back from the payment page to pick again — previously their first set of seats stayed held for 10 minutes without them realizing
+  The page checks for the user's own pending booking as soon as it opens (from My bookings), so the dialog appears right away, before any new seats are picked
+  The server is still the real gate, with 409 `PENDING_BOOKING_EXISTS` (e.g. closing the dialog and confirming anyway, or booking from another tab)
+  (Bookings whose slip has been uploaded don't count, so booking extra seats for friends in the same showtime works as usual)
+- **Holding pending bookings across all showtimes beyond `MAX_PENDING_BOOKINGS_PER_USER`** (default 3, counting both awaiting payment and awaiting slip review) → 409 `TOO_MANY_PENDING_BOOKINGS`
+- `POST /api/bookings` allows 10 successful bookings per account per 10 minutes, stopping scripts that loop book-and-cancel to make seats flicker so nobody else can book them
 
-### ส่งสลิปหลังหมดเวลา
+### Late slip submission
 
-ลูกค้าที่สแกนจ่ายตอนนาทีสุดท้ายแล้วกลับมาส่งสลิปไม่ทัน เดิมเจอแค่ "หมดเวลาแล้ว" ทั้งที่เงินเข้าบัญชีไปแล้ว — เงินก้อนนั้นไม่มีที่อยู่ในระบบเลย
-ตอนนี้ยังส่งสลิปได้อีก `LATE_SLIP_GRACE_MINUTES` นาที (ค่าเริ่มต้น 30) นับจากตอนหมดเวลา ทั้งจากหน้าชำระเงินเดิมและปุ่ม "ส่งสลิป (โอนแล้ว)" ที่หน้า `/my-bookings`
+A customer who scanned and paid in the final minute but came back too late to upload the slip used to get nothing but an "expired" message, even though the money had already arrived — that payment had no place in the system at all
+Now the slip can still be uploaded for `LATE_SLIP_GRACE_MINUTES` minutes (default 30) after the hold expires, both from the original payment page and from the "Upload slip (already paid)" button on `/my-bookings`
 
-| สถานการณ์ตอนส่ง | ผลลัพธ์ |
+| Situation at upload time | Result |
 |---|---|
-| ที่นั่งเดิมยังว่าง และรอบยังไม่เริ่ม | ได้ที่นั่งเดิมคืน เข้าคิวตรวจตามปกติเหมือนไม่เคยหมดเวลา |
-| ที่นั่งถูกคนอื่นจองไปแล้ว / รอบเริ่มหรือถูกยกเลิก | การจองยังเป็น `EXPIRED` แต่สลิปเข้าคิวตรวจพร้อมป้าย "โอนหลังหมดเวลา" — ผู้ดูแล **อนุมัติ = เข้าคิวคืนเงิน** (ไม่ออกตั๋ว) ปฏิเสธ = ปิดจบ |
-| เลยช่วงผ่อนผันแล้ว | 409 `HOLD_EXPIRED` พร้อมบอกให้ติดต่อเจ้าหน้าที่ด้วยรหัสการจอง |
+| The original seats are still free and the showtime hasn't started | The seats are restored and the slip enters the review queue as usual, as if the hold had never expired |
+| The seats were booked by someone else / the showtime started or was cancelled | The booking stays `EXPIRED`, but the slip enters the review queue with a "Paid after the deadline" badge — for the admin, **approve = queue a refund** (no ticket is issued); reject = closed |
+| Past the grace period | 409 `HOLD_EXPIRED`, telling the customer to contact staff with the booking code |
 
-การเอาที่นั่งคืนพึ่ง unique constraint ตัวเดียวกับตอนจองปกติ จึงไม่มีทางได้ที่นั่งซ้อนกับคนที่จองต่อไปแล้ว
-และนับถอยหลังบนหน้าชำระเงินคำนวณจาก `holdSecondsLeft` ที่ server ส่งมา ไม่ใช่นาฬิกาเครื่องลูกค้า — เครื่องที่ตั้งเวลาช้าจะได้ไม่เห็นเวลาเหลือมากกว่าจริง
+Restoring the seats relies on the same unique constraint as a normal booking, so there's no way to end up sharing seats with whoever booked them in the meantime
+And the countdown on the payment page is computed from the `holdSecondsLeft` the server sends, not the customer's device clock — so a device whose clock runs behind won't show more time left than there really is
 
-### บัญชีผู้ใช้และรหัสผ่าน
+### User accounts and passwords
 
-สมัครสมาชิกครั้งเดียวที่ `/register` (ชื่อ อีเมล เบอร์โทร รหัสผ่าน) แล้วระบบจะถือว่าเข้าสู่ระบบให้เลย
-ไม่ต้องกรอกซ้ำอีกรอบ คนที่กำลังเลือกที่นั่งค้างไว้จึงกดสมัครแล้วกลับมาจองต่อได้ทันที
+Signing up once at `/register` (name, email, phone, password) also logs the user in
+with no need to enter anything a second time, so someone in the middle of picking seats can sign up and go straight back to booking
 
-**อีเมลเป็นชื่อผู้ใช้หลัก** (เก็บเป็นตัวพิมพ์เล็กเสมอ จะได้ไม่มีบัญชีซ้ำเพราะพิมพ์ใหญ่/เล็กต่างกัน)
-ส่วน **เบอร์โทรบังคับกรอกและห้ามซ้ำ** เพราะเป็นช่องทางเดียวที่ผู้ดูแลใช้ติดต่อกลับเวลาการจองหรือการคืนเงินมีปัญหา
-และใช้ล็อกอินแทนอีเมลได้ด้วย
+**Email is the primary username** (always stored in lowercase, so differences in case can't create duplicate accounts)
+The **phone number is required and must be unique**, because it's the only channel admins use to get back to customers when a booking or refund has a problem
+and it can also be used to log in instead of the email
 
-**เปลี่ยนรหัสผ่านเอง** ทำได้ที่ `/profile` โดยต้องกรอกรหัสผ่านเดิมยืนยันก่อน
-ถ้ามีใครขโมยเซสชันไปได้ จะได้ยึดบัญชีทั้งใบด้วยการตั้งรหัสใหม่ไม่ได้
-เปลี่ยนสำเร็จแล้วเซสชันบนอุปกรณ์อื่นถูกเพิกถอนทั้งหมด เหลือเฉพาะเครื่องที่กดเปลี่ยน
-เพราะเหตุผลหลักที่คนเปลี่ยนรหัสคือสงสัยว่ารหัสรั่ว การไล่เครื่องอื่นออกจึงเป็นสิ่งที่ควรเกิดขึ้นเอง
+**Changing your own password** is done at `/profile` and requires entering the current password first
+so someone who steals a session can't take over the whole account by setting a new password
+After a successful change, sessions on all other devices are revoked, leaving only the device that made the change
+The main reason people change their password is suspecting a leak, so kicking out other devices is what should happen anyway
 
-### ลืมรหัสผ่าน
+### Forgot password
 
-กู้บัญชีเองได้จาก `/forgot-password` → กรอกอีเมลที่ใช้สมัคร → ระบบส่งลิงก์ไปที่อีเมลนั้น → กดลิงก์แล้วตั้งรหัสผ่านใหม่ที่ `/reset-password`
+Users can recover their account themselves: `/forgot-password` → enter the email they signed up with → the system sends a link to that email → open the link and set a new password at `/reset-password`
 
-| กติกา | เหตุผล |
+| Rule | Reason |
 |---|---|
-| ตอบ `ok` เหมือนกันทุกครั้ง ไม่ว่าอีเมลนั้นจะมีบัญชีหรือไม่ | ไม่งั้นหน้านี้จะกลายเป็นเครื่องมือไล่เช็กว่าอีเมลไหนเป็นลูกค้าของเราบ้าง |
-| ลิงก์มีอายุ 30 นาที และใช้ได้ครั้งเดียว | ลิงก์ที่ค้างอยู่ในกล่องจดหมายเป็นเดือนไม่ควรยังเปิดบัญชีได้ |
-| ขอลิงก์ใหม่ = ลิงก์ใบเก่าใช้ไม่ได้ทันที | คนที่กด "ส่งอีกครั้ง" จะได้ไม่ต้องเดาว่าต้องเปิดเมลฉบับไหน — ฉบับล่าสุดเสมอ |
-| ตั้งรหัสใหม่สำเร็จ = ออกจากระบบทุกอุปกรณ์ | ต่างจากการเปลี่ยนรหัสที่หน้าโปรไฟล์ซึ่งเก็บเครื่องที่กดไว้ให้ เพราะคนที่รีเซ็ตยังไม่ได้ล็อกอิน และเหตุผลที่ต้องรีเซ็ตมักเป็นเพราะบัญชีอาจถูกคนอื่นเข้าถึงอยู่ |
-| เก็บเฉพาะ sha256 ของ token ลงตาราง `PasswordResetToken` | ฐานข้อมูลรั่วก็เอาแถวพวกนี้ไปตั้งรหัสผ่านของใครไม่ได้ (หลักเดียวกับ refresh token) |
-| ตั้งรหัสใหม่ไม่ผ่านเกณฑ์ ลิงก์ไม่ถูกเผาทิ้ง | พิมพ์รหัสสั้นไปครั้งเดียวแล้วต้องไปขอลิงก์ใหม่ทั้งรอบคงไม่มีใครทน |
-| จำกัดการขอลิงก์ตาม (ไอพี + อีเมล) | กันเอาระบบไปถล่มเมลคนอื่นเล่น · ที่ไม่นับตามอีเมลอย่างเดียวเพราะคนร้ายจะยิงจนเต็มโควตาแล้วเจ้าของตัวจริงขอลิงก์ไม่ได้ กลายเป็นล็อกไม่ให้เขากู้บัญชีเสียเอง |
+| Always responds `ok`, whether or not the email has an account | Otherwise this page becomes a tool for probing which emails belong to our customers |
+| Links last 30 minutes and work only once | A link sitting in an inbox for a month shouldn't still open the account |
+| Requesting a new link = the old one stops working immediately | Someone who clicks "Send again" doesn't have to guess which email to open — it's always the latest one |
+| A successful reset = logged out on every device | Unlike changing the password on the profile page, which keeps the device that made the change signed in: the person resetting isn't logged in, and a reset is often needed because someone else may have access to the account |
+| Only the sha256 of the token is stored, in the `PasswordResetToken` table | A leaked database can't be used to set anyone's password with these rows (same principle as refresh tokens) |
+| A new password that fails the rules doesn't burn the link | Nobody would put up with requesting a whole new link because they typed a password that was too short once |
+| Link requests are limited per (IP + email) | Stops the system from being used to flood someone else's inbox · It isn't per email alone, because an attacker could use up the quota so the real owner can't request a link — locking them out of recovering their own account |
 
-`token` ถูกส่งไปกับ **body ไม่ใช่ path ของ URL** ตอนเรียก API เพราะ `morgan` บันทึก method + path ของทุก request ลง log
-ส่วนตัวลิงก์ในอีเมลใช้ `?token=` ตามแบบที่ผู้ให้บริการทั่วไปใช้กัน
+The `token` is sent in the **body, not the URL path**, when calling the API, because `morgan` logs the method + path of every request
+The link in the email itself uses `?token=`, the way most services do
 
-**การส่งอีเมล** ใช้ `nodemailer` ต่อกับ SMTP ที่ตั้งไว้ใน `.env`
-ถ้ายังไม่ได้ตั้ง `SMTP_HOST` ระบบจะ**พิมพ์เนื้ออีเมลพร้อมลิงก์ลง console ของเซิร์ฟเวอร์แทน** และ (เฉพาะ `NODE_ENV=development`) ส่งลิงก์กลับมาให้หน้าเว็บแสดงด้วย
-จะได้ทดลองทั้งขั้นตอนได้โดยไม่ต้องมีเมลเซิร์ฟเวอร์ — เงื่อนไขผูกกับ `NODE_ENV` ไว้ ต่อให้ลืมตั้ง SMTP ตอนขึ้นจริง ลิงก์ก็ไม่หลุดออกไปทาง API
+**Sending email** uses `nodemailer` with the SMTP server configured in `.env`
+If `SMTP_HOST` isn't set yet, the system **prints the email, link included, to the server console instead** and (only when `NODE_ENV=development`) also returns the link for the web page to show
+so the whole flow can be tried without a mail server — the condition is tied to `NODE_ENV`, so even if SMTP is forgotten in production, the link never leaks out through the API
 
-> ยังเข้าอีเมลตัวเองไม่ได้ด้วย ให้ผู้ดูแลตั้งรหัสชั่วคราวให้ที่หน้า [จัดการผู้ใช้](#จัดการผู้ใช้) เป็นทางสำรอง
+> If the user can't access their email either, an admin can set a temporary password on the [User management](#user-management) page as a fallback
 
-### จัดการผู้ใช้
+### User management
 
-หน้า `/admin/users` ให้ผู้ดูแลค้นบัญชีลูกค้าด้วยชื่อ อีเมล หรือเบอร์โทรในช่องเดียว
-(ลูกค้าที่โทรเข้ามามักบอกแค่อย่างใดอย่างหนึ่ง) แล้วทำได้ 3 อย่าง — แก้ข้อมูลติดต่อ ตั้งรหัสผ่านใหม่ และเปลี่ยนบทบาท
+The `/admin/users` page lets admins search customer accounts by name, email or phone in a single box
+(customers who call in usually give just one of them), then do 3 things — edit contact details, set a new password and change the role
 
-**ตั้งรหัสผ่านใหม่ให้ลูกค้า** เป็นทางสำรองของ [ลืมรหัสผ่าน](#ลืมรหัสผ่าน) ไว้ใช้กับคนที่เข้าอีเมลตัวเองไม่ได้แล้ว
-ผู้ดูแลตั้งรหัสชั่วคราวแล้วแจ้งเจ้าของไปเปลี่ยนเองที่หน้าโปรไฟล์
-ตั้งเสร็จบัญชีนั้นจะถูกออกจากระบบทุกอุปกรณ์ทันที เผื่อกรณีที่ต้องรีเซ็ตเพราะบัญชีโดนยึด
+**Setting a new password for a customer** is the fallback for [Forgot password](#forgot-password), for people who can no longer access their email
+The admin sets a temporary password and tells the owner to change it themselves on the profile page
+Once it's set, that account is logged out of every device immediately, in case the reset is needed because the account was hijacked
 
-**กติกาที่ระบบบังคับไว้ ไม่ใช่แค่ซ่อนปุ่ม**
+**Rules the system enforces, not just hidden buttons**
 
-| ห้าม | เหตุผล |
+| Not allowed | Reason |
 |---|---|
-| เปลี่ยนบทบาทของตัวเอง | ผู้ดูแลคนสุดท้ายจะได้ถอดสิทธิ์ตัวเองจนไม่มีใครเข้าหลังบ้านได้อีกไม่ได้ — จะย้ายมือให้ตั้งคนใหม่เป็นผู้ดูแลก่อน แล้วให้คนนั้นถอดสิทธิ์ให้ |
-| ลบบัญชีตัวเอง | เหตุผลเดียวกัน |
-| ลบบัญชีที่มีประวัติการจอง | `Booking` ผูกกับ `User` แบบ cascade ลบบัญชีทีเดียวยอดขายในรายงานจะหายตามไปเงียบ ๆ |
-| ตั้งรหัสผ่านตัวเองจากหน้านี้ | ต้องยืนยันรหัสเดิมก่อน จึงต้องทำที่หน้าโปรไฟล์ |
+| Changing your own role | So the last admin can't remove their own rights until nobody can reach the back office anymore — to hand over, make the new person an admin first, then have them remove your rights |
+| Deleting your own account | Same reason |
+| Deleting an account with booking history | `Booking` is tied to `User` with cascade, so deleting the account would silently take its sales out of the reports with it |
+| Setting your own password from this page | That requires confirming the current password first, so it has to be done on the profile page |
 
-การเปลี่ยนบทบาทมีผลกับ API **ทันที** ไม่ต้องรอ token หมดอายุ เพราะ middleware `authenticate`
-อ่าน role จากฐานข้อมูลใหม่ทุก request ไม่ได้เชื่อค่าที่ฝังมาใน JWT
-(ฝั่งหน้าจอของเจ้าตัวเมนูผู้ดูแลจะโผล่/หายหลังรีเฟรชหน้า แต่ต่อให้เมนูค้างอยู่ก็กดเข้าไปทำอะไรไม่ได้)
+Role changes take effect in the API **immediately**, without waiting for the token to expire, because the `authenticate` middleware
+re-reads the role from the database on every request instead of trusting the value embedded in the JWT
+(On the affected user's own screen, the admin menu appears/disappears after a page refresh, but even if the menu lingers, nothing in it can be used)
 
-### ความปลอดภัยของเซสชัน
+### Session security
 
-- access token เก็บใน memory ของ React เท่านั้น (ไม่แตะ localStorage) — XSS จึงขโมยไปใช้ต่อไม่ได้
-- refresh token เป็นสตริงสุ่ม 64 ไบต์ เก็บใน httpOnly cookie และเก็บลงฐานข้อมูลเฉพาะ SHA-256 hash
-- ทุกครั้งที่ refresh จะ **rotate** ใบใหม่และ revoke ใบเก่า ถ้าตรวจพบว่ามีการใช้ใบที่ revoke แล้วซ้ำ (แปลว่า token รั่ว) ระบบจะ revoke ทุกเซสชันของผู้ใช้คนนั้นทันที
-- **เปิดหลายแท็บพร้อมกันไม่โดนเตะออก** — ทุกแท็บส่ง cookie ใบเดียวกันมาต่ออายุ เดิมแท็บที่สองถูกมองว่าใช้ token ซ้ำแล้วโดน revoke ทุกเซสชัน
-  ตอนนี้หน้าเว็บต่อคิวการต่ออายุข้ามแท็บด้วย `navigator.locks` (ดู `client/src/api/refresh.js`) และถ้ายังชนกัน (เบราว์เซอร์เก่า)
-  ใบที่เพิ่งถูก rotate ไปไม่ถึง 10 วินาทีจะได้ 409 `REFRESH_RACE` ให้ลองใหม่แทน — ไม่ออกเซสชันใหม่ให้ใบเก่า การขโมย token จึงยังไม่ได้อะไรไป
-- **ยังไม่ล็อกอินไม่มี error แดงใน console** — หน้าเว็บถาม `/api/auth/refresh` ทุกครั้งที่เปิดเพื่อกู้เซสชัน (มองไม่เห็น httpOnly cookie เอง)
-  ไม่มีคุกกี้จึงตอบ 204 แทน 401 ส่วนคุกกี้ที่ใช้ไม่ได้แล้ว (เช่น หลัง seed ฐานใหม่) ได้ 401 ครั้งเดียวพร้อมถูกลบทิ้ง ครั้งถัดไปไม่ส่งใบเสียมาซ้ำ
-- **เปลี่ยน/รีเซ็ตรหัสผ่านแล้ว access token ใบเก่าใช้ไม่ได้ทันที** ไม่ต้องรอหมดอายุ 15 นาที — `User.tokenVersion` ฝังอยู่ใน token และถูกเพิ่มค่าทุกครั้งที่เปลี่ยนรหัส (`authenticate` อ่านแถวผู้ใช้ทุก request อยู่แล้วจึงเทียบได้แทบไม่มีต้นทุน)
-  เครื่องที่กดเปลี่ยนรหัสเองได้ access token ใบใหม่กลับไปในคำตอบเลย จึงไม่ต้องไปเจอ 401 ก่อน
-- **ต่ออายุ access token ล่วงหน้า** — request interceptor ต่ออายุก่อนหมดจริง 30 วินาที โดยนับอายุของ token (`exp − iat`) จากตอนที่ได้รับ ไม่ใช้นาฬิกาเครื่อง
-  ใช้งานปกติจึงไม่เจอ 401 `TOKEN_EXPIRED` ส่วน 401 → refresh → ยิงซ้ำ ยังอยู่เป็นทางสำรอง (เช่น เปลี่ยนรหัสจากอีกแท็บ)
-- `TRUST_PROXY` กำหนดว่าจะเชื่อ `X-Forwarded-For` จาก proxy ไหน (ค่าเริ่มต้น `loopback`) — เดิมตั้งตายตัวเป็น 1 ถ้าเปิด API ให้ต่อตรง ใครก็ปลอมไอพีหลบ rate limit ได้
-- ไฟล์สลิปถูกตรวจ **ไส้ในไฟล์** (magic bytes ของ JPG/PNG/WEBP) ไม่ใช่แค่ Content-Type ที่ฝั่งส่งบอกมา โดยตรวจตั้งแต่ไฟล์ยังอยู่ในหน่วยความจำ ไฟล์ที่ไม่ผ่านจึงไม่ถูกเขียนลงที่เก็บเลย และทุก response มี security headers จาก `helmet` (รวม `X-Content-Type-Options: nosniff`)
-- รูปสลิปไม่ได้เปิดเป็นไฟล์ static — ต้องดึงผ่าน `GET /api/payments/:bookingId/slip` (สลิปที่ลูกค้าโอนเข้ามา) หรือ `/refund-slip` (สลิปที่ผู้ดูแลโอนคืน) ซึ่งตรวจสิทธิ์ว่าเป็นเจ้าของการจองหรือ Admin เท่านั้น (`?payment=` = สลิปของรายการส่วนต่างเปลี่ยนที่นั่ง ซึ่งต้องเป็นของการจองนั้นเท่านั้น)
-- ไฟล์ที่อัปโหลดแยกกองตามคนอัปโหลด: `payments/` ของลูกค้า และ `refunds/` ของผู้ดูแล (เป็นโฟลเดอร์ใต้ `uploads/slips/` หรือ prefix ใน bucket แล้วแต่[ที่เก็บสลิป](#ที่เก็บสลิป)) เวลาตรวจสอบย้อนหลังหรือล้างไฟล์จะได้ไม่หยิบผิดกอง ชื่อไฟล์ถูกสุ่มใหม่ทุกครั้งและอ่านได้เฉพาะจากกองของชนิดนั้น
-- รหัสผ่านเก็บเป็น bcrypt hash เท่านั้น ไม่เคยเก็บหรือ log รหัสจริง และต้องยาวอย่างน้อย 8 ตัวอักษรโดยมีทั้งตัวอักษรและตัวเลข
-- ล็อกอินไม่ผ่านจะได้ข้อความเดียวกันเสมอ ไม่ว่าจะไม่มีบัญชีนั้นหรือรหัสผ่านผิด และถึงหาบัญชีไม่เจอระบบก็ยังเทียบ hash ทิ้งเปล่า ๆ ให้เวลาตอบใกล้เคียงกัน — คนร้ายจึงไล่ไม่ได้ว่าอีเมลไหนมีบัญชีอยู่
-- จำกัดจำนวนครั้งที่ล็อกอิน**ผิด**ต่อ (ไอพี + บัญชี) ครั้งที่สำเร็จไม่ถูกนับ คนใช้งานปกติจึงไม่โดนบล็อก และการยิงบัญชีคนอื่นก็ล็อกเจ้าของตัวจริงที่อยู่คนละไอพีไม่ได้
-- จำกัดจำนวนบัญชีที่สมัครได้ต่อไอพี โดยนับเฉพาะครั้งที่สมัคร**สำเร็จ** (ปรับทั้งหมดได้ใน `.env`)
+- The access token is kept only in React's memory (never localStorage) — so XSS can't steal it for later use
+- The refresh token is a random 64-byte string kept in an httpOnly cookie, and only its SHA-256 hash is stored in the database
+- Every refresh **rotates** to a new token and revokes the old one. If a revoked token is used again (meaning a token has leaked), the system immediately revokes every session of that user
+- **Multiple open tabs don't get kicked out** — every tab sends the same cookie to refresh. Previously the second tab was treated as token reuse and had every session revoked
+  Now the web app queues refreshes across tabs with `navigator.locks` (see `client/src/api/refresh.js`), and if they still collide (older browsers),
+  a token rotated less than 10 seconds ago gets 409 `REFRESH_RACE` to retry instead — no new session is issued for the old token, so a stolen token still gains nothing
+- **No red errors in the console when logged out** — the web app calls `/api/auth/refresh` on every load to restore the session (it can't see the httpOnly cookie itself)
+  With no cookie, the response is 204 instead of 401. A cookie that's no longer valid (e.g. after re-seeding the database) gets a single 401 and is deleted, so the bad cookie isn't sent again next time
+- **After a password change/reset, old access tokens stop working immediately** instead of waiting out their 15 minutes — `User.tokenVersion` is embedded in the token and incremented on every password change (`authenticate` already reads the user row on every request, so the comparison costs next to nothing)
+  The device that changed the password gets a new access token right in the response, so it never runs into a 401 first
+- **Access tokens are refreshed ahead of time** — the request interceptor refreshes 30 seconds before the real expiry, measuring the token's lifetime (`exp − iat`) from the moment it was received rather than using the device clock
+  So normal use never hits 401 `TOKEN_EXPIRED`; 401 → refresh → retry remains as a fallback (e.g. a password changed from another tab)
+- `TRUST_PROXY` decides which proxies to trust `X-Forwarded-For` from (default `loopback`) — it used to be hard-coded to 1, so if the API was reachable directly, anyone could spoof their IP to dodge rate limits
+- Slip files are checked by their **actual contents** (JPG/PNG/WEBP magic bytes), not just the Content-Type the sender claims. The check runs while the file is still in memory, so files that fail are never written to storage at all. Every response also carries security headers from `helmet` (including `X-Content-Type-Options: nosniff`)
+- Slip images aren't served as static files — they must be fetched through `GET /api/payments/:bookingId/slip` (the slip of the customer's transfer) or `/refund-slip` (the slip of the admin's refund transfer), which only allow the booking's owner or an Admin (`?payment=` = the slip of a seat change difference payment, which must belong to that booking)
+- Uploads are kept in separate piles by uploader: `payments/` for customers and `refunds/` for admins (folders under `uploads/slips/` or prefixes in the bucket, depending on the [slip storage](#slip-storage)), so audits and cleanups never grab from the wrong pile. File names are freshly randomized every time and can only be read from the pile of their own kind
+- Passwords are stored only as bcrypt hashes — the real password is never stored or logged — and must be at least 8 characters long with both letters and digits
+- A failed login always gets the same message, whether the account doesn't exist or the password is wrong, and even when no account is found the system still compares against a throwaway hash so response times are similar — so attackers can't work out which emails have accounts
+- **Failed** logins are limited per (IP + account); successful ones aren't counted, so normal users never get blocked, and hammering someone else's account can't lock out the real owner on a different IP
+- The number of accounts that can be registered per IP is limited, counting only **successful** sign-ups (all of these are adjustable in `.env`)
 
-### ที่เก็บสลิป
+### Slip storage
 
-เก็บไฟล์สลิปได้ 2 แบบ เลือกจากว่าตั้ง `SUPABASE_URL` ไว้หรือไม่ (โค้ดอยู่ที่ `server/src/lib/slipStorage.js`)
+Slip files can be stored in 2 ways, chosen by whether `SUPABASE_URL` is set (the code is in `server/src/lib/slipStorage.js`)
 
-| | ไม่ตั้ง `SUPABASE_URL` | ตั้ง `SUPABASE_URL` + `SUPABASE_SECRET_KEY` |
+| | `SUPABASE_URL` not set | `SUPABASE_URL` + `SUPABASE_SECRET_KEY` set |
 |---|---|---|
-| เก็บที่ | ดิสก์ `server/uploads/slips/` | Supabase Storage (bucket แบบ private) |
-| เหมาะกับ | ตอนพัฒนาและรันเทสต์ | ขึ้นระบบจริง |
+| Stored in | Disk at `server/uploads/slips/` | Supabase Storage (private bucket) |
+| Suited for | Development and running tests | Production |
 
-- ทั้งสองแบบ DB เก็บแค่ชื่อไฟล์ เปลี่ยนที่เก็บจึงไม่ต้องแก้ schema
-- ทั้งสองแบบรูปสลิปเปิดได้ผ่าน API ที่ตรวจสิทธิ์เท่านั้น (ฝั่ง Supabase ให้ server ดึงไฟล์จาก bucket แล้วส่งต่อ) จึงไม่มีลิงก์ตรงไปที่ไฟล์หลุดออกไป
-- **โฮสต์ที่ดิสก์ไม่ถาวร (เช่น Render) ต้องใช้ Supabase** ดิสก์ถูกล้างทุกครั้งที่ deploy/restart สลิปจะหายทั้งที่ DB ยังอ้างถึง
-  ถ้า `NODE_ENV=production` แต่ยังเก็บลงดิสก์ เซิร์ฟเวอร์จะเตือนตอนเปิด และถ้าเปิดสลิปที่ไฟล์หายไปแล้วจะได้ 404 `SLIP_FILE_MISSING`
+- In both modes the DB stores only the file name, so switching storage needs no schema change
+- In both modes slip images can only be opened through the permission-checked API (with Supabase, the server fetches the file from the bucket and passes it on), so no direct link to a file ever leaks out
+- **Hosts without a persistent disk (e.g. Render) must use Supabase**: the disk is wiped on every deploy/restart, so slips vanish while the DB still refers to them
+  If `NODE_ENV=production` but slips still go to disk, the server warns at startup, and opening a slip whose file is gone returns 404 `SLIP_FILE_MISSING`
 
-ตั้งค่า Supabase Storage:
+Setting up Supabase Storage:
 
-1. Supabase Dashboard → **Storage** → **New bucket** ตั้งชื่อ `slips` (หรือตามที่ตั้งใน `SUPABASE_SLIP_BUCKET`) และ**ปิด Public bucket**
-   ถ้าต้องการกันอีกชั้น ตั้ง file size limit `5 MB` และ allowed MIME types `image/jpeg, image/png, image/webp`
-2. ไม่ต้องเขียน RLS policy เพราะ API ใช้ secret key ซึ่งข้าม RLS ส่วน key สาธารณะ (publishable/anon) ไม่มี policy อนุญาต จึงอ่านอะไรใน bucket ไม่ได้
-3. นำ Project URL และ secret key (`sb_secret_…` หรือ service_role แบบเดิม) จากหน้า Project Settings ไปตั้งเป็น `SUPABASE_URL` และ `SUPABASE_SECRET_KEY` ที่ฝั่ง API (เช่น Environment ของ Render)
-   **ห้ามใส่ secret key ฝั่ง client** (Vercel หรือตัวแปร `VITE_*`) เพราะจะถูก bundle ไปถึงเบราว์เซอร์
-4. เปิดเซิร์ฟเวอร์แล้วดูบรรทัด `ที่เก็บสลิป:` ใน log ว่าขึ้นเป็น `Supabase Storage (bucket slips)`
+1. Supabase Dashboard → **Storage** → **New bucket**, name it `slips` (or whatever `SUPABASE_SLIP_BUCKET` is set to) and **turn off Public bucket**
+   For an extra layer of protection, set the file size limit to `5 MB` and the allowed MIME types to `image/jpeg, image/png, image/webp`
+2. No RLS policy is needed: the API uses the secret key, which bypasses RLS, and the public keys (publishable/anon) have no policy granting access, so they can't read anything in the bucket
+3. Take the Project URL and secret key (`sb_secret_…`, or the legacy service_role) from Project Settings and set them as `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API side (e.g. Render's Environment)
+   **Never put the secret key on the client side** (Vercel or `VITE_*` variables), because it would be bundled and shipped to the browser
+4. Start the server and check that the `ที่เก็บสลิป:` ("Slip storage:") line in the log shows `Supabase Storage (bucket slips)`
 
-สลิปเก่าที่อยู่บนดิสก์ไม่ถูกย้ายขึ้น bucket ให้อัตโนมัติ ถ้าย้ายฐานข้อมูลที่มีสลิปอยู่แล้วต้องอัปโหลดไฟล์ใน `uploads/slips/payments/` และ `refunds/` ขึ้นไปที่ prefix ชื่อเดียวกันเอง
+Existing slips on disk aren't moved to the bucket automatically. When migrating a database that already has slips, upload the files in `uploads/slips/payments/` and `refunds/` to the prefixes with the same names yourself
 
-### ช่วงที่ห้ามยกเลิกการจอง
+### When bookings can't be cancelled
 
-ระหว่างที่สลิปอยู่ในคิวตรวจ (`PENDING_VERIFICATION`) ผู้ใช้จะยกเลิกเองไม่ได้ เพราะเงินอาจโอนเข้ามาแล้วจริง ถ้าปล่อยให้ยกเลิกตรงนี้ ใบชำระเงินจะถูกปิดเป็น `REJECTED` ทั้งที่เงินเข้าบัญชีไปแล้ว กลายเป็นเงินที่หลุดออกนอกระบบโดยไม่มีคิวคืนเงินรองรับ
+While a slip is in the review queue (`PENDING_VERIFICATION`), users can't cancel by themselves, because the money may really have been transferred already. If cancelling were allowed here, the payment would be closed as `REJECTED` even though the money is in the account — money that falls outside the system with no refund queue to catch it
 
-ฝั่ง API คืน 409 `AWAITING_VERIFICATION` และส่ง `canCancel: false` มาด้วย หน้า `/my-bookings` จึงซ่อนปุ่มยกเลิกและขึ้นข้อความว่า "สลิปกำลังรอผู้ดูแลตรวจสอบ ยกเลิกได้หลังทราบผล" แทน เมื่อผู้ดูแลอนุมัติหรือปฏิเสธแล้วปุ่มจึงกลับมา — ถูกปฏิเสธก็ยกเลิกได้ทันที ถูกอนุมัติก็ยกเลิกได้ตามนโยบาย 3 ชั่วโมง แล้วเข้าคิวคืนเงินต่อ
+The API returns 409 `AWAITING_VERIFICATION` and also sends `canCancel: false`, so `/my-bookings` hides the cancel button and shows "Your slip is being reviewed — you can cancel once the result is in" instead. The button comes back once an admin approves or rejects — if rejected, the user can cancel right away; if approved, they can cancel under the 3-hour policy, and the booking then goes to the refund queue
 
-ผู้ดูแลยังยกเลิกแทนลูกค้าได้ทุกสถานะผ่าน `/admin/bookings` สำหรับกรณีที่ต้องจัดการเป็นรายกรณี
+Admins can still cancel on a customer's behalf in any status through `/admin/bookings`, for cases that need individual handling
 
-### ยกเลิกทั้งรอบฉาย
+### Cancelling a whole showtime
 
-เครื่องฉายเสียหรือโรงต้องปิด ผู้ดูแลกดปุ่ม "ยกเลิกรอบ" ที่ `/admin/showtimes` (ใส่เหตุผลได้ ลูกค้าเห็นในแจ้งเตือน) แล้วระบบทำให้ในคราวเดียว
+When a projector breaks or a theatre has to close, the admin clicks "Cancel showtime" on `/admin/showtimes` (a reason can be given, which customers see in their notification) and the system handles it all in one go
 
-- ทุกการจองของรอบนั้นถูกปิดและคืนที่นั่ง — ใบที่จ่ายแล้วเข้าคิวคืนเงิน ใบที่ยังไม่จ่ายถูกปิดเฉย ๆ
-- ลูกค้าทุกคนได้แจ้งเตือน `SHOWTIME_CANCELLED` ใบที่จ่ายแล้วถูกบอกให้แจ้งบัญชีรับเงินคืนที่ `/my-bookings` (ไม่ต้องให้ผู้ดูแลไล่โทรถามทีละคน)
-- รอบที่ยกเลิกแล้วยังโชว์อยู่ในตารางพร้อมป้าย "ยกเลิกแล้ว" ไม่หายไปเฉย ๆ และไม่ถูกส่งแจ้งเตือน "ใกล้ถึงเวลาฉาย"
-- ถ้ายังมีสลิปรอตรวจในรอบนั้นจะได้ 409 `SHOWTIME_HAS_PENDING_SLIPS` — ต้องอนุมัติ/ปฏิเสธให้จบก่อน เพราะยังไม่รู้ว่าเงินเข้าจริงไหม
-- ทำใน transaction เดียวด้วยคำสั่งแบบกลุ่ม จำนวน query คงที่ไม่ว่ารอบนั้นจะมีกี่การจอง
+- Every booking for that showtime is closed and its seats released — paid ones go to the refund queue, unpaid ones are simply closed
+- Every customer gets a `SHOWTIME_CANCELLED` notification; holders of paid bookings are asked to add a refund account at `/my-bookings` (so admins don't have to call everyone one by one)
+- A cancelled showtime stays in the schedule with a "Cancelled" badge instead of silently disappearing, and no "Your movie starts soon" reminder is sent for it
+- If the showtime still has slips awaiting review, the result is 409 `SHOWTIME_HAS_PENDING_SLIPS` — they must be approved/rejected first, because it isn't known yet whether the money really arrived
+- It runs in a single transaction using bulk statements, with a fixed number of queries no matter how many bookings the showtime has
 
-`PATCH /api/admin/showtimes/:id` ไม่รับ `status` แล้ว — การยกเลิกต้องผ่านเส้นทางนี้เท่านั้น
-เดิมเปลี่ยนสถานะรอบได้ตรง ๆ แต่ไม่แตะการจองเลย ตั๋วที่จ่ายแล้วจึงค้างอยู่ในรอบที่ถูกยกเลิกโดยไม่มีใครคืนเงิน
+`PATCH /api/admin/showtimes/:id` no longer accepts `status` — cancelling must go through this route only
+Previously the showtime status could be changed directly without touching the bookings at all, so paid tickets were left stranded in cancelled showtimes with nobody refunding them
 
-### ลบข้อมูลที่ยังผูกกับเงิน
+### Deleting records still tied to money
 
-| ลบไม่ได้ | ทำแทน |
+| Can't delete | Do this instead |
 |---|---|
-| รอบฉายที่เคยมีการจอง (แม้ยกเลิกหมดแล้ว) | "ยกเลิกรอบ" |
-| โรงที่เคยมีการจอง | ปิดใช้งานโรง (ติ๊ก "เปิดให้ลงรอบฉาย" ออก) — โรงที่ปิดลงรอบใหม่ไม่ได้ |
-| หนังที่ยังมีตั๋วรอบอนาคต สลิปรอตรวจ หรือเงินรอโอนคืน (แม้กด "ลบถาวร") | ยกเลิกรอบและคืนเงินให้เสร็จก่อน หรือเก็บเข้าคลัง |
-| หนังที่เคยออกใบเสร็จไปแล้ว (แม้คืนเงินครบแล้ว — 409 `MOVIE_HAS_RECEIPTS`) | เก็บเข้าคลัง |
+| A showtime that has ever had bookings (even if all were cancelled) | "Cancel showtime" |
+| A theatre that has ever had bookings | Deactivate the theatre (untick "Open for new showtimes") — deactivated theatres can't get new showtimes |
+| A movie that still has tickets for future showtimes, slips awaiting review or refunds pending (even with "Delete permanently") | Cancel the showtimes and finish the refunds first, or archive it |
+| A movie that has ever had a receipt issued (even if fully refunded — 409 `MOVIE_HAS_RECEIPTS`) | Archive it |
 
-เหตุผลเดียวกันหมด: `Booking` และ `Payment` ผูกกับรอบฉายแบบ cascade ลบรอบหรือโรงทีเดียว ประวัติการจอง ใบเสร็จ และ**คิวคืนเงินหายตามไปเงียบ ๆ**
-(ใบเสร็จหายไปแล้วเลขที่ใบเสร็จจะขาดช่วง จนตรวจย้อนหลังไม่ได้ว่าใบที่หายไปไปไหน)
-เดิมเช็กแค่ที่นั่งที่ยังถูกยึด — การจองที่ยกเลิกแล้วไม่มีที่นั่งเหลือ จึงลบผ่านแล้วรายการรอโอนคืนหายไปทั้งก้อน
+The reason is the same for all of them: `Booking` and `Payment` are tied to the showtime with cascade, so deleting a showtime or theatre would make the booking history, receipts and **refund queue silently disappear along with it**
+(Once receipts are gone, the receipt numbers have gaps, and an audit can no longer tell where the missing ones went)
+Previously only seats still held were checked — cancelled bookings have no seats left, so the delete went through and the pending refunds vanished entirely
 
-### ป้ายตัวเลขงานค้างบนเมนูผู้ดูแล
+### Pending-work badges on the admin menu
 
-เมนู **ตรวจสลิป** และ **คืนเงิน** มีป้ายสีแดงบอกจำนวนงานที่ยังไม่ได้ทำ (ซ่อนเองเมื่อไม่มีงานค้าง) ตัวเลขมาจาก `/api/admin/queue-counts` ซึ่งเป็น `COUNT` สองครั้ง แยกจาก `/overview` ที่หนักกว่า เพราะป้ายถูกดึงบ่อยกว่ามาก และใช้เงื่อนไขนับชุดเดียวกับหน้าภาพรวม เพื่อไม่ให้ตัวเลขสองที่เพี้ยนจากกัน
+The **Slip review** and **Refunds** menu items have red badges showing how much work is outstanding (hidden when there's none). The numbers come from `/api/admin/queue-counts`, which is just two `COUNT`s, separate from the heavier `/overview` because the badges are fetched far more often. It uses the same counting conditions as the overview page so the numbers in the two places never drift apart
 
-ตัวเลขเก็บใน zustand store กลาง (`store/adminQueueStore.js`) เหมือนกระดิ่งแจ้งเตือน หน้าที่ทำให้ตัวเลขเปลี่ยน (อนุมัติ/ปฏิเสธสลิป, บันทึกว่าโอนคืนแล้ว) จะสั่งอัปเดต store ทันทีหลังทำงานเสร็จ ป้ายจึงลดลงเลยโดยไม่ต้องรีเฟรชหน้า ส่วนงานที่เข้ามาจากฝั่งลูกค้า (ส่งสลิปใหม่ ยกเลิกการจอง) จะถูกดึงซ้ำทุก 30 วินาทีและทุกครั้งที่เปลี่ยนเมนู
+The numbers live in a shared zustand store (`store/adminQueueStore.js`), like the notification bell. Pages that change them (approving/rejecting slips, recording a refund as transferred) update the store as soon as the action completes, so the badge drops right away without a page refresh. Work arriving from the customer side (new slips, cancelled bookings) is re-fetched every 30 seconds and on every menu change
 
-### การคืนเงิน
+### Refunds
 
-ระบบนี้ไม่ได้ตัดเงินเอง (รับเงินด้วยการโอน + ตรวจสลิป) จึงคืนเงินอัตโนมัติไม่ได้เช่นกัน เมื่อการจองที่ชำระเงินแล้วถูกยกเลิก ใบชำระเงินจะเปลี่ยนเป็น `REFUND_PENDING` แล้วเข้าคิวที่ `/admin/refunds` พร้อมชื่อและเบอร์ลูกค้า ผู้ดูแลโอนคืนผ่านแอปธนาคารเองแล้วกดบันทึก (ต้องแนบสลิปคืนเงิน) ระบบจึงเปลี่ยนเป็น `REFUNDED` และแจ้งเตือนผู้ใช้
-ส่วนต่างจากการ[เปลี่ยนที่นั่ง](#เปลี่ยนที่นั่ง)ไปที่ที่ถูกกว่าก็เข้าคิวเดียวกันนี้ ยอดที่ต้องโอนของทุกรายการอยู่ที่ `refundAmount` (การจองที่เคยเปลี่ยนที่นั่งแล้วถูกยกเลิก ยอดคืนเป็นยอดสุทธิ ไม่ใช่ยอดที่จ่ายตอนจอง)
+This system doesn't charge money itself (it takes payment by transfer + slip review), so it can't refund automatically either. When a paid booking is cancelled, its payment becomes `REFUND_PENDING` and enters the queue at `/admin/refunds` with the customer's name and phone number. The admin transfers the refund in their banking app and records it (a refund slip must be attached); the system then changes it to `REFUNDED` and notifies the user
+Differences from [changing seats](#seat-changes) to cheaper ones go into this same queue. The amount to transfer for every item is in `refundAmount` (for a cancelled booking that had changed seats, the refund is the net amount, not what was paid at booking time)
 
-**บัญชีปลายทาง** — เพราะเป็นการโอนมือ ระบบจึงต้องรู้ว่าจะโอนคืนเข้าบัญชีไหน หน้าต่างยกเลิกของการจองที่ **ชำระเงินแล้วเท่านั้น** จะมีช่องให้เลือกธนาคาร (มีรายชื่อธนาคารหลักให้เลือก หรือพิมพ์เองได้) และกรอกเลขที่บัญชี ถ้าไม่กรอกจะยกเลิกไม่สำเร็จ (400 `REFUND_ACCOUNT_REQUIRED`) ส่วนการจองที่ยังไม่จ่ายเงินจะไม่ถามข้อมูลนี้ เพราะไม่มีเงินต้องคืน
+**Destination account** — since transfers are manual, the system has to know which account to refund to. The cancel dialog for **paid bookings only** has fields to choose a bank (from a list of major banks, or typed in) and enter the account number. Without them the cancellation fails (400 `REFUND_ACCOUNT_REQUIRED`). Unpaid bookings aren't asked for this, since there's no money to return
 
-เลขที่บัญชีรับได้ทั้งแบบมีขีดหรือเว้นวรรค (`123-4-56789-0`) ระบบจะตัดออกเหลือแต่ตัวเลข 10-15 หลักก่อนเก็บ บัญชีที่แจ้งไว้จะโชว์ทั้งบนการ์ดของลูกค้าเอง บนการ์ดในคิวคืนเงิน และย้ำอีกครั้งในหน้าต่างยืนยันก่อนที่ผู้ดูแลจะกดว่าโอนแล้ว
+Account numbers are accepted with dashes or spaces (`123-4-56789-0`); the system strips them down to 10-15 digits before storing. The account given is shown on the customer's own card, on the card in the refund queue, and once more in the confirmation dialog before the admin marks it as transferred
 
-**หลักฐานการโอนคืน** — สลิปที่ผู้ดูแลแนบตอนกดบันทึกจะโชว์ให้ลูกค้าเปิดดูได้เองที่ `/my-bookings` (ปุ่ม "ดูสลิปคืนเงิน" พร้อมหมายเหตุและวันเวลาที่โอน) เพราะเป็นเงินของลูกค้าเอง การให้ดูหลักฐานได้ตรงจุดช่วยตัดคำถาม "โอนคืนหรือยัง" ออกไป และใช้เส้นทางตรวจสิทธิ์เดียวกับสลิปฝั่งจ่ายเงิน คนอื่นเปิดดูไม่ได้ (403) ถ้าแนบสลิปผิดหรือพิมพ์หมายเหตุพลาด ผู้ดูแลกด "แก้ไขรายการ" ในแท็บ "คืนแล้ว" เพื่อเปลี่ยนสลิปหรือแก้หมายเหตุได้ (`PATCH /api/admin/refunds/:id`) โดยสถานะยังเป็นคืนแล้วและไม่แจ้งเตือนลูกค้าซ้ำ
+**Proof of refund** — the slip the admin attaches when recording the refund can be viewed by the customer at `/my-bookings` (the "Refund slip" button, with the note and the date and time of the transfer). It's the customer's own money, so letting them see the proof right there cuts out "have you refunded me yet?" questions. It uses the same permission-checked route as payment slips, so nobody else can open it (403). If the wrong slip was attached or the note has a typo, the admin can click "Edit record" in the "Refunded" tab to replace the slip or fix the note (`PATCH /api/admin/refunds/:id`); the status stays refunded and the customer isn't notified again
 
-ถ้ารายการถูกยกเลิกโดยผู้ดูแล (ลูกค้าโทรมาแจ้ง ยกเลิกทั้งรอบ) หรือเป็นเงินที่โอนมาหลังหมดเวลา จะไม่มีบัญชีติดมาด้วย
-ลูกค้าแจ้งเองได้ที่ `/my-bookings` (ปุ่ม "แจ้งบัญชีรับเงินคืน" — แก้ได้ตลอดที่ยังรอโอนคืน) ระหว่างนั้นคิวคืนเงินขึ้นว่า "ลูกค้าไม่ได้แจ้งบัญชี — ติดต่อตามเบอร์โทร"
+If the booking was cancelled by an admin (the customer phoned in, or the whole showtime was cancelled) or the money was transferred after the deadline, no account comes with it
+The customer can add one at `/my-bookings` (the "Add refund account" button — editable for as long as the refund is pending). Meanwhile the refund queue shows "No account given — call the customer"
 
-หน้ารายงานแสดงยอด "ยกเลิกหลังชำระเงิน" แยกไว้ต่างหาก เพื่อไม่ให้รายได้ลดลงเงียบ ๆ จนตัวเลขไม่ตรงกับเงินในบัญชีจริง
+The reports page shows a separate "Cancelled after payment" total, so revenue doesn't quietly drop until the figures no longer match the money actually in the account
 
-### ใบเสร็จรับเงิน (E-Receipt)
+### Receipts (E-Receipt)
 
-ผู้ดูแลกดอนุมัติสลิปแล้ว ระบบออกใบเสร็จให้ทันทีในจังหวะเดียวกับที่การจองเป็น `PAID`
-ลูกค้าเปิดได้จากปุ่ม "ใบเสร็จ" ที่ `/my-bookings` หน้าชำระเงิน และหน้า E-Ticket (`/booking/:id/receipt`) พร้อมได้อีเมลใบเสร็จ
-ส่วนผู้ดูแลเปิดใบเสร็จของลูกค้าได้ทุกใบจาก `/admin/bookings` และค้นการจองด้วยเลขที่ใบเสร็จได้ (ลูกค้าที่ติดต่อมาเรื่องเงินมักอ้างเลขนี้)
+Once an admin approves the slip, the system issues a receipt immediately, at the same moment the booking becomes `PAID`
+Customers can open it from the "Receipt" button on `/my-bookings`, the payment page and the E-Ticket page (`/booking/:id/receipt`), and also receive it by email
+Admins can open any customer's receipt from `/admin/bookings` and can search bookings by receipt number (customers who contact us about money usually quote it)
 
-| เรื่อง | ทำอย่างไร | เหตุผล |
+| Topic | How | Why |
 |---|---|---|
-| เลขที่ `RC-2026-000123` | รันต่อกันแยกตามปี (ปี ค.ศ. ตามเวลาไทย) จากตาราง `ReceiptCounter` ใน transaction เดียวกับการอนุมัติ | `SEQUENCE` ของ PostgreSQL ไม่ย้อนตาม rollback — อนุมัติไม่ผ่านทีไรเลขหายไปหนึ่งเลข ใบเสร็จจะขาดช่วงจนตรวจย้อนหลังไม่ได้ |
-| ผู้ดูแลสองคนกดอนุมัติใบเดียวกัน | คนที่ช้ากว่าตกที่ด่านเช็กสถานะก่อนถึงตัวนับ | ไม่เปลืองเลข ได้ใบเสร็จใบเดียว |
-| ชื่อผู้จ่าย | เก็บสำเนาไว้ที่ `Payment.receiptName` ตอนออกใบเสร็จ | ผู้ใช้แก้ชื่อในโปรไฟล์ทีหลังได้ แต่ใบเสร็จที่ออกไปแล้วต้องไม่เปลี่ยนตาม |
-| สลิปที่ส่งหลังหมดเวลาแล้วเข้าคิวคืนเงิน | ไม่ออกใบเสร็จ | ไม่ได้ขายตั๋วให้ เงินก้อนนั้นกำลังถูกโอนคืน |
-| ยกเลิก / คืนเงินภายหลัง | ใบเสร็จยังเปิดได้ พร้อมตราประทับ "รอคืนเงิน" หรือ "คืนเงินแล้ว" | ใบเสร็จเป็นหลักฐานว่ารับเงินมาจริง ไม่ควรหายไปเพราะคืนเงิน |
-| เปลี่ยนที่นั่งหลังออกใบเสร็จ | ที่นั่งบนใบเสร็จตรึงไว้ที่ `Payment.receiptSeats` พร้อมหมายเหตุที่นั่งปัจจุบัน · ส่วนต่างที่โอนเพิ่มได้ใบเสร็จเลขใหม่ของตัวเอง (`?payment=`) | ใบเสร็จฉบับบนเว็บต้องตรงกับฉบับที่ส่งอีเมลไปแล้วเสมอ |
+| Number `RC-2026-000123` | Sequential per year (Gregorian year, Thai time) from the `ReceiptCounter` table, in the same transaction as the approval | PostgreSQL's `SEQUENCE` doesn't roll back — every failed approval would lose a number, leaving gaps in the receipts that make audits impossible |
+| Two admins approve the same slip | The slower one fails the status check before reaching the counter | No numbers wasted; exactly one receipt |
+| Payer name | A copy is stored in `Payment.receiptName` when the receipt is issued | Users can edit their name in the profile later, but receipts already issued must not change with it |
+| Late slips that go to the refund queue | No receipt is issued | No ticket was sold; that money is being refunded |
+| Cancelled / refunded later | The receipt still opens, stamped "Refund pending" or "Refunded" | A receipt is proof that the money was really received; it shouldn't disappear because of a refund |
+| Seats changed after the receipt was issued | The seats on the receipt are frozen in `Payment.receiptSeats`, with a note of the current seats · An extra difference payment gets its own new receipt number (`?payment=`) | The web version of a receipt must always match the one already emailed |
 
-**พิมพ์ / บันทึก PDF** ใช้การพิมพ์ของเบราว์เซอร์ (ปุ่มบนหน้าใบเสร็จ) ได้กระดาษ A4 หน้าเดียวที่ไม่มีเมนู ปุ่ม หรือพื้นมืดติดไป และชื่อไฟล์ที่เสนอเป็นเลขที่ใบเสร็จ
-ไม่ได้สร้าง PDF ฝั่ง server เพราะต้องฝังฟอนต์ไทยเอง ซึ่งสระและวรรณยุกต์มีโอกาสวางผิดตำแหน่ง ขณะที่เบราว์เซอร์จัดวางภาษาไทยได้ถูกอยู่แล้ว
-บนจอมือถือตารางรายการเหลือแค่ "รายการ | จำนวนเงิน" (จำนวน × ราคาต่อหน่วยย้ายไปใต้ชื่อรายการ) ยอดเงินทุกบรรทัดจึงเห็นได้โดยไม่ต้องเลื่อนตาราง
+**Print / Save as PDF** uses the browser's print function (the button on the receipt page), producing a single A4 page without menus, buttons or the dark background, with the receipt number as the suggested file name
+There's no server-side PDF, because that would mean embedding Thai fonts ourselves, where vowels and tone marks risk being placed wrongly, while browsers already lay out Thai correctly
+On mobile screens the line-item table shrinks to just "Description | Amount" (quantity × unit price moves under the item name), so every amount is visible without scrolling the table
 
-**อีเมลใบเสร็จ** ส่งหลัง transaction ของการอนุมัติจบแล้วเท่านั้น อนุมัติชนกับอีกคนจะได้ไม่มีเมลของใบเสร็จที่ไม่มีอยู่จริงหลุดออกไป
-และไม่รอ SMTP — ผู้ดูแลที่กำลังไล่ตรวจคิวสลิปไม่ต้องรอเมลส่งเสร็จทีละใบ (ส่งไม่สำเร็จก็แค่ลง log ลูกค้ายังเปิดใบเสร็จจากหน้าเว็บได้)
-ใช้ label สองภาษา "ไทย / English" ในฉบับเดียว เพราะระบบไม่ได้เก็บภาษาที่ลูกค้าเลือกไว้ และยังไม่ได้ตั้ง SMTP ก็พิมพ์ลง console เหมือนอีเมลตั้งรหัสผ่าน
+**The receipt email** is sent only after the approval transaction has finished, so an approval that collides with another admin can't send out an email for a receipt that doesn't exist
+and it doesn't wait for SMTP — an admin working through the slip queue doesn't have to wait for each email to finish sending (a failed send is just logged; the customer can still open the receipt on the website)
+It uses bilingual "ไทย / English" labels in a single version, because the system doesn't store the language the customer picked, and without SMTP configured it's printed to the console, like the password reset email
 
-เป็น **ใบเสร็จรับเงิน** ธรรมดา ไม่แยกภาษีมูลค่าเพิ่ม และไม่ใช่ใบกำกับภาษี — ชื่อและที่อยู่ผู้ออกตั้งได้ที่ `RECEIPT_ISSUER_NAME` / `RECEIPT_ISSUER_ADDRESS`
-รายการที่จ่ายไปแล้วก่อนมีระบบนี้ได้เลขย้อนหลังจาก migration `receipts` เรียงตามเวลาที่จ่ายจริง
+It's a plain **receipt**: VAT isn't broken out, and it isn't a tax invoice — the issuer name and address are set with `RECEIPT_ISSUER_NAME` / `RECEIPT_ISSUER_ADDRESS`
+Payments made before this feature existed were numbered retroactively by the `receipts` migration, in order of actual payment time
 
-### เปลี่ยนที่นั่ง
+### Seat changes
 
-การจองที่ชำระเงินแล้วเปลี่ยนที่นั่งเองได้จากปุ่ม "เปลี่ยนที่นั่ง" ที่ `/my-bookings` — เดิมต้องยกเลิกแล้วรอผู้ดูแลโอนเงินคืนก่อนจองใหม่ ทั้งช้า ที่นั่งหลุดระหว่างรอ และเพิ่มงานคืนเงินโดยไม่จำเป็น
-หน้าเปลี่ยนที่นั่งเริ่มจากที่นั่งเดิมเลือกไว้ครบ (ขอบเส้นประ) ลูกค้าแตะที่นั่งเดิมออกแล้วเลือกที่ใหม่แทน จำนวนต้องเท่าเดิม ย้ายแค่บางที่ก็ได้ และย้ายข้ามโซนได้
+Paid bookings can change their own seats via the "Change seats" button on `/my-bookings` — previously customers had to cancel and wait for an admin to refund them before booking again, which was slow, lost the seats while waiting and created needless refund work
+The seat change page starts with the current seats all selected (dashed outline). The customer taps current seats off and picks new ones instead; the count must stay the same, moving only some of the seats is fine, and moving across zones is allowed
 
-| ราคาที่นั่งใหม่ | ผลลัพธ์ |
+| New seat price | Result |
 |---|---|
-| เท่าเดิม | ย้ายทันที |
-| ถูกลง | ย้ายทันที ลูกค้ากรอกบัญชีรับเงินคืน แล้วส่วนต่างเข้าคิว `/admin/refunds` เป็นรายการแยก (ป้าย "คืนส่วนต่างเปลี่ยนที่นั่ง") |
-| แพงขึ้น | กันที่นั่งใหม่ไว้ `SEAT_HOLD_MINUTES` รอโอนส่วนต่างผ่าน QR พร้อมเพย์ ระหว่างนั้นที่นั่งเดิมยังเป็นของลูกค้า → สลิปเข้าคิว `/admin/payments` เดียวกับค่าตั๋ว → ผู้ดูแลอนุมัติแล้วจึงย้ายจริง และออกใบเสร็จส่วนต่างเลขใหม่ (ส่งอีเมลด้วย) |
+| Same | Moved immediately |
+| Cheaper | Moved immediately; the customer enters a refund account and the difference goes into the `/admin/refunds` queue as a separate item ("Seat change difference" badge) |
+| Pricier | The new seats are held for `SEAT_HOLD_MINUTES` while the difference is transferred via PromptPay QR; meanwhile the current seats still belong to the customer → the slip enters the same `/admin/payments` queue as ticket payments → the move only happens once an admin approves, and a new difference receipt is issued (also emailed) |
 
-ไม่โอนภายในเวลา สลิปถูกปฏิเสธ หรือลูกค้ากดยกเลิกคำขอ = แค่ไม่ได้ย้าย ที่นั่งเดิมไม่หาย
-ปฏิเสธสลิปแล้วได้เวลาโอนใหม่ `REJECTED_RETRY_MINUTES` (ยกเว้นรอบเริ่มฉายแล้ว) และส่งสลิปช้าได้ในช่วง `LATE_SLIP_GRACE_MINUTES` แบบเดียวกับค่าตั๋ว — ที่นั่งใหม่ยังว่างก็เข้าคิวตรวจตามปกติ ไม่ว่างแล้วผู้ดูแลอนุมัติ = คืนส่วนต่าง
+Not transferring in time, a rejected slip, or the customer cancelling the request = the move just doesn't happen; the current seats aren't lost
+A rejected slip gets a new `REJECTED_RETRY_MINUTES` window to transfer (unless the showtime has started), and late slips are accepted within `LATE_SLIP_GRACE_MINUTES`, just like ticket payments — if the new seats are still free the slip enters review as usual; if not, admin approval = refunding the difference
 
-**การคิดราคา** — ที่นั่งในโซนที่การจองมีอยู่แล้วคิดตามราคาที่จ่ายไว้ ส่วนโซนใหม่คิดราคาปัจจุบันของรอบ ย้ายในโซนเดิมจึงฟรีเสมอแม้ผู้ดูแลจะปรับราคารอบภายหลัง
-หน้าเว็บคำนวณส่วนต่างให้เห็นก่อนกดยืนยันด้วยกติกาเดียวกัน (`client/src/utils/seatChange.js`) แต่ยอดจริงให้ server คิด (`server/src/utils/seatChange.js`)
+**Pricing** — seats in zones the booking already has are priced at what was paid, while new zones use the showtime's current price. So moving within the same zone is always free, even if an admin changes the showtime's prices later
+The web app shows the difference before confirming, using the same rules (`client/src/utils/seatChange.js`), but the actual amount is calculated by the server (`server/src/utils/seatChange.js`)
 
-| กติกา | เหตุผล |
+| Rule | Reason |
 |---|---|
-| เฉพาะใบที่ชำระเงินแล้ว | ใบที่ยังไม่จ่ายกด "ยกเลิกใบเดิม" แล้วจองใหม่ได้ทันทีอยู่แล้ว |
-| ต้องเหลือเวลาก่อนฉายอย่างน้อย `SEAT_CHANGE_CUTOFF_MINUTES` (30 นาที) | ย้ายในโซนเดิมไม่มีเงินเกี่ยว จึงผ่อนกว่าการยกเลิก (3 ชั่วโมง) |
-| สูงสุด `MAX_SEAT_CHANGES_PER_BOOKING` (2) ครั้งต่อการจอง — คำขอที่หมดเวลาหรือยกเลิกไม่นับ | กันการสลับไปมาจนที่นั่งกระพริบให้คนอื่นจองไม่ได้ (และจำกัดการขอ 10 ครั้งต่อ 10 นาทีต่อบัญชีอีกชั้น) |
-| มีคำขอค้างได้ทีละหนึ่งคำขอต่อการจอง | ส่วนต่างคิดจากที่นั่งชุดปัจจุบัน ถ้าซ้อนกันได้ ยอดจะผิด |
-| ระหว่างสลิปส่วนต่างรอตรวจ ยกเลิกการจองไม่ได้ทั้งลูกค้าและผู้ดูแล (409 `SEAT_CHANGE_AWAITING_VERIFICATION`) และยกเลิกทั้งรอบไม่ได้ | เหตุผลเดียวกับ `AWAITING_VERIFICATION` — เงินส่วนต่างอาจเข้ามาแล้วจริง |
-| ยกเลิกการจองที่เคยเปลี่ยนที่นั่ง → คืน **ยอดสุทธิ** (`Booking.totalAmount`) ในรายการเดียว | ยอดนี้รวมส่วนต่างที่โอนเพิ่มและหักส่วนต่างที่คืนไปแล้ว ผู้ดูแลโอนครั้งเดียวจบ ไม่ต้องไล่รวมเอง (ยอดที่ต้องโอนเก็บที่ `Payment.refundAmount` ซึ่งคิวคืนเงิน แจ้งเตือน และรายงานใช้ร่วมกัน) |
-| ใบเสร็จที่ออกไปแล้วไม่เปลี่ยน | ที่นั่งบนใบเสร็จตรึงไว้ที่ `Payment.receiptSeats` (หลักเดียวกับ `receiptName`) พร้อมหมายเหตุ "เปลี่ยนที่นั่งภายหลังเป็น …" ส่วน QR บนตั๋วไม่เปลี่ยน เพราะใช้รหัสการจองเดิม |
+| Paid bookings only | Unpaid bookings can already use "Cancel it" and book again right away |
+| At least `SEAT_CHANGE_CUTOFF_MINUTES` (30 minutes) before the showtime | Moving within a zone involves no money, so it's more lenient than cancelling (3 hours) |
+| At most `MAX_SEAT_CHANGES_PER_BOOKING` (2) per booking — expired or cancelled requests don't count | Stops switching back and forth until seats flicker and others can't book them (with another layer on top: 10 requests per 10 minutes per account) |
+| One pending request per booking at a time | The difference is calculated from the current seat set; if requests could overlap, the amount would be wrong |
+| While a difference slip awaits review, neither the customer nor an admin can cancel the booking (409 `SEAT_CHANGE_AWAITING_VERIFICATION`), and the whole showtime can't be cancelled | Same reason as `AWAITING_VERIFICATION` — the difference may really have been paid already |
+| Cancelling a booking that changed seats → refunds the **net amount** (`Booking.totalAmount`) as a single item | This amount includes the extra differences paid and subtracts the differences already refunded, so the admin makes one transfer without adding things up (the amount to transfer is stored in `Payment.refundAmount`, which the refund queue, notifications and reports all share) |
+| Issued receipts don't change | The seats on the receipt are frozen in `Payment.receiptSeats` (same principle as `receiptName`) with the note "Seats later changed to …". The QR on the ticket doesn't change, because it uses the same booking code |
 
-**ผู้ดูแลย้ายแทนลูกค้า** (ที่นั่งชำรุด ลูกค้าโทรมาขอ) จากปุ่ม "เปลี่ยนที่นั่ง" ที่ `/admin/bookings` — ได้เฉพาะโซนเดิมทุกที่ จึงไม่มีส่วนต่าง (400 `SEAT_ZONE_MISMATCH`)
-ไม่ติดเส้นตาย (แต่ต้องก่อนรอบฉายจบ) ไม่นับโควตาของลูกค้า และลูกค้าได้แจ้งเตือนพร้อมเหตุผลที่ผู้ดูแลกรอก
+**Admins can move seats for a customer** (broken seat, customer phoned in) via the "Change seats" button on `/admin/bookings` — every seat must stay in its original zone, so there's never a difference (400 `SEAT_ZONE_MISMATCH`)
+It isn't bound by the deadline (but must happen before the showtime ends), doesn't count toward the customer's quota, and the customer is notified with the reason the admin entered
 
-**โครงข้อมูล** — `Payment` ไม่ได้ผูกหนึ่งต่อหนึ่งกับการจองแล้ว `kind` บอกชนิด: `BOOKING` (ค่าตั๋วตอนจอง) · `SEAT_CHANGE_TOPUP` (ส่วนต่างที่โอนเพิ่ม) · `SEAT_CHANGE_REFUND` (ส่วนต่างที่ต้องคืน)
-คิวตรวจสลิป คิวคืนเงิน เลขที่ใบเสร็จ และรายงาน จึงใช้ชุดเดียวกันได้ทั้งหมด ส่วน `booking.payment` ยังชี้ใบหลักแบบหนึ่งต่อหนึ่งผ่าน `mainBookingId` และมี CHECK constraint กันชนิดกับคอลัมน์ไม่ตรงกัน
-ประวัติทุกคำขออยู่ที่ตาราง `SeatChange` (ใครย้าย จากไหนไปไหน ส่วนต่างเท่าไหร่) ส่วนที่นั่งใหม่ที่กันไว้ระหว่างรอโอนคือแถว `BookingSeat` ที่มี `seatChangeId` — จึงกันจองซ้ำด้วย unique constraint ตัวเดียวกับตอนจองปกติ
+**Data model** — `Payment` is no longer one-to-one with a booking; `kind` gives its type: `BOOKING` (the ticket payment at booking time) · `SEAT_CHANGE_TOPUP` (an extra difference paid) · `SEAT_CHANGE_REFUND` (a difference to be refunded)
+So the slip review queue, the refund queue, receipt numbering and the reports can all use the same set. `booking.payment` still points one-to-one at the main payment through `mainBookingId`, and a CHECK constraint stops the kind and the columns from disagreeing
+The history of every request is in the `SeatChange` table (who moved, from where to where, and the difference). The new seats held while awaiting the transfer are `BookingSeat` rows with a `seatChangeId` — so double booking is prevented by the same unique constraint as normal bookings
 
-### เวลาและสกุลเงิน
+### Time and currency
 
-- เก็บเวลาทั้งหมดเป็น UTC ในฐานข้อมูล แสดงผลตามเวลาไทย (UTC+7) ทั้งสองฝั่ง
-- เก็บจำนวนเงินเป็นจำนวนเต็มหน่วยบาท เลี่ยงปัญหาทศนิยมของ floating point
+- All times are stored in UTC in the database and displayed in Thai time (UTC+7) on both sides
+- Amounts are stored as whole-baht integers, avoiding floating-point decimal problems
 
-### รองรับหลายขนาดหน้าจอ
+### Responsive layout
 
-ออกแบบจากจอมือถือก่อน (ใช้ได้ตั้งแต่กว้าง 360px) แล้วขยายด้วย breakpoint ของ Tailwind — `sm` 640 · `md` 768 · `lg` 1024
-- **ผังที่นั่ง** — โรง 12–16 ที่ต่อแถวกว้างเกินจอมือถือ ถ้าย่อให้พอดีจอที่นั่งจะเล็กจนกดพลาด จึงให้เลื่อนแนวนอนแทน
-  เปิดหน้ามาผังเลื่อนไปที่ที่นั่งที่เลือกค้างไว้ (หรือกลางโรง) ให้เอง อักษรแถวติดขอบซ้ายตอนเลื่อน และมีข้อความบอกเฉพาะตอนที่ผังล้นจอ
-- **แถบสรุปติดขอบล่าง** (`BottomBar`) — วัดความสูงตัวเองแล้วตั้งเป็นตัวแปร CSS `--bottom-bar`
-  layout ใช้เว้นที่ท้ายหน้า ส่วน toast ใช้ลอยขึ้นเหนือแถบ จึงไม่บังเนื้อหาหรือปุ่มยืนยัน ไม่ว่าแถบจะสูงกี่บรรทัด
-- **ตารางฝั่งผู้ดูแล** — จอที่แคบกว่า `lg` แสดงแต่ละแถวเป็นการ์ดด้วย class `.stack-table` ใน `index.css` ที่ใช้ร่วมกัน
-  ชื่อคอลัมน์มาจาก `data-label` ของแต่ละ `<td>` จึงไม่ต้องเขียน markup ซ้ำสองชุด
-- **จอใหญ่** — หน้าชำระเงินวาง QR คู่กับช่องส่งสลิป หน้าโปรไฟล์แบ่งสองคอลัมน์ และเมนูข้างของผู้ดูแลติดจอตอนเลื่อน
+Designed mobile-first (usable from 360px wide), then scaled up with Tailwind breakpoints — `sm` 640 · `md` 768 · `lg` 1024
+- **Seat map** — theatres with 12–16 seats per row are wider than a phone screen, and shrinking the map to fit makes seats too small to tap reliably, so it scrolls horizontally instead
+  On load, the map scrolls by itself to the seats already selected (or the middle of the theatre), row letters stick to the left edge while scrolling, and a hint appears only when the map overflows the screen
+- **Sticky summary bar** (`BottomBar`) — measures its own height and sets it as the CSS variable `--bottom-bar`
+  The layout uses it to leave space at the bottom of the page, and toasts use it to float above the bar, so neither the content nor the confirm button is covered, however many lines tall the bar is
+- **Admin tables** — on screens narrower than `lg`, each row is shown as a card using the shared `.stack-table` class in `index.css`
+  Column names come from each `<td>`'s `data-label`, so the markup doesn't have to be written twice
+- **Large screens** — the payment page puts the QR next to the slip upload, the profile page splits into two columns, and the admin sidebar stays in view while scrolling
 
 ---
 
-## โครงสร้างโปรเจกต์
+## Project structure
 
 ```
-├─ server/                        โปรเจกต์อิสระ มี package.json ของตัวเอง
-│  ├─ prisma/schema.prisma        โครงสร้างฐานข้อมูลทั้งหมด
-│  ├─ prisma/seed.js              ข้อมูลตัวอย่าง
-│  ├─ uploads/slips/payments/     สลิปที่ลูกค้าโอนเงินเข้ามา (ไม่ขึ้น git · ใช้เมื่อไม่ได้ตั้ง Supabase)
-│  ├─ uploads/slips/refunds/      สลิปที่ผู้ดูแลโอนคืนให้ลูกค้า (ไม่ขึ้น git · ใช้เมื่อไม่ได้ตั้ง Supabase)
+├─ server/                        Independent project with its own package.json
+│  ├─ prisma/schema.prisma        The whole database structure
+│  ├─ prisma/seed.js              Sample data
+│  ├─ uploads/slips/payments/     Slips from customers' payments (not in git · used when Supabase isn't configured)
+│  ├─ uploads/slips/refunds/      Slips of refunds admins sent to customers (not in git · used when Supabase isn't configured)
 │  ├─ src/
-│  │  ├─ app.js  index.js         ประกอบ Express app และเปิดเซิร์ฟเวอร์
-│  │  ├─ config/env.js            อ่านและตรวจ .env ด้วย zod
-│  │  ├─ lib/                     prisma client, ที่เก็บสลิป (ดิสก์ หรือ Supabase Storage)
-│  │  ├─ middleware/              auth, ตรวจ role, validate, upload (+ ตรวจไส้ในไฟล์), error handler
+│  │  ├─ app.js  index.js         Assembles the Express app and starts the server
+│  │  ├─ config/env.js            Reads and validates .env with zod
+│  │  ├─ lib/                     prisma client, slip storage (disk or Supabase Storage)
+│  │  ├─ middleware/              auth, role check, validate, upload (+ file content check), error handler
 │  │  ├─ utils/                   jwt, password, phone, promptpay, pricing, seats, seatChange, datetime, mailer, pagination, receipt, bahtText (+ unit test)
-│  │  ├─ emails/                  เนื้อหาอีเมลขาออก (ตั้งรหัสผ่าน, ใบเสร็จ) แยกจากตัวส่ง
-│  │  ├─ jobs/                    ปล่อยที่นั่งหมดเวลา, แจ้งเตือนก่อนฉาย 1 ชม.
-│  │  ├─ routes/                  ผูก URL เข้ากับ controller (ชื่อไฟล์ตรงกับ controllers/)
-│  │  ├─ controllers/             รับ req/res แล้วเรียก service — ไม่แตะ prisma
-│  │  └─ services/                ตรรกะธุรกิจ + query ฐานข้อมูล (ที่เดียวที่ใช้ prisma)
-│  └─ test/                       integration test (รันกับฐานข้อมูลทดสอบแยก ผ่าน .env.test)
-│     ├─ helpers/                 ล้างฐาน + สร้างข้อมูลทดสอบ (ปฏิเสธการรันถ้าไม่ใช่ฐาน *_test)
-│     └─ integration/             จองชนกัน, หมดเวลา vs ส่งสลิป, ยกเลิกรอบ, เปลี่ยนที่นั่ง, refresh หลายแท็บ, HTTP จริง ฯลฯ
-└─ client/                        โปรเจกต์อิสระ มี package.json ของตัวเอง
+│  │  ├─ emails/                  Outgoing email content (password reset, receipt), kept separate from the sender
+│  │  ├─ jobs/                    Release expired seats, reminder 1 hour before the showtime
+│  │  ├─ routes/                  Map URLs to controllers (file names match controllers/)
+│  │  ├─ controllers/             Take req/res and call services — never touch prisma
+│  │  └─ services/                Business logic + database queries (the only place that uses prisma)
+│  └─ test/                       Integration tests (run against a separate test database via .env.test)
+│     ├─ helpers/                 Wipe the database + create test data (refuses to run unless it's a *_test database)
+│     └─ integration/             Booking races, expiry vs slip upload, showtime cancellation, seat changes, multi-tab refresh, real HTTP, etc.
+└─ client/                        Independent project with its own package.json
    └─ src/
-      ├─ api/                     หนึ่งไฟล์ต่อหนึ่งกลุ่ม endpoint + client.js (auto refresh token)
+      ├─ api/                     One file per endpoint group + client.js (auto refresh token)
       ├─ store/                   zustand — authStore, notificationStore, adminQueueStore
-      ├─ context/                 i18n (ไทย/อังกฤษ), Toast
+      ├─ context/                 i18n (Thai/English), Toast
       ├─ hooks/                   useCountdown, usePolling, useSeatSelection
-      ├─ components/              layout, ui kit, ผังที่นั่ง, การ์ดหนัง
-      ├─ pages/                   หน้าฝั่งผู้ใช้ (รวมใบเสร็จ โปรไฟล์ ลืมรหัสผ่าน และตั้งรหัสผ่านใหม่)
-      └─ pages/admin/             หน้าฝั่งผู้ดูแลระบบ (รวมหน้าจัดการผู้ใช้)
+      ├─ components/              layout, ui kit, seat map, movie cards
+      ├─ pages/                   User-facing pages (including receipt, profile, forgot password and reset password)
+      └─ pages/admin/             Admin pages (including user management)
 ```
 
 ---
 
-## API หลัก
+## Main API
 
-| Method | Endpoint | คำอธิบาย |
+| Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/auth/register` | สมัครสมาชิก (`name`, `email`, `phone`, `password`) → เข้าสู่ระบบให้เลย |
-| `POST` | `/api/auth/login` | เข้าสู่ระบบ (`identifier` = อีเมลหรือเบอร์, `password`) → access token + refresh cookie |
-| `POST` | `/api/auth/refresh` | ต่ออายุเซสชันแบบ rotate · ไม่มีคุกกี้ตอบ 204 (ยังไม่ล็อกอิน) · คุกกี้ใช้ไม่ได้ตอบ 401 แล้วลบคุกกี้ทิ้ง |
-| `PATCH` | `/api/auth/me` | แก้ชื่อที่ใช้แสดง |
-| `PATCH` | `/api/auth/password` | เปลี่ยนรหัสผ่านตัวเอง (ต้องส่ง `currentPassword`) → access token ใบใหม่ (ใบเดิมใช้ไม่ได้ทันที) |
-| `POST` | `/api/auth/forgot-password` | ขอลิงก์ตั้งรหัสผ่านใหม่ทางอีเมล — ตอบ `ok` เหมือนกันเสมอ |
-| `POST` | `/api/auth/reset-password/check` | ตรวจว่าลิงก์ยังใช้ได้ไหม ก่อนแสดงฟอร์ม |
-| `POST` | `/api/auth/reset-password` | ตั้งรหัสผ่านใหม่จากลิงก์ (`token`, `password`) |
-| `GET` | `/api/movies` · `/api/movies/:id` | รายการ/รายละเอียดภาพยนตร์ |
-| `GET` | `/api/showtimes?movieId=&date=` | รอบฉายตามวัน |
-| `GET` | `/api/showtimes/:id/seats` | ผังที่นั่งพร้อมสถานะและราคาต่อโซน |
-| `POST` | `/api/bookings` | สร้างการจอง (409 `SEAT_TAKEN` ถ้าที่นั่งถูกตัดหน้า · `PENDING_BOOKING_EXISTS` / `TOO_MANY_PENDING_BOOKINGS` ตาม[นโยบายกักที่นั่ง](#นโยบายกักที่นั่ง)) |
-| `POST` | `/api/bookings/:id/cancel` | ยกเลิกการจอง — ใบที่จ่ายแล้วต้องส่ง `refundBankName` + `refundAccountNo` (ระหว่างรอตรวจสลิปจะได้ 409) |
-| `POST` | `/api/bookings/:id/seat-changes` | เปลี่ยนที่นั่ง (`seatIds` = ชุดใหม่ทั้งชุด · ย้ายไปที่ถูกกว่าต้องส่ง `refundBankName` + `refundAccountNo`) — แพงขึ้นได้คำขอที่รอโอนส่วนต่าง (ดู [เปลี่ยนที่นั่ง](#เปลี่ยนที่นั่ง)) |
-| `GET` | `/api/seat-changes/:id` | คำขอเปลี่ยนที่นั่ง + QR ส่วนต่าง (`holdSecondsLeft`, `canUploadSlip`, `lateSlipUntil`) |
-| `POST` | `/api/seat-changes/:id/slip` · `/cancel` | ส่งสลิปส่วนต่าง (multipart, field `slip`) · ยกเลิกคำขอที่ยังไม่ได้ส่งสลิป |
-| `PATCH` | `/api/bookings/:id/refund-account` | แจ้ง/แก้บัญชีรับเงินคืนของใบที่รอโอนคืน (`refundBankName`, `refundAccountNo`) |
-| `GET` | `/api/bookings/:id/ticket` | ข้อมูล E-Ticket (เฉพาะที่ชำระแล้ว) |
-| `GET` | `/api/bookings/:id/receipt` | ใบเสร็จรับเงิน — เจ้าของการจองหรือผู้ดูแล (ยังไม่มีใบเสร็จได้ 403 `RECEIPT_NOT_READY` · `?payment=` = ใบเสร็จส่วนต่างเปลี่ยนที่นั่ง) |
-| `GET` | `/api/payments/:bookingId` | ข้อมูลชำระเงิน + PromptPay payload (`canUploadSlip`, `lateSlipUntil` บอกว่ายังส่งสลิปได้ถึงเมื่อไหร่) |
-| `POST` | `/api/payments/:bookingId/slip` | อัปโหลดสลิป (multipart, field `slip`) — รวมสลิปที่ส่งหลังหมดเวลาในช่วงผ่อนผัน |
-| `GET` | `/api/admin/overview` | สรุปภาพรวมของผู้ดูแลระบบ |
-| `GET` | `/api/admin/queue-counts` | จำนวนงานค้าง (สลิปรอตรวจ / รอโอนคืน) สำหรับป้ายบนเมนู |
-| `GET` | `/api/admin/users?q=&role=&page=` | ค้นหาผู้ใช้จากชื่อ อีเมล หรือเบอร์โทร |
-| `PATCH` | `/api/admin/users/:id` | แก้ชื่อ/อีเมล/เบอร์ หรือเปลี่ยนบทบาท |
-| `POST` | `/api/admin/users/:id/password` | ตั้งรหัสผ่านใหม่ให้ผู้ใช้ที่ลืมรหัส |
-| `DELETE` | `/api/admin/users/:id` | ลบบัญชี (เฉพาะที่ยังไม่เคยจอง) |
-| `GET` | `/api/admin/payments` | คิวสลิปรอตรวจสอบ (รวมสลิปที่ส่งหลังหมดเวลา) |
-| `POST` | `/api/admin/payments/:id/approve` · `/reject` | อนุมัติ / ปฏิเสธสลิป (สลิปที่ส่งหลังหมดเวลา: อนุมัติ = เข้าคิวคืนเงิน) |
-| `GET` | `/api/admin/refunds` | คิวการจองที่ต้องโอนเงินคืน |
-| `POST` | `/api/admin/refunds/:id/complete` | บันทึกว่าโอนเงินคืนแล้ว (ต้องแนบสลิป) |
-| `POST` | `/api/admin/showtimes/:id/cancel` | ยกเลิกทั้งรอบ — ปิดทุกการจอง เข้าคิวคืนเงิน แจ้งเตือนลูกค้า (`reason` ไม่บังคับ) |
-| `POST` | `/api/admin/bookings/:id/change-seats` | ย้ายที่นั่งแทนลูกค้า — โซนเดิมเท่านั้น ไม่ติดเส้นตาย/โควตา (`reason` ไม่บังคับ ลูกค้าเห็นในแจ้งเตือน) |
-| `GET` | `/api/admin/reports/sales` · `/sales.csv` · `/occupancy` | รายงานยอดขายและอัตราที่นั่งเต็ม |
+| `POST` | `/api/auth/register` | Sign up (`name`, `email`, `phone`, `password`) → logged in right away |
+| `POST` | `/api/auth/login` | Log in (`identifier` = email or phone, `password`) → access token + refresh cookie |
+| `POST` | `/api/auth/refresh` | Renew the session with rotation · no cookie → 204 (not logged in) · invalid cookie → 401 and the cookie is deleted |
+| `PATCH` | `/api/auth/me` | Edit the display name |
+| `PATCH` | `/api/auth/password` | Change your own password (requires `currentPassword`) → a new access token (the old one stops working immediately) |
+| `POST` | `/api/auth/forgot-password` | Request a password reset link by email — always responds `ok` |
+| `POST` | `/api/auth/reset-password/check` | Check whether the link is still valid before showing the form |
+| `POST` | `/api/auth/reset-password` | Set a new password from the link (`token`, `password`) |
+| `GET` | `/api/movies` · `/api/movies/:id` | Movie list/details |
+| `GET` | `/api/showtimes?movieId=&date=` | Showtimes by date |
+| `GET` | `/api/showtimes/:id/seats` | Seat map with status and price per zone |
+| `POST` | `/api/bookings` | Create a booking (409 `SEAT_TAKEN` if a seat was taken first · `PENDING_BOOKING_EXISTS` / `TOO_MANY_PENDING_BOOKINGS` per the [seat hold limits](#seat-hold-limits)) |
+| `POST` | `/api/bookings/:id/cancel` | Cancel a booking — paid bookings must send `refundBankName` + `refundAccountNo` (409 while the slip awaits review) |
+| `POST` | `/api/bookings/:id/seat-changes` | Change seats (`seatIds` = the complete new set · moving to cheaper seats requires `refundBankName` + `refundAccountNo`) — pricier seats create a request awaiting the difference payment (see [Seat changes](#seat-changes)) |
+| `GET` | `/api/seat-changes/:id` | Seat change request + difference QR (`holdSecondsLeft`, `canUploadSlip`, `lateSlipUntil`) |
+| `POST` | `/api/seat-changes/:id/slip` · `/cancel` | Upload the difference slip (multipart, field `slip`) · cancel a request whose slip hasn't been uploaded yet |
+| `PATCH` | `/api/bookings/:id/refund-account` | Add/edit the refund account of a booking awaiting refund (`refundBankName`, `refundAccountNo`) |
+| `GET` | `/api/bookings/:id/ticket` | E-Ticket data (paid bookings only) |
+| `GET` | `/api/bookings/:id/receipt` | Receipt — booking owner or admin (403 `RECEIPT_NOT_READY` if there's no receipt yet · `?payment=` = a seat change difference receipt) |
+| `GET` | `/api/payments/:bookingId` | Payment details + PromptPay payload (`canUploadSlip`, `lateSlipUntil` say until when a slip can still be uploaded) |
+| `POST` | `/api/payments/:bookingId/slip` | Upload a slip (multipart, field `slip`) — including late slips within the grace period |
+| `GET` | `/api/admin/overview` | Admin overview summary |
+| `GET` | `/api/admin/queue-counts` | Pending work counts (slips awaiting review / refunds pending) for the menu badges |
+| `GET` | `/api/admin/users?q=&role=&page=` | Search users by name, email or phone |
+| `PATCH` | `/api/admin/users/:id` | Edit name/email/phone, or change the role |
+| `POST` | `/api/admin/users/:id/password` | Set a new password for a user who forgot theirs |
+| `DELETE` | `/api/admin/users/:id` | Delete an account (only if it has never booked) |
+| `GET` | `/api/admin/payments` | Queue of slips awaiting review (including late slips) |
+| `POST` | `/api/admin/payments/:id/approve` · `/reject` | Approve / reject a slip (late slips: approve = queue a refund) |
+| `GET` | `/api/admin/refunds` | Queue of bookings that need a refund transfer |
+| `POST` | `/api/admin/refunds/:id/complete` | Record the refund as transferred (slip required) |
+| `POST` | `/api/admin/showtimes/:id/cancel` | Cancel a whole showtime — closes every booking, queues refunds, notifies customers (`reason` optional) |
+| `POST` | `/api/admin/bookings/:id/change-seats` | Move seats for a customer — same zone only, not bound by the deadline/quota (`reason` optional, shown to the customer in the notification) |
+| `GET` | `/api/admin/reports/sales` · `/sales.csv` · `/occupancy` | Sales and occupancy reports |
 
-ทุก endpoint ที่ขึ้นต้นด้วย `/api/admin` ต้องใช้บัญชีที่มี role `ADMIN`
+Every endpoint starting with `/api/admin` requires an account with the `ADMIN` role
 
-รายการฝั่งผู้ดูแล (`/admin/bookings`, `/payments`, `/refunds`, `/users`) **แบ่งหน้า** ด้วย `page` (เริ่มที่ 1) และ `pageSize` (ค่าเริ่มต้น 50 สูงสุด 100)
-แล้วตอบ `total`, `page`, `pageSize` มาด้วย — เดิมตัดที่ 100 แถวล่าสุดตายตัว รายการที่เก่ากว่านั้นเปิดดูจากหน้าเว็บไม่ได้เลย
+Admin lists (`/admin/bookings`, `/payments`, `/refunds`, `/users`) are **paginated** with `page` (starting at 1) and `pageSize` (default 50, max 100)
+and also return `total`, `page`, `pageSize` — previously they were hard-capped at the latest 100 rows, and anything older couldn't be viewed from the web app at all
 
-ตัวอย่างการเรียก API พร้อมใช้อยู่ใน [server/api.http](server/api.http) — เปิดใน VS Code แล้วใช้ส่วนขยาย **REST Client** กด Send Request ไล่จากบนลงล่างได้ทันที
+Ready-to-use API call examples are in [server/api.http](server/api.http) — open it in VS Code with the **REST Client** extension and click Send Request from top to bottom
 
 ---
 
-## การทดสอบ
+## Testing
 
 ```bash
-cd server && npm test   # unit test: PromptPay CRC/EMVCo payload, การคิดราคาต่อโซน, ราคาเปลี่ยนที่นั่ง, TRUST_PROXY, จำนวนเงินเป็นตัวอักษร, ใบเสร็จ + อีเมลใบเสร็จ
+cd server && npm test   # unit tests: PromptPay CRC/EMVCo payload, per-zone pricing, seat change pricing, TRUST_PROXY, amounts in words, receipts + receipt email
 ```
 
-**Integration test** รันกับ PostgreSQL จริงในฐานข้อมูลแยก (`theatre_reservation_test`) — ครอบเคสที่ unit test มองไม่เห็น
-เช่น สองคนจองที่นั่งเดียวกันพร้อมกัน, job หมดเวลาชนกับการส่งสลิป, ผู้ดูแลสองคนกดอนุมัติ/ยกเลิกพร้อมกัน, ยกเลิกทั้งรอบ,
-ส่งสลิปหลังหมดเวลา, refresh จากหลายแท็บ, ออกเลขที่ใบเสร็จพร้อมกัน (ไม่ซ้ำ ไม่ข้าม), เปลี่ยนที่นั่ง (แย่งที่นั่งใหม่/กดซ้ำพร้อมกัน ส่วนต่าง ยกเลิกหลังเปลี่ยน) และเทสต์ผ่าน HTTP จริง (security headers, ตรวจไฟล์สลิป, เพิกถอน token, แบ่งหน้า)
+**Integration tests** run against real PostgreSQL in a separate database (`theatre_reservation_test`) — covering cases unit tests can't see,
+such as two people booking the same seat at once, the expiry job colliding with a slip upload, two admins approving/cancelling at once, cancelling a whole showtime,
+late slip submission, refreshing from multiple tabs, issuing receipt numbers concurrently (no duplicates, no gaps), seat changes (racing for the new seats/double submits, differences, cancelling after a change) and tests over real HTTP (security headers, slip file checks, token revocation, pagination)
 
 ```bash
 cd server
-cp .env.test.example .env.test   # แก้ <PASSWORD> ให้ตรงกับ PostgreSQL บนเครื่อง (Windows: copy)
-npm run test:int                 # ครั้งแรกจะสร้างฐาน theatre_reservation_test และ migrate ให้เอง
+cp .env.test.example .env.test   # set <PASSWORD> to match your local PostgreSQL (Windows: copy)
+npm run test:int                 # the first run creates the theatre_reservation_test database and migrates it automatically
 ```
 
-> เทสต์**ล้างทุกตาราง**ก่อนรันแต่ละเคส ตัวช่วยในเทสต์จึงปฏิเสธการรันถ้าชื่อฐานไม่ลงท้ายด้วย `_test`
-> หรือถ้า `SMTP_HOST` ถูกตั้งไว้ (กันล้างฐาน dev โดยไม่ตั้งใจ และกันส่งอีเมลจริงระหว่างเทสต์)
+> The tests **wipe every table** before each case, so the test helpers refuse to run if the database name doesn't end in `_test`
+> or if `SMTP_HOST` is set (to avoid wiping the dev database by accident and sending real email during tests)
 
-เคสสำคัญที่ควรลองด้วยมือ:
+Key cases to try by hand:
 
-1. **สมัครแล้วจองต่อได้ทันที** — เลือกที่นั่งโดยยังไม่ล็อกอิน กดยืนยัน → ถูกพาไปหน้าเข้าสู่ระบบ → กด "สมัครสมาชิก" ในการ์ด → สมัครเสร็จต้องถูกพากลับมาที่ผังที่นั่งเดิมโดยที่นั่งที่เลือกไว้ยังอยู่
-2. **จองชนกัน** — เปิดสองเบราว์เซอร์ เลือกที่นั่งเดียวกัน กดยืนยันพร้อมกัน → ต้องมีคนเดียวที่จองได้ อีกคนได้ข้อความว่าที่นั่งถูกจองไปแล้ว
-3. **หมดเวลาชำระเงิน** — ตั้ง `SEAT_HOLD_MINUTES=1` ใน `.env` แล้วปล่อยหน้าชำระเงินทิ้งไว้ → การจองเปลี่ยนเป็นหมดเวลาและที่นั่งกลับมาว่างภายใน ~90 วินาที
-4. **ปฏิเสธสลิป** — Admin กดปฏิเสธพร้อมเหตุผล → หน้าของผู้ใช้อัปเดตเองพร้อมเหตุผลและได้เวลาชำระใหม่ 10 นาที
-5. **ห้ามยกเลิกระหว่างรอตรวจสลิป** — อัปโหลดสลิปแล้วเข้า `/my-bookings` → ปุ่มยกเลิกต้องหายไป และขึ้นข้อความว่าต้องรอผลตรวจ → เมื่อแอดมินอนุมัติหรือปฏิเสธแล้วปุ่มจึงกลับมา
-6. **นโยบายยกเลิก** — การจองที่เหลือเวลาก่อนฉายน้อยกว่า 3 ชั่วโมงจะยกเลิกไม่ได้
-7. **คืนเงิน** — จองแล้วจ่ายเงิน → แอดมินอนุมัติ → ผู้ใช้ยกเลิกพร้อมกรอกธนาคารและเลขที่บัญชี → รายการต้องโผล่ที่ `/admin/refunds` พร้อมเบอร์ลูกค้าและบัญชีปลายทาง → แอดมินกดบันทึกว่าโอนคืนแล้ว → ผู้ใช้ได้รับแจ้งเตือนและเห็นสถานะ "คืนเงินแล้ว"
-8. **โปรไฟล์และจัดการผู้ใช้** — ที่ `/profile` แก้ชื่อ → ชื่อบนแถบบนต้องเปลี่ยนทันที · เปลี่ยนรหัสผ่านด้วยรหัสเดิมที่ผิดต้องถูกปฏิเสธ · ที่ `/admin/users` ค้นลูกค้าด้วยเบอร์ → ตั้งรหัสผ่านใหม่ให้ → ลูกค้าล็อกอินด้วยรหัสใหม่ได้ และเซสชันเดิมถูกตัด
-9. **ลืมรหัสผ่าน** — ที่ `/login` กด "ลืมรหัสผ่าน?" → กรอกอีเมลที่สมัครไว้ → เปิดลิงก์ (ดูใน console ของเซิร์ฟเวอร์ หรือกดจากกล่องสีฟ้าบนหน้าจอตอนรันโหมดพัฒนา) → ตั้งรหัสใหม่ → ต้องถูกพากลับไปหน้าเข้าสู่ระบบพร้อมอีเมลเติมไว้ให้ · กดลิงก์เดิมซ้ำอีกรอบต้องขึ้นว่าลิงก์ใช้ไม่ได้แล้ว
-10. **สลับภาษา** — กดปุ่ม EN / ไทย บนแถบบน ทุกหน้าต้องเปลี่ยนภาษารวมถึงชื่อเรื่องจากฐานข้อมูล
-11. **ยกเลิกทั้งรอบ** — รอบที่มีทั้งใบที่จ่ายแล้วและยังไม่จ่าย → `/admin/showtimes` กด "ยกเลิกรอบ" → ใบที่จ่ายแล้วต้องโผล่ที่ `/admin/refunds` ลูกค้าได้แจ้งเตือนและกด "แจ้งบัญชีรับเงินคืน" ที่ `/my-bookings` ได้ · ลองลบรอบนั้นต้องลบไม่ได้
-12. **ส่งสลิปหลังหมดเวลา** — ตั้ง `SEAT_HOLD_MINUTES=1` จองแล้วปล่อยให้หมดเวลา → หน้าชำระเงินต้องยังมีช่องส่งสลิป ส่งแล้วต้องได้ที่นั่งเดิมคืน · ทำซ้ำแต่ให้อีกบัญชีจองที่นั่งนั้นไปก่อนส่ง → สลิปต้องเข้าคิวพร้อมป้าย "โอนหลังหมดเวลา" อนุมัติแล้วเข้าคิวคืนเงิน
-13. **นโยบายกักที่นั่ง** — จองแล้วกด back จากหน้าชำระเงิน → ผังที่นั่งต้องขึ้นหน้าต่างให้ไปจ่ายใบเดิมหรือยกเลิกใบเดิม**ทันที** (ไม่ต้องเลือกที่นั่งใหม่ก่อน และไม่มี 409 ใน console)
-14. **เปิดหลายแท็บ** — ล็อกอินไว้แล้วเปิดเว็บพร้อมกัน 3 แท็บ (หรือปิดเปิดเบราว์เซอร์ที่กู้แท็บเดิม) → ทุกแท็บต้องยังล็อกอินอยู่
-15. **แก้ราคารอบที่มีคนจอง** — ที่ `/admin/showtimes` แก้ราคาฐานของรอบที่มีคนจองแล้วโดยไม่แตะเวลา → ต้องบันทึกได้
-16. **ใบเสร็จ (E-Receipt)** — จองแล้วให้แอดมินอนุมัติสลิป → console ของ server ต้องพิมพ์อีเมลใบเสร็จเลขที่ `RC-…` และแจ้งเตือนต้องบอกเลขเดียวกัน → กด "ใบเสร็จ" ที่ `/my-bookings` → กด "พิมพ์ / บันทึก PDF" ต้องได้ A4 หน้าเดียวที่ไม่มีเมนูหรือพื้นมืด · สลับ EN แล้วจำนวนเงินเป็นตัวอักษรต้องเป็นภาษาอังกฤษ · ยกเลิกใบนั้น → ใบเสร็จยังเปิดได้พร้อมตรา "รอคืนเงิน" · แอดมินค้น `RC-…` ที่ `/admin/bookings` ต้องเจอ และลบถาวรหนังเรื่องนั้นต้องไม่ได้
-17. **เปลี่ยนที่นั่ง** — จองแล้วให้แอดมินอนุมัติ → ที่ `/my-bookings` กด "เปลี่ยนที่นั่ง" → ย้ายในโซนเดิมต้องเสร็จทันที ตั๋วขึ้นที่นั่งใหม่ ส่วนใบเสร็จเดิมยังเป็นที่นั่งเก่าพร้อมหมายเหตุ · ย้ายไปโซนที่แพงกว่า → ได้หน้าโอนส่วนต่าง และที่นั่งใหม่ต้องขึ้นว่าไม่ว่างในผังของอีกบัญชี → ส่งสลิป → แอดมินอนุมัติที่ `/admin/payments` (ป้าย "ส่วนต่างเปลี่ยนที่นั่ง") → ที่นั่งเปลี่ยน และมีปุ่ม "ใบเสร็จส่วนต่าง" · ย้ายไปที่ถูกกว่า → ต้องกรอกบัญชี แล้วรายการโผล่ที่ `/admin/refunds` · แอดมินกด "เปลี่ยนที่นั่ง" ที่ `/admin/bookings` แล้วลองย้ายข้ามโซน → ต้องไม่ได้
+1. **Sign up and keep booking right away** — pick seats without logging in and confirm → you're taken to the login page → click "Create one" on the card → after signing up you must land back on the same seat map with your selected seats still there
+2. **Booking race** — open two browsers, pick the same seat and confirm at the same time → only one must succeed; the other gets a message that the seat is already taken
+3. **Payment timeout** — set `SEAT_HOLD_MINUTES=1` in `.env` and leave the payment page open → the booking turns expired and the seats become free again within ~90 seconds
+4. **Slip rejection** — an admin rejects with a reason → the user's page updates by itself with the reason and a new 10-minute payment window
+5. **No cancelling while the slip is under review** — upload a slip, then go to `/my-bookings` → the cancel button must be gone, with a message saying to wait for the review result → the button comes back only after an admin approves or rejects
+6. **Cancellation policy** — bookings less than 3 hours before the showtime can't be cancelled
+7. **Refund** — book and pay → an admin approves → the user cancels, entering a bank and account number → the item must appear at `/admin/refunds` with the customer's phone and destination account → the admin records the refund as transferred → the user gets a notification and sees the "Refunded" status
+8. **Profile and user management** — edit the name at `/profile` → the name in the top bar must change immediately · changing the password with a wrong current password must be rejected · at `/admin/users`, find a customer by phone → set a new password for them → the customer can log in with the new password, and their old sessions are cut off
+9. **Forgot password** — at `/login` click "Forgot password?" → enter the registered email → open the link (find it in the server console, or click it in the blue box on screen when running in development mode) → set a new password → you must be taken back to the login page with the email pre-filled · opening the same link again must say the link is no longer valid
+10. **Language switch** — click the EN / ไทย button in the top bar; every page must switch language, including movie titles from the database
+11. **Cancelling a whole showtime** — a showtime with both paid and unpaid bookings → on `/admin/showtimes` click "Cancel showtime" → paid bookings must appear at `/admin/refunds`, and customers get a notification and can click "Add refund account" at `/my-bookings` · trying to delete that showtime must fail
+12. **Late slip submission** — set `SEAT_HOLD_MINUTES=1`, book and let the hold expire → the payment page must still offer slip upload, and uploading must restore the original seats · repeat, but have another account book those seats before uploading → the slip must enter the queue with a "Paid after the deadline" badge, and approving it sends it to the refund queue
+13. **Seat hold limits** — book, then press back from the payment page → the seat map must show the dialog to pay for or cancel the existing booking **immediately** (without picking new seats first, and with no 409 in the console)
+14. **Multiple tabs** — while logged in, open the site in 3 tabs at once (or close and reopen a browser that restores its tabs) → every tab must still be logged in
+15. **Editing the price of a booked showtime** — at `/admin/showtimes`, change the base price of a showtime that already has bookings without touching the time → it must save
+16. **Receipt (E-Receipt)** — book and have an admin approve the slip → the server console must print the receipt email with number `RC-…`, and the notification must show the same number → click "Receipt" at `/my-bookings` → "Print / Save as PDF" must produce a single A4 page without menus or the dark background · after switching to EN, the amount in words must be in English · cancel that booking → the receipt still opens, stamped "Refund pending" · an admin searching for `RC-…` at `/admin/bookings` must find it, and permanently deleting that movie must fail
+17. **Seat changes** — book and have an admin approve → at `/my-bookings` click "Change seats" → moving within the same zone must complete immediately, with the ticket showing the new seats while the original receipt keeps the old seats plus a note · moving to a pricier zone → you get the difference payment page, and the new seats must show as taken on another account's seat map → upload the slip → an admin approves it at `/admin/payments` ("Seat change difference" badge) → the seats change and a "Difference receipt" button appears · moving to cheaper seats → an account must be entered, then the item appears at `/admin/refunds` · an admin clicking "Change seats" at `/admin/bookings` and trying to move across zones → must not be allowed
 
 ---
 
-## การตั้งค่าที่ปรับได้ (`server/.env`)
+## Configuration (`server/.env`)
 
-| ตัวแปร | ค่าเริ่มต้น | ความหมาย |
+| Variable | Default | Meaning |
 |---|---|---|
-| `SEAT_HOLD_MINUTES` | `10` | เวลากันที่นั่งระหว่างรอชำระเงิน |
-| `REJECTED_RETRY_MINUTES` | `10` | เวลาที่ให้ใหม่หลังสลิปถูกปฏิเสธ |
-| `CANCEL_CUTOFF_HOURS` | `3` | ยกเลิกฟรีได้ถ้าเหลือเวลาก่อนฉายไม่น้อยกว่านี้ |
-| `MAX_SEATS_PER_BOOKING` | `8` | จำนวนที่นั่งสูงสุดต่อการจอง |
-| `MAX_PENDING_BOOKINGS_PER_USER` | `3` | ถือที่นั่งค้าง (รอชำระ + รอตรวจสลิป) พร้อมกันได้กี่รายการต่อคน |
-| `LATE_SLIP_GRACE_MINUTES` | `30` | หมดเวลาชำระแล้วยังส่งสลิปได้อีกกี่นาที (`0` = ปิด) — ใช้กับสลิปส่วนต่างเปลี่ยนที่นั่งด้วย |
-| `SEAT_CHANGE_CUTOFF_MINUTES` | `30` | ลูกค้าเปลี่ยนที่นั่งเองได้ถึงก่อนรอบฉายกี่นาที |
-| `MAX_SEAT_CHANGES_PER_BOOKING` | `2` | ลูกค้าเปลี่ยนที่นั่งเองได้กี่ครั้งต่อการจอง (คำขอที่หมดเวลา/ยกเลิก และที่ผู้ดูแลย้ายให้ไม่นับ) |
-| `TRUST_PROXY` | `loopback` | เชื่อ `X-Forwarded-For` จาก proxy ไหน — ตัวเลข = จำนวน proxy ข้างหน้า · **ห้ามตั้ง `true`** ถ้าไม่แน่ใจ (ปลอมไอพีหลบ rate limit ได้) |
-| `BCRYPT_ROUNDS` | `10` | ความแรงในการ hash รหัสผ่าน (สูงขึ้น = เดายากขึ้นแต่ล็อกอินช้าลง) |
-| `LOGIN_LIMIT` | `10` | ล็อกอินผิดได้กี่ครั้งต่อ (ไอพี + บัญชี) ครั้งที่สำเร็จไม่นับ |
-| `LOGIN_WINDOW_MINUTES` | `15` | กรอบเวลาที่ใช้นับการล็อกอินผิด (นาที) |
-| `REGISTER_LIMIT` | `50` | สมัครได้กี่บัญชีต่อไอพี นับเฉพาะครั้งที่สำเร็จ |
-| `REGISTER_WINDOW_MINUTES` | `60` | กรอบเวลาที่ใช้นับการสมัคร (นาที) |
-| `PASSWORD_RESET_TTL_MINUTES` | `30` | อายุลิงก์ตั้งรหัสผ่านใหม่ |
-| `PASSWORD_RESET_LIMIT` | `5` | ขอลิงก์ได้กี่ครั้งต่อ (ไอพี + อีเมล) ในกรอบเวลาด้านล่าง |
-| `PASSWORD_RESET_WINDOW_MINUTES` | `60` | กรอบเวลาที่ใช้นับการขอลิงก์ (นาที) |
-| `SMTP_HOST` | _(ว่าง)_ | เซิร์ฟเวอร์อีเมลขาออก — **ว่างไว้ = ไม่ส่งจริง พิมพ์ลง console แทน** |
-| `SMTP_PORT` | `587` | พอร์ต SMTP (ใช้ `465` คู่กับ `SMTP_SECURE=true`) |
-| `SMTP_SECURE` | ตามพอร์ต | `true` เมื่อเข้ารหัสตั้งแต่เชื่อมต่อ ไม่ตั้งมาจะเดาจากพอร์ตให้ |
-| `SMTP_USER` / `SMTP_PASS` | _(ว่าง)_ | บัญชีสำหรับล็อกอินเข้า SMTP (เว้นว่างได้ถ้าเซิร์ฟเวอร์ไม่ต้องล็อกอิน) |
-| `MAIL_FROM` | `CineBook <no-reply@localhost>` | ชื่อผู้ส่งที่ปรากฏในอีเมล |
-| `APP_URL` | ค่าของ `CLIENT_ORIGIN` | ฐานของลิงก์ในอีเมล ต้องเป็น URL ที่ผู้ใช้เปิดได้จากเครื่องตัวเอง |
-| `PROMPTPAY_ID` | `0812345678` | หมายเลขพร้อมเพย์ปลายทางที่ใช้สร้าง QR (**ต้องเปลี่ยนก่อนใช้งานจริง**) |
-| `RECEIPT_ISSUER_NAME` | `Sphere Cineplex` | ชื่อผู้ออกใบเสร็จ แสดงบนหน้าใบเสร็จและอีเมลใบเสร็จ |
-| `RECEIPT_ISSUER_ADDRESS` | _(ว่าง)_ | ที่อยู่ผู้ออกใบเสร็จ — ว่างไว้ = ไม่แสดงบรรทัดที่อยู่ |
-| `MAX_SLIP_SIZE_MB` | `5` | ขนาดไฟล์สลิปสูงสุด |
-| `SUPABASE_URL` | _(ว่าง)_ | Project URL ของ Supabase — **ว่างไว้ = เก็บสลิปลงดิสก์** ตั้งแล้วเก็บบน Supabase Storage (ดู [ที่เก็บสลิป](#ที่เก็บสลิป)) |
-| `SUPABASE_SECRET_KEY` | _(ว่าง)_ | secret key (`sb_secret_…`) หรือ service_role key — ต้องตั้งคู่กับ `SUPABASE_URL` และ**ห้ามใส่ฝั่ง client** |
-| `SUPABASE_SLIP_BUCKET` | `slips` | ชื่อ bucket ที่เก็บสลิป (ต้องเป็น private) |
+| `SEAT_HOLD_MINUTES` | `10` | How long seats are held while awaiting payment |
+| `REJECTED_RETRY_MINUTES` | `10` | The new time given after a slip is rejected |
+| `CANCEL_CUTOFF_HOURS` | `3` | Free cancellation is allowed while at least this much time remains before the showtime |
+| `MAX_SEATS_PER_BOOKING` | `8` | Maximum seats per booking |
+| `MAX_PENDING_BOOKINGS_PER_USER` | `3` | How many pending bookings (awaiting payment + awaiting slip review) one person can hold at once |
+| `LATE_SLIP_GRACE_MINUTES` | `30` | How many minutes after the payment window closes a slip can still be uploaded (`0` = off) — also applies to seat change difference slips |
+| `SEAT_CHANGE_CUTOFF_MINUTES` | `30` | Customers can change seats themselves until this many minutes before the showtime |
+| `MAX_SEAT_CHANGES_PER_BOOKING` | `2` | How many times a customer can change seats per booking (expired/cancelled requests and admin moves don't count) |
+| `TRUST_PROXY` | `loopback` | Which proxies to trust `X-Forwarded-For` from — a number = how many proxies are in front · **don't set `true`** if you're not sure (IPs could be spoofed to dodge rate limits) |
+| `BCRYPT_ROUNDS` | `10` | Password hashing strength (higher = harder to guess but slower logins) |
+| `LOGIN_LIMIT` | `10` | How many failed logins are allowed per (IP + account); successful ones don't count |
+| `LOGIN_WINDOW_MINUTES` | `15` | Time window for counting failed logins (minutes) |
+| `REGISTER_LIMIT` | `50` | How many accounts can be registered per IP, counting only successful sign-ups |
+| `REGISTER_WINDOW_MINUTES` | `60` | Time window for counting sign-ups (minutes) |
+| `PASSWORD_RESET_TTL_MINUTES` | `30` | Lifetime of password reset links |
+| `PASSWORD_RESET_LIMIT` | `5` | How many links can be requested per (IP + email) within the window below |
+| `PASSWORD_RESET_WINDOW_MINUTES` | `60` | Time window for counting link requests (minutes) |
+| `SMTP_HOST` | _(empty)_ | Outgoing mail server — **empty = nothing is really sent; printed to the console instead** |
+| `SMTP_PORT` | `587` | SMTP port (use `465` together with `SMTP_SECURE=true`) |
+| `SMTP_SECURE` | Based on the port | `true` when the connection is encrypted from the start; if unset, it's inferred from the port |
+| `SMTP_USER` / `SMTP_PASS` | _(empty)_ | Credentials for logging in to SMTP (can be left empty if the server needs no login) |
+| `MAIL_FROM` | `CineBook <no-reply@localhost>` | Sender name shown in emails |
+| `APP_URL` | The value of `CLIENT_ORIGIN` | Base of the links in emails; must be a URL users can open from their own devices |
+| `PROMPTPAY_ID` | `0812345678` | Destination PromptPay number used to generate the QR (**must be changed before going live**) |
+| `RECEIPT_ISSUER_NAME` | `Sphere Cineplex` | Receipt issuer name, shown on the receipt page and in the receipt email |
+| `RECEIPT_ISSUER_ADDRESS` | _(empty)_ | Receipt issuer address — empty = no address line |
+| `MAX_SLIP_SIZE_MB` | `5` | Maximum slip file size |
+| `SUPABASE_URL` | _(empty)_ | Supabase Project URL — **empty = slips are stored on disk**; when set, they're stored in Supabase Storage (see [Slip storage](#slip-storage)) |
+| `SUPABASE_SECRET_KEY` | _(empty)_ | Secret key (`sb_secret_…`) or service_role key — must be set together with `SUPABASE_URL` and **never put on the client side** |
+| `SUPABASE_SLIP_BUCKET` | `slips` | Name of the bucket that stores slips (must be private) |
