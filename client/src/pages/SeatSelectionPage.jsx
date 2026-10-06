@@ -17,6 +17,7 @@ import SeatMap from '../components/seatmap/SeatMap.jsx';
 import SeatLegend from '../components/seatmap/SeatLegend.jsx';
 import useSeatSelection from '../hooks/useSeatSelection.js';
 import { formatDate, formatMoney, formatTime } from '../utils/format.js';
+import { seatLabels } from '../utils/seats.js';
 
 const MAX_SEATS = 8;
 // ต้องตรงกับ SEAT_HOLD_MINUTES ฝั่ง server
@@ -217,12 +218,7 @@ const SeatSelectionPage = () => {
               {t('seats.selectedSeats')} ({selected.length}/{MAX_SEATS})
             </p>
             <p className="min-w-0 truncate font-semibold">
-              {selectedSeats.length > 0
-                ? selectedSeats
-                    .map((seat) => `${seat.rowLabel}${seat.seatNumber}`)
-                    .sort()
-                    .join(', ')
-                : '—'}
+              {selectedSeats.length > 0 ? seatLabels(selectedSeats) : '—'}
             </p>
           </div>
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">

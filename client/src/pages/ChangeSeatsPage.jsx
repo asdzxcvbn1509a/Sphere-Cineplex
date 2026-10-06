@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowRight, Clock3, Info, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock3, Info, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { getBooking, requestSeatChange } from '../api/bookings.js';
@@ -22,11 +22,10 @@ import SeatLegend from '../components/seatmap/SeatLegend.jsx';
 import { EMPTY_REFUND_FORM, readRefundAccountForm } from '../utils/banks.js';
 import { formatDate, formatMoney, formatTime } from '../utils/format.js';
 import { previewSeatChange, sameZones } from '../utils/seatChange.js';
+import { seatLabels } from '../utils/seats.js';
 
 // ต้องตรงกับ SEAT_HOLD_MINUTES ฝั่ง server — เวลาที่กันที่นั่งใหม่ไว้รอโอนส่วนต่าง
 const HOLD_MINUTES = 10;
-
-const labelOf = (seat) => `${seat.rowLabel}${seat.seatNumber}`;
 
 /**
  * เปลี่ยนที่นั่งของการจองที่จ่ายแล้ว — เริ่มจากที่นั่งเดิมเลือกไว้ครบ ลูกค้าแตะที่นั่งเดิมออกแล้วเลือกที่ใหม่แทน
@@ -73,7 +72,8 @@ const ChangeSeatsPage = ({ admin = false }) => {
         setBooking(next);
         setSeatMap(map.data);
         // โหลดครั้งแรกเริ่มจากที่นั่งเดิม · โหลดซ้ำ (ที่นั่งถูกตัดหน้า) ตัดเฉพาะที่นั่งที่ไม่ว่างแล้วออก
-        setSelected((current) => (silent ? current.filter((id) => free.has(id)) : ownIds));
+        // ที่นั่งเดิมที่ผู้ดูแลปิดใช้งาน (เช่น ชำรุด) ไม่อยู่ในผัง ถ้าปล่อยไว้ใน selected จะแตะเอาออกไม่ได้จนเลือกที่ใหม่ไม่ได้เลย
+        setSelected((current) => (silent ? current : ownIds).filter((id) => free.has(id)));
         setState({ loading: false, error: null });
       } catch (error) {
         setState({ loading: false, error: apiError(error).message });
@@ -111,6 +111,8 @@ const ChangeSeatsPage = ({ admin = false }) => {
   const required = booking.seats.length;
   const ownIds = booking.seats.map((seat) => seat.id);
   const selectedSeats = selected.map((id) => seatsById.get(id)).filter(Boolean);
+  // ที่นั่งเดิมที่ปิดใช้งานแล้ว ไม่อยู่ในผังจึงไม่ได้ถูกเลือกไว้ตั้งแต่ต้น — บอกให้รู้ว่าต้องเลือกที่ใหม่แทน
+  const closedOwn = booking.seats.filter((seat) => !seatsById.has(seat.id));
   const preview = previewSeatChange(booking.seats, selectedSeats);
   const unchanged = selected.length === required && selected.every((id) => ownIds.includes(id));
   const zonesOk = !admin || sameZones(booking.seats, selectedSeats);
@@ -268,6 +270,13 @@ const ChangeSeatsPage = ({ admin = false }) => {
             })}`}
       </p>
 
+      {closedOwn.length > 0 && (
+        <p className="mb-4 flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          {t('seatChange.ownSeatClosed', { seats: seatLabels(closedOwn) })}
+        </p>
+      )}
+
       <SeatMap
         rows={seatMap.rows}
         selectedIds={selected}
@@ -290,9 +299,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
             <ArrowRight size={14} className="text-muted" />
             <span className="text-muted">{t('seatChange.to')}</span>
             <span className="font-semibold text-accent">
-              {selectedSeats.length > 0
-                ? selectedSeats.map(labelOf).sort().join(', ')
-                : '—'}{' '}
+              {selectedSeats.length > 0 ? seatLabels(selectedSeats) : '—'}{' '}
               <span className="text-xs font-normal text-muted">
                 ({selected.length}/{required})
               </span>
@@ -342,7 +349,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
           <p className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 font-semibold">
             {booking.seats.map((seat) => seat.label).join(', ')}
             <ArrowRight size={14} className="text-muted" />
-            <span className="text-accent">{selectedSeats.map(labelOf).sort().join(', ')}</span>
+            <span className="text-accent">{seatLabels(selectedSeats)}</span>
           </p>
 
           <p className="text-muted">

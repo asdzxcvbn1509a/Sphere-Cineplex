@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeftRight,
   CreditCard,
@@ -34,7 +34,9 @@ const needsRefundAccount = (booking) => booking?.payment?.status === 'APPROVED';
 const MyBookingsPage = () => {
   const { t, lang, pick } = useI18n();
   const toast = useToast();
-  const [scope, setScope] = useState('upcoming');
+  // แท็บอยู่ใน URL (?tab=history) — หน้าการจองที่ยกเลิกพามาที่แท็บประวัติได้ตรง ๆ และรีเฟรชแล้วไม่เด้งกลับ
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scope = searchParams.get('tab') === 'history' ? 'history' : 'upcoming';
   const [bookings, setBookings] = useState([]);
   const [state, setState] = useState({ loading: true, error: null });
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -159,7 +161,7 @@ const MyBookingsPage = () => {
           <button
             key={tab}
             type="button"
-            onClick={() => setScope(tab)}
+            onClick={() => setSearchParams(tab === 'history' ? { tab } : {}, { replace: true })}
             className={clsx(
               'rounded-lg px-4 py-1.5 text-sm font-medium transition',
               scope === tab ? 'bg-accent text-ink' : 'text-muted hover:text-fg',

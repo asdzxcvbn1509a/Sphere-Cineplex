@@ -1,3 +1,12 @@
+import { z } from 'zod';
+
+/**
+ * boolean ใน query string — รับเฉพาะ 'true' / 'false' ค่าอื่นได้ 422
+ * ไม่ใช้ z.coerce.boolean() เพราะสตริงที่ไม่ว่างทุกตัวเป็น true รวมถึง 'false'
+ * (?force=false ของการลบหนังจะกลายเป็นลบถาวร — เหตุผลเดียวกับ SMTP_SECURE ใน config/env.js)
+ */
+export const queryBoolean = z.enum(['true', 'false']).transform((value) => value === 'true');
+
 /**
  * ตรวจ request ด้วย zod แล้วเขียนค่าที่ผ่าน parse กลับเข้า req
  * ใช้: router.post('/', validate({ body: schema }), handler)

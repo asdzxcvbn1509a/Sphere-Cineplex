@@ -5,13 +5,13 @@ import { z } from 'zod';
 import { listNotifications, markAllRead, markRead } from '../controllers/notifications.js';
 // middleware
 import { authenticate } from '../middleware/authenticate.js';
-import { validate } from '../middleware/validate.js';
+import { queryBoolean, validate } from '../middleware/validate.js';
 
 const router = express.Router();
 router.use(authenticate);
 
 const listQuerySchema = z.object({
-  unreadOnly: z.coerce.boolean().optional(),
+  unreadOnly: queryBoolean.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 

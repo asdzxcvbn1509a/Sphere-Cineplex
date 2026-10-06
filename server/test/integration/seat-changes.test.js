@@ -567,6 +567,29 @@ describe('ผู้ดูแลย้ายที่นั่งแทนลู�
     const notice = await prisma.notification.findFirst({ where: { type: 'SEATS_CHANGED' } });
     assert.ok(notice.bodyTh.includes('ที่นั่ง A1 ชำรุด'));
   });
+
+  test('ปิดใช้งานที่นั่งชำรุดก่อนแล้วค่อยย้าย — ผังไม่มีที่นั่งนั้น และย้ายลูกค้าออกได้', async () => {
+    const { showtime, theatre, seats } = await createShowtimeFixture();
+    const [admin, user] = await Promise.all([createAdmin(), createUser()]);
+    const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[0], seats[1]] });
+    await updateSeats(theatre.id, { seatIds: [seats[0].id], isActive: false });
+
+    // หน้าย้ายที่นั่งสร้างผังจาก getSeatMap — A1 ไม่อยู่ในผัง จึงเริ่มเลือกไว้แค่ A2 แล้วให้เลือกที่แทนให้ครบ
+    const map = await getSeatMap(showtime.id);
+    assert.ok(!map.rows.flatMap((row) => row.seats).some((seat) => seat.id === seats[0].id));
+
+    const result = await adminChangeSeats({
+      bookingId: paid.id,
+      adminId: admin.id,
+      seatIds: [seats[1].id, seats[2].id],
+      reason: 'ที่นั่ง A1 ชำรุด',
+    });
+
+    assert.equal(result.seatChange.status, 'COMPLETED');
+    assert.equal(result.seatChange.diffAmount, 0);
+    assert.deepEqual(labelsOf(result.booking), ['A2', 'A3']);
+    assert.deepEqual(await heldSeatIds(paid.id), [seats[1].id, seats[2].id].sort());
+  });
 });
 
 describe('สลิปส่วนต่างที่ส่งหลังหมดเวลา', () => {

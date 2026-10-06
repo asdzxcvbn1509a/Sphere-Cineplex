@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, FileText, Hourglass, Ticket } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Hourglass, Ticket, TicketX } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getBooking } from '../api/bookings.js';
 import { getPayment, uploadSlip } from '../api/payments.js';
@@ -14,7 +14,7 @@ import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
-import { formatMoney, formatTime } from '../utils/format.js';
+import { formatDateTime, formatMoney, formatTime } from '../utils/format.js';
 
 const PaymentPage = () => {
   const { bookingId } = useParams();
@@ -99,8 +99,10 @@ const PaymentPage = () => {
   const lateUpload = expired && !lateWaiting && payment?.canUploadSlip;
   const lateRefund =
     status === 'EXPIRED' && ['REFUND_PENDING', 'REFUNDED'].includes(payment?.status);
-  const closed =
-    status === 'CANCELLED' || (expired && !lateUpload && !lateWaiting && !lateRefund);
+  // การจองที่ยกเลิกมีการ์ดของตัวเองด้านล่าง — เดิมรวมอยู่ในนี้แล้วขึ้น "หมดเวลาชำระเงินแล้ว"
+  // ทั้งที่อาจจ่ายไปแล้วและรอเงินคืน (แจ้งเตือนยกเลิก/รอบฉายถูกยกเลิก/คืนเงินแล้ว พามาที่หน้านี้)
+  const closed = expired && !lateUpload && !lateWaiting && !lateRefund;
+  const refundStatus = booking.payment?.status;
 
   const uploadForm = <SlipUploadForm onUpload={handleUpload} />;
 
@@ -190,6 +192,25 @@ const PaymentPage = () => {
             </p>
           </div>
           {uploadForm}
+        </div>
+      )}
+
+      {status === 'CANCELLED' && (
+        <div className="card p-6 text-center sm:p-8">
+          <TicketX className="mx-auto mb-3 text-muted" size={40} />
+          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.cancelledTitle')}</h2>
+          {refundStatus === 'REFUND_PENDING' && (
+            <p className="mt-2 text-sm text-accent sm:text-base">{t('bookings.refundPending')}</p>
+          )}
+          {refundStatus === 'REFUNDED' && (
+            <p className="mt-2 text-sm text-success sm:text-base">
+              {t('bookings.refunded', { at: formatDateTime(booking.payment.refundedAt, lang) })}
+            </p>
+          )}
+          {/* บัญชีรับเงินคืนและสลิปคืนเงินอยู่ที่การ์ดของการจองนี้ในแท็บประวัติ */}
+          <Button as={Link} to="/my-bookings?tab=history" variant="secondary" className="mt-4">
+            {t('payment.goMyBookings')}
+          </Button>
         </div>
       )}
 

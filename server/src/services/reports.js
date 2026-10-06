@@ -1,6 +1,7 @@
 import prisma from '../lib/prisma.js';
 import { bangkokDateKey, bangkokDayRange } from '../utils/datetime.js';
 import { PENDING_SLIP_WHERE } from './payments.js';
+import { SELLABLE_SEAT_COUNTS } from './showtimes.js';
 
 const PAID = 'PAID';
 
@@ -205,7 +206,10 @@ export const getSalesReport = async ({ from, to, groupBy = 'day' } = {}) => {
   };
 };
 
-/** อัตราการเต็มของแต่ละรอบฉาย (ที่นั่งที่ถูกยึด ÷ ที่นั่งทั้งโรง) */
+/**
+ * อัตราการเต็มของแต่ละรอบฉาย (ที่นั่งที่ถูกยึด ÷ ที่นั่งที่เปิดขาย)
+ * นับชุดเดียวกับจำนวนว่างในรายการรอบฉาย รอบที่ขายหมดจึงเป็น 100% แม้โรงจะมีที่นั่งที่ปิดใช้งานอยู่
+ */
 export const getOccupancyReport = async ({ from, to } = {}) => {
   const start = from ? bangkokDayRange(from)?.start : new Date();
   const end = to ? bangkokDayRange(to)?.end : undefined;
@@ -219,8 +223,8 @@ export const getOccupancyReport = async ({ from, to } = {}) => {
     take: 200,
     include: {
       movie: { select: { titleTh: true, titleEn: true } },
-      theatre: { select: { name: true, _count: { select: { seats: true } } } },
-      _count: { select: { bookingSeats: true } },
+      theatre: { select: { name: true, _count: { select: SELLABLE_SEAT_COUNTS.theatreSeats } } },
+      _count: { select: SELLABLE_SEAT_COUNTS.bookingSeats },
     },
   });
 

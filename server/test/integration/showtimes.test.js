@@ -7,9 +7,16 @@ import {
   createBooking,
   updateRefundAccount,
 } from '../../src/services/bookings.js';
-import { createShowtime, deleteShowtime, updateShowtime } from '../../src/services/showtimes.js';
-import { deleteTheatre, updateTheatre } from '../../src/services/theatres.js';
+import {
+  createShowtime,
+  deleteShowtime,
+  getSeatMap,
+  getShowtimeById,
+  updateShowtime,
+} from '../../src/services/showtimes.js';
+import { deleteTheatre, updateSeats, updateTheatre } from '../../src/services/theatres.js';
 import { deleteMovie } from '../../src/services/movies.js';
+import { getOccupancyReport } from '../../src/services/reports.js';
 import { sendShowtimeReminders } from '../../src/jobs/reminders.js';
 import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
 import {
@@ -226,6 +233,40 @@ describe('แก้ไขรอบฉาย', () => {
       createShowtime({ movieId: movie.id, theatreId: theatre.id, startsAt: minutesFromNow(24 * 60), basePrice: 200 }),
       apiErrorWith('THEATRE_INACTIVE', 400),
     );
+  });
+});
+
+describe('ที่นั่งที่ปิดใช้งาน', () => {
+  test('ไม่นับเป็นที่ว่าง — จองที่นั่งที่เปิดขายครบแล้วรอบต้องเต็ม ทั้งรายการรอบ ผังที่นั่ง และรายงาน', async () => {
+    const { showtime, theatre, seats } = await createShowtimeFixture();
+    const [first, second] = await Promise.all([createUser(), createUser()]);
+    // ปิด C3–C4 เหลือที่นั่งที่เปิดขาย 10 จาก 12
+    await updateSeats(theatre.id, { seatIds: [seats[10].id, seats[11].id], isActive: false });
+
+    const listed = await getShowtimeById(showtime.id);
+    assert.equal(listed.totalSeats, 10);
+    assert.equal(listed.availableSeats, 10);
+
+    await book({ user: first, showtime, seats: seats.slice(0, 5) });
+    await book({ user: second, showtime, seats: seats.slice(5, 10) });
+
+    // หน้าเรื่องตัดสิน "เต็มแล้ว" จาก availableSeats === 0
+    assert.equal((await getShowtimeById(showtime.id)).availableSeats, 0);
+    assert.deepEqual((await getSeatMap(showtime.id)).stats, { total: 10, available: 0 });
+    const [occupancy] = await getOccupancyReport();
+    assert.equal(occupancy.totalSeats, 10);
+    assert.equal(occupancy.soldSeats, 10);
+    assert.equal(occupancy.occupancy, 100);
+  });
+
+  test('ที่นั่งที่จองแล้วค่อยปิดใช้งาน — จำนวนว่างในรายการรอบเท่ากับในผังที่นั่ง', async () => {
+    const { showtime, theatre, seats } = await createShowtimeFixture();
+    const user = await createUser();
+    await book({ user, showtime, seats: [seats[0]] });
+    await updateSeats(theatre.id, { seatIds: [seats[0].id], isActive: false });
+
+    assert.equal((await getShowtimeById(showtime.id)).availableSeats, 11);
+    assert.deepEqual((await getSeatMap(showtime.id)).stats, { total: 11, available: 11 });
   });
 });
 

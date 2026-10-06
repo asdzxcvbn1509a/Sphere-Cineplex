@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createApp } from '../../src/app.js';
 import { PAYMENT_SLIP_DIR } from '../../src/config/env.js';
 import { issueSession, rotateSession } from '../../src/services/auth.js';
+import { markRead, notify } from '../../src/services/notifications.js';
 import { hashPassword } from '../../src/utils/password.js';
 import { signAccessToken } from '../../src/utils/jwt.js';
 import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
@@ -171,6 +172,44 @@ describe('แบ่งหน้ารายการฝั่งผู้ดู�
     assert.equal(beyond.total, 7);
 
     assert.equal((await get('pageSize=500')).status, 422);
+  });
+});
+
+describe('boolean ใน query string', () => {
+  test('?force=false ไม่ใช่การยืนยันลบถาวร — หนังที่มีการจองยังอยู่ · ค่าที่ไม่ใช่ true/false ได้ 422', async () => {
+    const { movie, showtime, seats } = await createShowtimeFixture();
+    const [admin, user] = await Promise.all([createAdmin(), createUser()]);
+    await book({ user, showtime, seats: [seats[0]] });
+    const remove = (query) =>
+      fetch(`${base}/api/admin/movies/${movie.id}?${query}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${signAccessToken(admin)}` },
+      });
+
+    const kept = await remove('force=false');
+    assert.equal(kept.status, 409);
+    assert.equal((await kept.json()).error.code, 'MOVIE_HAS_BOOKINGS');
+    assert.equal((await fetch(`${base}/api/movies/${movie.id}`)).status, 200);
+
+    assert.equal((await remove('force=yes')).status, 422);
+  });
+
+  test('?unreadOnly=false คืนแจ้งเตือนที่อ่านแล้วด้วย ไม่ใช่แค่ที่ยังไม่อ่าน', async () => {
+    const user = await createUser();
+    const read = await notify({ userId: user.id, type: 'BOOKING_EXPIRED', context: { code: 'READ01' } });
+    await notify({ userId: user.id, type: 'BOOKING_EXPIRED', context: { code: 'NEW001' } });
+    await markRead(user.id, read.id);
+    const list = async (query) => {
+      const res = await fetch(`${base}/api/notifications?${query}`, {
+        headers: { Authorization: `Bearer ${signAccessToken(user)}` },
+      });
+      return res.json();
+    };
+
+    const all = await list('unreadOnly=false');
+    assert.equal(all.notifications.length, 2);
+    assert.equal(all.unreadCount, 1);
+    assert.equal((await list('unreadOnly=true')).notifications.length, 1);
   });
 });
 

@@ -101,7 +101,11 @@ const TicketPage = () => {
               <p className="text-[11px] uppercase tracking-wide text-neutral-500">
                 {t('ticket.showTime')}
               </p>
-              <p className="font-semibold">{formatTime(ticket.showtime.startsAt, lang)} น.</p>
+              <p className="font-semibold">
+                {formatTime(ticket.showtime.startsAt, lang)}
+                {/* "น." ใช้กับเวลาภาษาไทยเท่านั้น */}
+                {lang === 'th' && ' น.'}
+              </p>
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-wide text-neutral-500">

@@ -3,18 +3,28 @@ import ApiError from '../utils/ApiError.js';
 import { bangkokDayRange } from '../utils/datetime.js';
 import { buildZonePrices, toPriceMap } from '../utils/pricing.js';
 
+/**
+ * นับเฉพาะที่นั่งที่เปิดขาย ให้ตรงกับผังที่นั่งและการจอง (ใช้แค่ที่นั่ง isActive ทั้งคู่)
+ * เดิมนับทุกที่นั่งของโรง ที่นั่งที่ผู้ดูแลปิดใช้งานจึงกลายเป็น "ว่าง" — รอบที่ขายหมดแล้วไม่ขึ้นว่าเต็ม
+ * ที่นั่งที่ถูกจองแล้วค่อยปิดใช้งานไม่นับทั้งสองฝั่ง จำนวนว่างจึงไม่เพี้ยน
+ */
+export const SELLABLE_SEAT_COUNTS = {
+  theatreSeats: { seats: { where: { isActive: true } } },
+  bookingSeats: { bookingSeats: { where: { seat: { isActive: true } } } },
+};
+
 const showtimeInclude = {
   theatre: {
     select: {
       id: true,
       name: true,
       screenType: true,
-      _count: { select: { seats: true } },
+      _count: { select: SELLABLE_SEAT_COUNTS.theatreSeats },
     },
   },
   movie: { select: { id: true, titleTh: true, titleEn: true, posterUrl: true, durationMin: true } },
   zonePrices: { select: { zone: true, price: true } },
-  _count: { select: { bookingSeats: true } },
+  _count: { select: SELLABLE_SEAT_COUNTS.bookingSeats },
 };
 
 const shapeShowtime = (showtime) => {
@@ -145,7 +155,8 @@ export const getSeatMap = async (showtimeId) => {
     rows: [...rowMap.entries()].map(([rowLabel, rowSeats]) => ({ rowLabel, seats: rowSeats })),
     stats: {
       total: seats.length,
-      available: seats.length - statusBySeatId.size,
+      // นับจากที่นั่งในผังที่ยังไม่มีใครยึด — statusBySeatId อาจมีที่นั่งที่จองแล้วค่อยปิดใช้งาน ซึ่งไม่อยู่ในผัง
+      available: seats.filter((seat) => !statusBySeatId.has(seat.id)).length,
     },
   };
 };

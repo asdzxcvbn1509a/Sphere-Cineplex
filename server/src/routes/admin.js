@@ -42,7 +42,7 @@ import {
 import { authenticate } from '../middleware/authenticate.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { uploadRefundSlip } from '../middleware/upload.js';
-import { validate } from '../middleware/validate.js';
+import { queryBoolean, validate } from '../middleware/validate.js';
 import { passwordSchema } from '../utils/password.js';
 import { paginationQuery } from '../utils/pagination.js';
 
@@ -120,7 +120,7 @@ const showtimeListQuery = z.object({
   movieId: z.string().min(1).optional(),
   theatreId: z.string().min(1).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  includePast: z.coerce.boolean().optional(),
+  includePast: queryBoolean.optional(),
 });
 
 const bookingListQuery = z.object({
@@ -194,7 +194,7 @@ router.post('/movies', validate({ body: movieSchema }), createMovie);
 router.patch('/movies/:id', validate({ body: movieSchema.partial() }), updateMovie);
 router.delete(
   '/movies/:id',
-  validate({ query: z.object({ force: z.coerce.boolean().optional() }) }),
+  validate({ query: z.object({ force: queryBoolean.optional() }) }),
   deleteMovie,
 );
 
