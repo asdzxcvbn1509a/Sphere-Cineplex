@@ -16,41 +16,47 @@ const MovieDetailPage = () => {
   const { t, lang, pick } = useI18n();
 
   const [movie, setMovie] = useState(null);
+  // รอบที่ยังไม่เริ่มของทุกวัน — กดเปลี่ยนวันแค่กรองในเครื่อง ไม่ต้องรอโหลดใหม่
   const [showtimes, setShowtimes] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
   const [state, setState] = useState({ loading: true, error: null });
-  const [loadingShowtimes, setLoadingShowtimes] = useState(false);
 
   const dateStrip = buildDateStrip(7);
   const todayKey = bangkokDateKey();
 
-  useEffect(() => {
+  // ขอพร้อมกันในรอบเดียว — เดิมรอรายละเอียดหนังเสร็จก่อนค่อยขอรอบของวันแรก แล้วขอใหม่ทุกครั้งที่กดเปลี่ยนวัน
+  const load = useCallback(() => {
     setState({ loading: true, error: null });
-    getMovie(movieId)
-      .then(({ data }) => {
-        setMovie(data.movie);
+    Promise.all([getMovie(movieId), listShowtimes({ movieId })])
+      .then(([movieRes, showtimesRes]) => {
+        setMovie(movieRes.data.movie);
+        setShowtimes(showtimesRes.data.showtimes);
         // เลือกวันแรกที่มีรอบฉายให้อัตโนมัติ ผู้ใช้จะได้เห็นรอบทันทีโดยไม่ต้องกดอะไรก่อน
-        setSelectedDate(data.movie.availableDates?.[0] ?? todayKey);
+        setSelectedDate(movieRes.data.movie.availableDates?.[0] ?? todayKey);
         setState({ loading: false, error: null });
       })
       .catch((error) => setState({ loading: false, error: apiError(error).message }));
   }, [movieId, todayKey]);
 
-  const loadShowtimes = useCallback(() => {
-    if (!selectedDate) return;
-    setLoadingShowtimes(true);
-    listShowtimes({ movieId, date: selectedDate })
-      .then(({ data }) => setShowtimes(data.showtimes))
-      .catch(() => setShowtimes([]))
-      .finally(() => setLoadingShowtimes(false));
-  }, [movieId, selectedDate]);
-
-  useEffect(loadShowtimes, [loadShowtimes]);
+  useEffect(load, [load]);
 
   if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) return <div className="mx-auto max-w-3xl px-4 py-10"><ErrorBlock message={state.error} /></div>;
+  if (state.error) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+      </div>
+    );
+  }
 
-  const byTheatre = showtimes.reduce((groups, showtime) => {
+  // ตัดรอบที่เริ่มไปแล้วระหว่างเปิดหน้าค้างไว้ด้วย (เดิมได้จากการโหลดใหม่ทุกครั้งที่กดวัน)
+  const now = Date.now();
+  const showtimesOfDay = showtimes.filter(
+    (showtime) =>
+      bangkokDateKey(showtime.startsAt) === selectedDate && new Date(showtime.startsAt).getTime() > now,
+  );
+
+  const byTheatre = showtimesOfDay.reduce((groups, showtime) => {
     const key = showtime.theatre.id;
     if (!groups[key]) groups[key] = { theatre: showtime.theatre, items: [] };
     groups[key].items.push(showtime);
@@ -162,9 +168,7 @@ const MovieDetailPage = () => {
 
             <h2 className="mb-3 text-lg font-semibold">{t('movie.showtimes')}</h2>
 
-            {loadingShowtimes && <LoadingBlock label={t('common.loading')} className="py-10" />}
-
-            {!loadingShowtimes && showtimes.length === 0 && (
+            {showtimesOfDay.length === 0 && (
               <div className="card px-6 py-10 text-center text-sm text-muted">
                 {t('movie.noShowtimes')}
               </div>

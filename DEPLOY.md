@@ -12,6 +12,7 @@ Browser ──► Vercel ──────────────────�
 
 - The web app calls the API at `/api/...` on its own domain, and Vercel forwards those requests to Render as configured in `client/vercel.json`
   **Don't change the web app to call the Render URL directly**: the refresh token lives in a `SameSite=lax` cookie, and across domains the browser won't send it, so users get logged out on every refresh
+- `client/vercel.json` also caches everything under `/assets/` for a year (`immutable`). Vite puts a content hash in those file names, so every build ships new names, while `index.html` is still revalidated on every visit and always points at the current files
 - The API is configured through `render.yaml` (Render Blueprint): build, start and health check
 - Pick the **Singapore** region for both Render and Supabase. The API makes several database round trips per request, so if they sit on different continents every page will be slow
 

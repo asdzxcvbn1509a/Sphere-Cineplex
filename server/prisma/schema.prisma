@@ -3,7 +3,11 @@
 // เพื่อเลี่ยงปัญหา floating point และการ serialize Decimal ข้าม JSON
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // include ซ้อนกันหลายชั้นกลายเป็น SQL คำสั่งเดียว (LATERAL JOIN) แทนหนึ่งคำสั่งต่อหนึ่งความสัมพันธ์
+  // เช่น GET /bookings/:id เดิมไปกลับฐาน 7 รอบ เหลือรอบเดียว — ยังเป็น Preview ของ Prisma 6
+  // ถ้าต้องถอย ลบบรรทัดนี้แล้ว db:generate ใหม่ (และลบ relationLoadStrategy ที่ใส่ไว้ใน services ด้วย)
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

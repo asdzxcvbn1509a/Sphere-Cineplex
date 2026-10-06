@@ -77,7 +77,9 @@ export const listShowtimes = async ({
   const showtimes = await prisma.showtime.findMany({
     where,
     include: showtimeInclude,
-    orderBy: { startsAt: 'asc' },
+    // หลายโรงมักเริ่มเวลาเดียวกัน — SQL ไม่รับประกันลำดับของค่าที่เท่ากัน ถ้าไม่เรียงต่อด้วยชื่อโรง
+    // การ์ดโรงในหน้าหนัง (จัดกลุ่มตามลำดับที่เจอ) จะสลับที่กันไปมาระหว่างการโหลดแต่ละครั้ง
+    orderBy: [{ startsAt: 'asc' }, { theatre: { name: 'asc' } }],
   });
 
   return showtimes.map(shapeShowtime);
@@ -96,19 +98,19 @@ export const getShowtimeById = async (id) => {
  * รวมที่นั่งใหม่ที่กันไว้ให้คำขอเปลี่ยนที่นั่งที่ยังรอโอนส่วนต่าง แม้การจองนั้นจะจ่ายแล้วก็ตาม)
  */
 export const getSeatMap = async (showtimeId) => {
-  const showtime = await prisma.showtime.findUnique({
-    where: { id: showtimeId },
-    include: {
-      theatre: true,
-      movie: { select: { id: true, titleTh: true, titleEn: true, posterUrl: true, durationMin: true } },
-      zonePrices: { select: { zone: true, price: true } },
-    },
-  });
-  if (!showtime) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
-
-  const [seats, occupied] = await Promise.all([
+  // สามคำสั่งยิงพร้อมกัน — ที่นั่งกรองผ่านความสัมพันธ์กับรอบฉาย จึงไม่ต้องรอรู้ theatreId ก่อน
+  // หน้านี้ถูกเปิด (และกดรีเฟรชผัง) บ่อยที่สุด ทุกรอบที่ไปกลับฐานข้อมูลได้คืนมาตรง ๆ
+  const [showtime, seats, occupied] = await Promise.all([
+    prisma.showtime.findUnique({
+      where: { id: showtimeId },
+      include: {
+        theatre: true,
+        movie: { select: { id: true, titleTh: true, titleEn: true, posterUrl: true, durationMin: true } },
+        zonePrices: { select: { zone: true, price: true } },
+      },
+    }),
     prisma.seat.findMany({
-      where: { theatreId: showtime.theatreId, isActive: true },
+      where: { isActive: true, theatre: { showtimes: { some: { id: showtimeId } } } },
       orderBy: [{ rowLabel: 'asc' }, { seatNumber: 'asc' }],
     }),
     prisma.bookingSeat.findMany({
@@ -116,6 +118,7 @@ export const getSeatMap = async (showtimeId) => {
       select: { seatId: true, seatChangeId: true, booking: { select: { status: true } } },
     }),
   ]);
+  if (!showtime) throw ApiError.notFound('SHOWTIME_NOT_FOUND', 'ไม่พบรอบฉายนี้');
 
   const statusBySeatId = new Map(
     occupied.map((row) => [

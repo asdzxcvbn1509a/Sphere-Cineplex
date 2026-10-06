@@ -119,6 +119,9 @@ export const getSalesReport = async ({ from, to, groupBy = 'day' } = {}) => {
       status: PAID,
       ...(start || end ? { paidAt: { ...(start && { gte: start }), ...(end && { lt: end }) } } : {}),
     },
+    // อ่านการจองทั้งช่วงทีเดียว (อาจเป็นหลักพันใบ) แบบ join จะส่งข้อมูลรอบ/หนัง/โรงซ้ำมาทุกแถว
+    // ดึงแยกทีละตารางแบบเดิมจึงเบากว่า — ที่อื่นใช้ join (ดู previewFeatures ใน schema.prisma)
+    relationLoadStrategy: 'query',
     include: {
       showtime: {
         include: {
@@ -219,7 +222,8 @@ export const getOccupancyReport = async ({ from, to } = {}) => {
       status: 'SCHEDULED',
       startsAt: { ...(start && { gte: start }), ...(end && { lt: end }) },
     },
-    orderBy: { startsAt: 'asc' },
+    // หลายโรงเริ่มเวลาเดียวกันได้ — เรียงต่อด้วยชื่อโรง ลำดับในตารางจะไม่สลับไปมา (เหมือน listShowtimes)
+    orderBy: [{ startsAt: 'asc' }, { theatre: { name: 'asc' } }],
     take: 200,
     include: {
       movie: { select: { titleTh: true, titleEn: true } },

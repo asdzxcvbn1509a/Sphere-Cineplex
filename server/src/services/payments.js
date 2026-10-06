@@ -292,7 +292,8 @@ export const listPayments = async ({ status = 'PENDING_VERIFICATION', page, page
       verifiedBy: { select: { id: true, name: true } },
     },
   };
-  const [payments, total] = await prisma.$transaction([
+  // อ่านอย่างเดียว ยิงพร้อมกัน — เหตุผลเดียวกับ listAllBookings ใน services/bookings.js
+  const [payments, total] = await Promise.all([
     prisma.payment.findMany(query),
     prisma.payment.count({ where }),
   ]);
@@ -559,7 +560,8 @@ export const listRefunds = async ({ status = 'REFUND_PENDING', page, pageSize } 
       refundedBy: { select: { id: true, name: true } },
     },
   };
-  const [refunds, total] = await prisma.$transaction([
+  // อ่านอย่างเดียว ยิงพร้อมกัน — เหตุผลเดียวกับ listAllBookings ใน services/bookings.js
+  const [refunds, total] = await Promise.all([
     prisma.payment.findMany(query),
     prisma.payment.count({ where }),
   ]);

@@ -22,14 +22,16 @@ export const listMovies = async ({ status, q, includeArchived = false } = {}) =>
 
 /** รายละเอียดหนัง + วันที่ที่ยังมีรอบฉายให้เลือก (ตามเวลาไทย) */
 export const getMovieById = async (id) => {
-  const movie = await prisma.movie.findUnique({ where: { id } });
+  // สองคำสั่งไม่ขึ้นต่อกัน ยิงพร้อมกันแล้วค่อยเช็กว่ามีเรื่องนี้จริงไหม
+  const [movie, showtimes] = await Promise.all([
+    prisma.movie.findUnique({ where: { id } }),
+    prisma.showtime.findMany({
+      where: { movieId: id, status: 'SCHEDULED', startsAt: { gte: new Date() } },
+      select: { startsAt: true },
+      orderBy: { startsAt: 'asc' },
+    }),
+  ]);
   if (!movie) throw ApiError.notFound('MOVIE_NOT_FOUND', 'ไม่พบภาพยนตร์เรื่องนี้');
-
-  const showtimes = await prisma.showtime.findMany({
-    where: { movieId: id, status: 'SCHEDULED', startsAt: { gte: new Date() } },
-    select: { startsAt: true },
-    orderBy: { startsAt: 'asc' },
-  });
 
   const availableDates = [...new Set(showtimes.map((s) => bangkokDateKey(s.startsAt)))];
   return { ...movie, availableDates };

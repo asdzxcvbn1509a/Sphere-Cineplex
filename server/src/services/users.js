@@ -44,7 +44,8 @@ export const listUsers = async ({ q, role, page, pageSize } = {}) => {
     ];
   }
 
-  const [users, total] = await prisma.$transaction([
+  // อ่านอย่างเดียว ยิงพร้อมกัน — เหตุผลเดียวกับ listAllBookings ใน services/bookings.js
+  const [users, total] = await Promise.all([
     prisma.user.findMany({
       where,
       include: { _count: { select: { bookings: true } } },

@@ -362,12 +362,16 @@ export const createBooking = async ({ userId, showtimeId, seatIds }) => {
           totalAmount: total,
           holdExpiresAt: addMinutes(new Date(), env.SEAT_HOLD_MINUTES),
           seatSnapshot,
+          // INSERT เดียวทุกที่นั่ง (เดิม create ทีละแถว = ไปกลับฐานหนึ่งรอบต่อที่นั่ง ระหว่างที่ถือล็อกรอบฉายอยู่)
+          // แถวยังถูกเขียนตามลำดับ items ที่เรียง seatId ไว้แล้ว — กันจองชนกันเหมือนเดิม
           seats: {
-            create: items.map((item) => ({
-              showtimeId,
-              seatId: item.seatId,
-              price: item.price,
-            })),
+            createMany: {
+              data: items.map((item) => ({
+                showtimeId,
+                seatId: item.seatId,
+                price: item.price,
+              })),
+            },
           },
         },
       });
@@ -809,7 +813,9 @@ export const listAllBookings = async ({ status, date, q, page, pageSize } = {}) 
     ];
   }
 
-  const [bookings, total] = await prisma.$transaction([
+  // อ่านอย่างเดียว ยิงพร้อมกันได้ — ห่อ transaction ไม่ได้ทำให้สองคำสั่งเห็นข้อมูลชุดเดียวกัน
+  // (READ COMMITTED แต่ละคำสั่งเห็น snapshot ของตัวเอง) ได้แค่ BEGIN/COMMIT เพิ่มและต้องรอกันทีละคำสั่ง
+  const [bookings, total] = await Promise.all([
     prisma.booking.findMany({
       where,
       include: { ...bookingInclude, user: { select: { id: true, name: true, phone: true } } },
