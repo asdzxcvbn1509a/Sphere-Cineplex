@@ -1,8 +1,14 @@
 import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import prisma from '../../src/lib/prisma.js';
-import { issueSession, revokeSession, rotateSession } from '../../src/services/auth.js';
+import {
+  issueSession,
+  resetPassword,
+  revokeSession,
+  rotateSession,
+} from '../../src/services/auth.js';
 import { hashToken } from '../../src/utils/jwt.js';
+import { verifyPassword } from '../../src/utils/password.js';
 import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
 import { apiErrorWith, createUser } from '../helpers/fixtures.js';
 
@@ -55,5 +61,27 @@ describe('ต่ออายุเซสชัน (refresh token rotation)', () 
 
     await assert.rejects(rotateSession(refreshToken), apiErrorWith('REFRESH_TOKEN_REUSED', 401));
     assert.equal(await liveSessions(user.id), 0);
+  });
+});
+
+describe('ลิงก์ตั้งรหัสผ่านใหม่', () => {
+  test('สองคำขอใช้ลิงก์เดียวกันพร้อมกัน — ตั้งรหัสได้ครั้งเดียว อีกคำขอได้ RESET_LINK_INVALID', async () => {
+    const user = await createUser();
+    await issueSession(user, 'phone');
+    const token = 'race-reset-token'.padEnd(43, 'x');
+    await prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+    });
+
+    const passwords = ['NewPassword111', 'NewPassword222'];
+    const results = await Promise.allSettled(passwords.map((password) => resetPassword({ token, password })));
+    const winner = results.findIndex((r) => r.status === 'fulfilled');
+    const failed = results.filter((r) => r.status === 'rejected');
+
+    assert.equal(failed.length, 1);
+    assert.equal(failed[0].reason.code, 'RESET_LINK_INVALID');
+    const { passwordHash } = await prisma.user.findUnique({ where: { id: user.id } });
+    assert.ok(await verifyPassword(passwords[winner], passwordHash), 'รหัสที่ใช้ได้ต้องเป็นของคำขอที่ชนะ');
+    assert.equal(await liveSessions(user.id), 0, 'ตั้งรหัสสำเร็จแล้วต้องออกจากระบบทุกเครื่อง');
   });
 });

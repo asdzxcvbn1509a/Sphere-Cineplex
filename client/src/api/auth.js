@@ -27,10 +27,12 @@ export const changePassword = async ({ currentPassword, newPassword }) => {
   return await api.patch('/auth/password', { currentPassword, newPassword });
 };
 
-export const updateProfile = async ({ name, email }) => {
+/** แก้ชื่อ/อีเมลของตัวเอง — เปลี่ยนอีเมลต้องส่ง `currentPassword` มาด้วย (อีเมลคือช่องทางกู้บัญชี) */
+export const updateProfile = async ({ name, email, currentPassword }) => {
   return await api.patch('/auth/me', {
     ...(name !== undefined && { name }),
     ...(email !== undefined && { email }),
+    ...(currentPassword !== undefined && { currentPassword }),
   });
 };
 

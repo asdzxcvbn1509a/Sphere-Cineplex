@@ -18,6 +18,7 @@ import {
 // middleware
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../middleware/validate.js';
+import { loginKey } from '../utils/loginIdentifier.js';
 import { MAX_PASSWORD_LENGTH, passwordSchema } from '../utils/password.js';
 import { env } from '../config/env.js';
 
@@ -60,6 +61,8 @@ const resetPasswordSchema = z.object({
 const updateProfileSchema = z.object({
   name: z.string().trim().min(1, 'กรุณากรอกชื่อ').max(60).optional(),
   email: z.email('อีเมลไม่ถูกต้อง').max(120).optional(),
+  // จำเป็นเฉพาะตอนเปลี่ยนอีเมลจริง (service เป็นคนบังคับ) — แก้แค่ชื่อไม่ต้องส่ง
+  currentPassword: z.string().min(1, 'กรุณากรอกรหัสผ่านปัจจุบัน').max(MAX_PASSWORD_LENGTH).optional(),
 });
 
 /**
@@ -68,6 +71,9 @@ const updateProfileSchema = z.object({
  *
  * นับแยกตาม "ไอพี + บัญชีที่พยายามเข้า" เพื่อไม่ให้คนร้ายยิงบัญชีเดียวจนล็อก
  * เจ้าของตัวจริงที่อยู่คนละไอพีเข้าไม่ได้ไปด้วย
+ *
+ * บัญชีใช้ loginKey ซึ่ง normalize แบบเดียวกับตอนค้นบัญชี — 081-234-5678 กับ 0812345678 ต้องนับเป็นบัญชีเดียวกัน
+ * ไม่งั้นแค่เปลี่ยนรูปแบบการพิมพ์เบอร์ก็ได้โควตาใหม่ไม่รู้จบ
  */
 const loginLimiter = rateLimit({
   windowMs: env.LOGIN_WINDOW_MINUTES * 60 * 1000,
@@ -75,10 +81,7 @@ const loginLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => {
-    const identifier = String(req.body?.identifier ?? '').trim().toLowerCase();
-    return `${ipKeyGenerator(req.ip)}|${identifier}`;
-  },
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip)}|${loginKey(req.body?.identifier)}`,
   message: {
     error: {
       code: 'LOGIN_RATE_LIMITED',
@@ -107,10 +110,31 @@ const registerLimiter = rateLimit({
 });
 
 /**
- * กันการเดา "รหัสผ่านปัจจุบัน" จากเซสชันที่ถูกขโมยไป
+ * กันสคริปต์ใช้หน้าสมัครไล่เช็กว่าอีเมล/เบอร์ไหนมีบัญชีแล้ว
+ * สมัครซ้ำได้ EMAIL_TAKEN/PHONE_TAKEN (ตั้งใจบอกให้ผู้ใช้ไปล็อกอินแทน) แต่ registerLimiter นับเฉพาะที่สำเร็จ
+ * ถ้าไม่มีตัวนี้จะยิงเช็กได้ไม่จำกัด ทั้งที่หน้าลืมรหัสผ่านตั้งใจปิดเรื่องนี้ไว้แล้ว
+ *
+ * นับเฉพาะครั้งที่ไม่สำเร็จ ต่อไอพี — ตั้งหลวมพอให้คนจริงที่กรอกผิดหลายรอบ หรือหลายคนในออฟฟิศเดียวกันไม่โดน
+ */
+const registerFailureLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: {
+    error: {
+      code: 'REGISTER_RATE_LIMITED',
+      message: 'สมัครสมาชิกไม่สำเร็จหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่',
+    },
+  },
+});
+
+/**
+ * กันการเดา "รหัสผ่านปัจจุบัน" จากเซสชันที่ถูกขโมยไป — ทั้งตอนเปลี่ยนรหัสผ่านและตอนเปลี่ยนอีเมล (นับรวมกัน)
  * นับรายบัญชี ไม่ใช่รายไอพี เพราะคนร้ายที่ถือ token อยู่ย้ายไอพีได้ง่ายกว่าเปลี่ยนบัญชี
  */
-const changePasswordLimiter = rateLimit({
+const currentPasswordLimiter = rateLimit({
   windowMs: env.LOGIN_WINDOW_MINUTES * 60 * 1000,
   limit: env.LOGIN_LIMIT,
   standardHeaders: 'draft-7',
@@ -166,7 +190,13 @@ const resetPasswordLimiter = rateLimit({
 });
 
 // @ENDPOINT http://localhost:4000/api/auth/register
-router.post('/register', registerLimiter, validate({ body: registerSchema }), register);
+router.post(
+  '/register',
+  registerLimiter,
+  registerFailureLimiter,
+  validate({ body: registerSchema }),
+  register,
+);
 // @ENDPOINT http://localhost:4000/api/auth/login
 router.post('/login', loginLimiter, validate({ body: loginSchema }), login);
 // @ENDPOINT http://localhost:4000/api/auth/forgot-password
@@ -200,12 +230,18 @@ router.post('/refresh', refresh);
 router.post('/logout', logout);
 // @ENDPOINT http://localhost:4000/api/auth/me
 router.get('/me', authenticate, me);
-router.patch('/me', authenticate, validate({ body: updateProfileSchema }), updateMe);
+router.patch(
+  '/me',
+  authenticate,
+  currentPasswordLimiter,
+  validate({ body: updateProfileSchema }),
+  updateMe,
+);
 // @ENDPOINT http://localhost:4000/api/auth/password
 router.patch(
   '/password',
   authenticate,
-  changePasswordLimiter,
+  currentPasswordLimiter,
   validate({ body: changePasswordSchema }),
   changePassword,
 );

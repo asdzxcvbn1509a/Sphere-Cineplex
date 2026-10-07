@@ -12,6 +12,8 @@ Browser ──► Vercel ──────────────────�
 
 - The web app calls the API at `/api/...` on its own domain, and Vercel forwards those requests to Render as configured in `client/vercel.json`
   **Don't change the web app to call the Render URL directly**: the refresh token lives in a `SameSite=lax` cookie, and across domains the browser won't send it, so users get logged out on every refresh
+- Vercel adds a secret header (`x-proxy-secret`, from the `PROXY_SECRET` variable) to every request it forwards. Once the same `PROXY_SECRET` is set on Render, the API rejects requests that didn't come through Vercel (403 `DIRECT_ACCESS_FORBIDDEN`), except `/api/health` — see [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy)
+- `client/vercel.json` also sends security headers with the web app (`Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`). API responses get theirs from `helmet`
 - `client/vercel.json` also caches everything under `/assets/` for a year (`immutable`). Vite puts a content hash in those file names, so every build ships new names, while `index.html` is still revalidated on every visit and always points at the current files
 - The API is configured through `render.yaml` (Render Blueprint): build, start and health check
 - Pick the **Singapore** region for both Render and Supabase. The API makes several database round trips per request, so if they sit on different continents every page will be slow
@@ -106,6 +108,7 @@ Follow the [Slip storage](docs/architecture.md#slip-storage) section of the arch
    | `SUPABASE_SECRET_KEY` | The value from step 2.4 |
    | `CLIENT_ORIGIN` | The web app URL you'll get from Vercel, e.g. `https://<repo-name>.vercel.app`. If you're not sure yet, enter it anyway and fix it in step 6 |
    | `PROMPTPAY_ID` | The phone number or national ID number linked to **your own** PromptPay. The QR on the payment page is generated from it — if someone scans and pays, the money really goes to this number |
+   | `PROXY_SECRET` | Leave it empty for now — it's set in [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy), after Vercel is sending it |
 
    You don't need to fill in:
    - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`: Render generates them
@@ -171,7 +174,7 @@ DATABASE_URL='<DATABASE_URL from step 2.2>' SEED_PASSWORD='<new password>' npm r
 2. [vercel.com](https://vercel.com) → **Add New** → **Project** → import this repo
 3. **Root Directory:** click Edit and choose `client`
    - The framework is detected as Vite automatically; no need to change Build or Output
-   - No Environment Variables are needed
+   - No Environment Variables are needed yet — `PROXY_SECRET` is added in [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy). Never give it a `VITE_` prefix: those are bundled into the JavaScript every visitor downloads
 4. Click **Deploy** to get the web app URL, e.g. `https://<project>.vercel.app` (see the actual name under Settings → Domains)
 
 ## 6. Correct `CLIENT_ORIGIN`
@@ -182,21 +185,36 @@ If the Vercel URL differs from what you entered in step 3:
 
 This value is used to build the links in emails (password reset links and receipts). If it's wrong, those links lead to the wrong place
 
-## 7. Match `TRUST_PROXY` to the real number of proxies
+## 7. Lock the API to Vercel and match `TRUST_PROXY`
 
-The rate limits on login, sign-up and forgot password count per user IP. The system only sees the real IP when `TRUST_PROXY` exactly equals the number of proxies in front of the API
-If it's set too low, everyone is counted as the same IP (Vercel's):
-- One person entering a wrong password repeatedly gets that account locked for everyone
-- The sign-up quota is shared by the whole site
+The rate limits on login, sign-up and password reset count per user IP, which the API reads from `X-Forwarded-For` by trusting `TRUST_PROXY` proxies in front of it. Requests through Vercel pass one more proxy than requests sent straight to the Render URL, so one number can only be right for one of the two paths:
+- **Too low for the Vercel path** — everyone using the web app is counted as Vercel's IP. A few wrong passwords lock that account for everyone, and the sign-up and password-reset quotas are shared by the whole site
+- **Right for Vercel while the Render URL stays open** — requests sent straight to Render can put a fake IP in `X-Forwarded-For` and dodge every rate limit
 
-Steps:
-1. Open `https://<Vercel URL>/api/health`. **It must be opened through the Vercel URL** — through the Render URL, the count comes out one hop short
-2. Check `proxyHops`. If it's already `3`, this step is done
-3. If it isn't 3, set `TRUST_PROXY` in `render.yaml` to that value, then commit and push
+So `TRUST_PROXY` is set for the Vercel path (`4` in `render.yaml`), and `PROXY_SECRET` closes the direct path:
+
+1. Generate a secret:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+2. Vercel → project → **Settings** → **Environment Variables** → add `PROXY_SECRET` with that value for **Production** and **Preview**, then redeploy (Deployments → ⋯ → Redeploy). Variables only reach deployments made after they're set
+3. Open `https://<Vercel URL>/api/health` — `proxySecret` must be `unchecked`: Vercel is sending the header and the API isn't checking it yet
+   - `unresolved` — Vercel can't find the variable: check its name, and that you redeployed
+   - `missing` — the request didn't go through `client/vercel.json`: check the Root Directory (step 5)
+4. Render → service → **Environment** → add `PROXY_SECRET` with **the same value**. Render restarts on its own
+5. Check again:
+   - `https://<Vercel URL>/api/health` → `proxySecret` must be `valid`, and the web app must work as before
+   - `https://<Render URL>/api/movies` → 403 `DIRECT_ACCESS_FORBIDDEN`: direct requests are closed
+   - `https://<Render URL>/api/health` → still 200, because Render's health check and the pinger in step 8 call it directly
+
+   If the web app shows errors right after step 4, the two values differ. Fix the value, or delete `PROXY_SECRET` on Render to turn the check off again
+6. In `https://<Vercel URL>/api/health` (**it must be opened through the Vercel URL**), check `proxyHops`. If it isn't `4`, set `TRUST_PROXY` in `render.yaml` to that value, then commit and push
    Change it in the file, because the file is the source of truth for this value. If you only change it in the dashboard, it may be overwritten on the next Blueprint sync
-4. Open `/api/health` again. The `ip` value must match the IP shown by [api64.ipify.org](https://api64.ipify.org)
+7. The `ip` value must match the IP shown by [api64.ipify.org](https://api64.ipify.org) — not one of Vercel's IPs
 
-> **Accepted limitation:** requests sent straight to the Render URL (bypassing Vercel) pass through one fewer proxy, so they can spoof their IP to dodge the rate limits
+> While `PROXY_SECRET` is set, a `TRUST_PROXY` slightly higher than needed does no harm (every accepted request came through Vercel, which overwrites `X-Forwarded-For`), but one that's too low puts everyone back on Vercel's IP. Re-check `proxyHops` if login lockouts are reported
 
 ## 8. Keep the server awake (Render free plan)
 
@@ -214,7 +232,8 @@ On a paid Render plan you can skip this step
 
 ## 9. Email (optional)
 
-Until `SMTP_HOST` is set, the system doesn't send real email. It prints each message (including password reset links) to Render's Logs instead, so users won't receive anything
+Until `SMTP_HOST` is set, the system doesn't send real email, so users receive neither password reset links nor receipts. In production it only logs one line per skipped email (`ยังไม่ได้ตั้ง SMTP_HOST` — "SMTP_HOST isn't set yet") with a masked recipient and never the message itself, because a reset link in the logs would let anyone who can read them take over that account. The server also warns about this at startup
+Until email works, customers who forget their password need an admin to set a temporary one at `/admin/users`
 
 Render's free plan **blocks ports 25, 465 and 587**, so Gmail won't work. Use [Brevo](https://www.brevo.com) (300 emails a day free) instead, which accepts port 2525:
 
@@ -240,7 +259,8 @@ On a paid Render plan you can use Gmail (port 587 + App Password) as described i
 - [ ] Open `<Vercel URL>/my-bookings` directly and refresh — you must not get a 404 page
 - [ ] Book seats and upload a slip — a new file must appear under `payments/` in Supabase → Storage → `slips`
 - [ ] Log in as the admin — you must be able to open that slip, and approving it must produce a receipt
-- [ ] Render's Logs show no `⚠️` warnings
+- [ ] `<Vercel URL>/api/health` shows `"proxySecret": "valid"` and `<Render URL>/api/movies` returns 403 (step 7)
+- [ ] Render's Logs show no `⚠️` warnings (the SMTP and PromptPay warnings are expected only if you chose to skip step 9 or run a demo with the sample number)
 
 ---
 
@@ -274,3 +294,5 @@ You can re-run the command from step 4 at any time, e.g. when the sample showtim
 | Every request errors and Vercel's Logs show `ROUTER_EXTERNAL_TARGET_ERROR` | The URL in `client/vercel.json` is wrong, or Render took longer than 120 seconds to wake up (try again, or do step 8) |
 | Logs show `⚠️  ยังเก็บสลิปลงดิสก์` ("still storing slips on disk"), or opening a slip gives 404 `SLIP_FILE_MISSING` | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` aren't set. Slips uploaded during that time were stored on Render's disk and are already gone |
 | Supabase says the project is paused | 7 days without activity. Click Restore on the project page, then do step 8 to keep it from happening again |
+| Every API call fails with 403 `DIRECT_ACCESS_FORBIDDEN` | `PROXY_SECRET` differs between Vercel and Render, or Vercel wasn't redeployed after setting it. `<Vercel URL>/api/health` names the problem in `proxySecret` (step 7) |
+| Users get `LOGIN_RATE_LIMITED` or `REGISTER_RATE_LIMITED` after only a few attempts | `TRUST_PROXY` is lower than the real number of proxies, so everyone shares Vercel's IP. Compare it with `proxyHops` (step 7) |

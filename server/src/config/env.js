@@ -10,12 +10,26 @@ export const SERVER_ROOT = path.resolve(currentDir, '../..');
 
 dotenv.config({ path: path.join(SERVER_ROOT, '.env'), quiet: true });
 
+/** เลขพร้อมเพย์ตัวอย่างใน .env.example — ขึ้นระบบจริงแล้วยังเป็นเลขนี้ index.js จะเตือนตอนเปิดเครื่อง */
+export const SAMPLE_PROMPTPAY_ID = '0812345678';
+
+/**
+ * JWT secret ที่ยังเป็นค่าตัวอย่างจาก .env.example / .env.test.example — ใครเปิด repo ก็เห็นค่าเหล่านี้
+ * ถ้าหลุดไปถึง production ใครก็เซ็น access token ปลอมได้เอง
+ */
+const isSampleSecret = (value) => {
+  const secret = String(value ?? '');
+  return secret.startsWith('replace_me') || secret.endsWith('_not_for_production');
+};
+
 const envSchema = z.object({
   DATABASE_URL: z
     .string({ error: 'ต้องกำหนด DATABASE_URL ใน server/.env' })
     .min(1, 'ต้องกำหนด DATABASE_URL ใน server/.env'),
   PORT: z.coerce.number().int().positive().default(4000),
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  // ไม่ตั้ง = production เพราะโหมด development เปิดของที่ไม่ควรมีบนระบบจริง (ลิงก์ตั้งรหัสผ่านใน API, stack trace, cookie ไม่ Secure)
+  // ลืมตั้งบนโฮสต์ใหม่จึงได้โหมดที่ปลอดภัยไว้ก่อน — .env.example ตั้ง development ไว้ให้เครื่องที่ใช้พัฒนาแล้ว
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
   CLIENT_ORIGIN: z.string().default('http://localhost:5173'),
 
   JWT_ACCESS_SECRET: z
@@ -59,7 +73,7 @@ const envSchema = z.object({
   // (คำขอที่หมดเวลา/ยกเลิกไม่นับ และผู้ดูแลย้ายให้ไม่นับ)
   MAX_SEAT_CHANGES_PER_BOOKING: z.coerce.number().int().positive().default(2),
 
-  PROMPTPAY_ID: z.string().min(8).default('0812345678'),
+  PROMPTPAY_ID: z.string().min(8).default(SAMPLE_PROMPTPAY_ID),
   PROMPTPAY_MERCHANT_NAME: z.string().default('THEATRE RESERVATION'),
 
   // ---------- ใบเสร็จรับเงิน ----------
@@ -95,7 +109,21 @@ const envSchema = z.object({
   // ใครอยู่หน้า API บ้าง — ใช้ตัดสินว่าจะเชื่อ X-Forwarded-For แค่ไหน (ดู utils/trustProxy.js)
   // ค่าเริ่มต้น loopback = เชื่อเฉพาะ reverse proxy บนเครื่องเดียวกัน ปลอดภัยทั้งตอนพัฒนาและตอนขึ้นจริงแบบทั่วไป
   TRUST_PROXY: z.string().default('loopback'),
+  // secret ที่ proxy ของหน้าเว็บ (Vercel) แนบมากับทุกคำขอ — ตั้งแล้ว API รับเฉพาะคำขอที่มาทางหน้าเว็บ (ดู middleware/requireProxy.js)
+  // ไม่ตั้ง = รับทุกคำขอเหมือนเดิม (ตอนพัฒนาและรันเทสต์)
+  PROXY_SECRET: z.string().trim().min(32, 'PROXY_SECRET ต้องยาวอย่างน้อย 32 ตัวอักษร').optional(),
 }).superRefine((value, ctx) => {
+  if (value.NODE_ENV === 'production') {
+    for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
+      if (isSampleSecret(value[key])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'ยังเป็นค่าตัวอย่างจาก .env.example — สร้างค่าสุ่มใหม่ก่อนขึ้นระบบจริง',
+        });
+      }
+    }
+  }
   // ตั้งมาแค่ครึ่งเดียวถือว่าตั้งผิด — ปล่อยผ่านเงียบ ๆ แล้วสลิปตกไปอยู่บนดิสก์ จะรู้ตัวอีกทีก็ตอนสลิปหายหลัง deploy
   if (Boolean(value.SUPABASE_URL) !== Boolean(value.SUPABASE_SECRET_KEY)) {
     ctx.addIssue({

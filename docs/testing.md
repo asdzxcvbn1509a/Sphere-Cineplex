@@ -21,6 +21,8 @@ Node's built-in test runner over `server/src/**/*.test.js`. No database is neede
 | `utils/pricing.test.js` | Per-zone prices derived from the base price |
 | `utils/seatChange.test.js` | Seat-change pricing (kept seats, same zone, new zone, id ordering, invalid selections) |
 | `utils/trustProxy.test.js` | Parsing `TRUST_PROXY` |
+| `utils/proxySecret.test.js` | Comparing the `x-proxy-secret` header with `PROXY_SECRET` (nothing passes while it's unset) |
+| `utils/loginIdentifier.test.js` | Login lookup and rate-limit key: every format of the same phone number, email case |
 | `utils/bahtText.test.js` | Amounts in words (Thai and English) |
 | `utils/receipt.test.js` | Receipt numbers, receipt lines and the receipt shape |
 | `emails/receipt.test.js` | Receipt email content |
@@ -44,7 +46,7 @@ Files run one at a time (`--test-concurrency=1`); cases inside a file fire truly
 
 | File | Covers |
 |---|---|
-| `auth.test.js` | Refresh token rotation, reuse detection, multi-tab refresh races |
+| `auth.test.js` | Refresh token rotation, reuse detection, multi-tab refresh races, one reset link used by two requests at once |
 | `bookings.test.js` | Concurrent bookings of the same seat and of overlapping seat sets, seats from another theatre, the expiry job, double cancellation |
 | `holds.test.js` | Seat hold limits (`PENDING_BOOKING_EXISTS`, `TOO_MANY_PENDING_BOOKINGS`) |
 | `late-slip.test.js` | Late slips (seats restored or refund path), grace period, the expiry job racing a slip upload, rejecting after the showtime starts |
@@ -53,7 +55,7 @@ Files run one at a time (`--test-concurrency=1`); cases inside a file fire truly
 | `receipts.test.js` | Receipt numbering (sequential, concurrent, rolled back with a failed transaction), frozen payer names, who may open a receipt, refund stamps, admin search by receipt number |
 | `seat-changes.test.js` | Same/cheaper/pricier seat changes, quotas and deadlines, concurrent changes, cancelling after a change, late difference slips, admin moves, HTTP |
 | `showtimes.test.js` | Cancelling a whole showtime, customer refund accounts, delete guards, editing booked showtimes, inactive seats, reminders |
-| `http.test.js` | Real HTTP: security headers, slip file checks, missing slip files, pagination, query booleans, token revocation, `/auth/refresh` responses |
+| `http.test.js` | Real HTTP: security headers, `PROXY_SECRET` checks and `/api/health` statuses, slip file checks and upload limits, missing slip files, pagination, query booleans, token revocation, `/auth/refresh` responses, login and sign-up rate limits, changing the email |
 
 Test data comes from `server/test/helpers/fixtures.js` (`createUser`, `createShowtimeFixture`, `book`, `createPaidBooking`, `makeSlipFile`, `apiErrorWith`, …)
 

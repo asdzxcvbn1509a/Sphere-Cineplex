@@ -220,8 +220,9 @@ The `token` is sent in the **body, not the URL path**, when calling the API, bec
 The link in the email itself uses `?token=`, the way most services do
 
 **Sending email** uses `nodemailer` with the SMTP server configured in `.env`
-If `SMTP_HOST` isn't set yet, the system **prints the email, link included, to the server console instead** and (only when `NODE_ENV=development`) also returns the link for the web page to show
-so the whole flow can be tried without a mail server — the condition is tied to `NODE_ENV`, so even if SMTP is forgotten in production, the link never leaks out through the API
+If `SMTP_HOST` isn't set yet and `NODE_ENV=development`, the system **prints the email, link included, to the server console instead** and also returns the link for the web page to show,
+so the whole flow can be tried without a mail server. Both are tied to `NODE_ENV`, so even if SMTP is forgotten in production, the link never leaks — not through the API, and not into the logs either:
+production only logs one line saying an email to a masked recipient was skipped, because a reset link in the logs would let anyone who can read them take over that account
 
 > If the user can't access their email either, an admin can set a temporary password on the [User management](#user-management) page as a fallback
 
@@ -261,14 +262,21 @@ re-reads the role from the database on every request instead of trusting the val
   The device that changed the password gets a new access token right in the response, so it never runs into a 401 first
 - **Access tokens are refreshed ahead of time** — the request interceptor refreshes 30 seconds before the real expiry, measuring the token's lifetime (`exp − iat`) from the moment it was received rather than using the device clock
   So normal use never hits 401 `TOKEN_EXPIRED`; 401 → refresh → retry remains as a fallback (e.g. a password changed from another tab)
+- **Changing the email needs the current password**, like changing the password. The email is how an account is recovered, so otherwise a stolen access token could point the account at the attacker's inbox and take it over for good through "forgot password". A successful change also voids reset links already sent to the old address
+- Access tokens are signed and verified only with HS256 (the token's header can't choose the algorithm), and their payload holds no personal data — just the user id, role and `tokenVersion`
 - `TRUST_PROXY` decides which proxies to trust `X-Forwarded-For` from (default `loopback`) — it used to be hard-coded to 1, so if the API was reachable directly, anyone could spoof their IP to dodge rate limits
+- **The API only accepts requests that came through the web app** once `PROXY_SECRET` is set: Vercel adds the secret in an `x-proxy-secret` header, and anything without it gets 403 `DIRECT_ACCESS_FORBIDDEN` (except `/api/health`)
+  Requests through Vercel pass one more proxy than requests sent straight to Render, so no single `TRUST_PROXY` value fits both paths — with the direct path closed, `TRUST_PROXY` can match the Vercel path exactly and nobody can spoof `X-Forwarded-For` (see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy))
+- The web app's pages carry their own security headers from `client/vercel.json`: a Content-Security-Policy (scripts and styles only from the site and Google Fonts), `X-Frame-Options: DENY` / `frame-ancestors 'none'` so no other site can frame the admin pages and trick a click on "approve", `nosniff` and a `Referrer-Policy`
+- Upload requests are capped before anything is stored: one file, at most 5 text fields of 4 KB, and 20 slip uploads per account per hour — multer keeps the whole request in memory before the service can check who owns the booking
 - Slip files are checked by their **actual contents** (JPG/PNG/WEBP magic bytes), not just the Content-Type the sender claims. The check runs while the file is still in memory, so files that fail are never written to storage at all. Every response also carries security headers from `helmet` (including `X-Content-Type-Options: nosniff`)
 - Slip images aren't served as static files — they must be fetched through `GET /api/payments/:bookingId/slip` (the slip of the customer's transfer) or `/refund-slip` (the slip of the admin's refund transfer), which only allow the booking's owner or an Admin (`?payment=` = the slip of a seat change difference payment, which must belong to that booking)
 - Uploads are kept in separate piles by uploader: `payments/` for customers and `refunds/` for admins (folders under `uploads/slips/` or prefixes in the bucket, depending on the [slip storage](#slip-storage)), so audits and cleanups never grab from the wrong pile. File names are freshly randomized every time and can only be read from the pile of their own kind
 - Passwords are stored only as bcrypt hashes — the real password is never stored or logged — and must be at least 8 characters long with both letters and digits
 - A failed login always gets the same message, whether the account doesn't exist or the password is wrong, and even when no account is found the system still compares against a throwaway hash so response times are similar — so attackers can't work out which emails have accounts
 - **Failed** logins are limited per (IP + account); successful ones aren't counted, so normal users never get blocked, and hammering someone else's account can't lock out the real owner on a different IP
-- The number of accounts that can be registered per IP is limited, counting only **successful** sign-ups (all of these are adjustable in `.env`)
+  The account part is normalized exactly like the login lookup (`utils/loginIdentifier.js`), so typing the same phone number as `081-234-5678`, `0812345678` or `+66812345678` doesn't earn a fresh quota
+- The number of accounts that can be registered per IP is limited, counting only **successful** sign-ups (all of these are adjustable in `.env`). **Failed** sign-ups have their own limit (30 per 15 minutes per IP), because the sign-up form answers `EMAIL_TAKEN` / `PHONE_TAKEN` and would otherwise let a script check unlimited emails and phone numbers
 
 ### Slip storage
 

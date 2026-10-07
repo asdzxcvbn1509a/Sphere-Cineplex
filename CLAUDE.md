@@ -40,6 +40,7 @@ CineBook — movie theatre seat booking for a Thai audience: React SPA (`client/
 - Integration tests refuse databases not ending in `_test` and a configured `SMTP_HOST`. Don't run the API on the `_test` database while they run — its background jobs touch the same rows
 - Upload middleware saves the slip before the service runs; services must delete it on failure (`discardSlipOnError`)
 - The access token lives in memory only; the refresh cookie `trs_refresh` (path `/api/auth`, `SameSite=lax`) requires the browser to call `/api` on the web app's own origin
+- With `PROXY_SECRET` set (production), every route except `/api/health` needs the `x-proxy-secret` header that `client/vercel.json` adds — calls straight to the Render URL get 403 `DIRECT_ACCESS_FORBIDDEN`. Keep it empty locally; tests pass `createApp({ proxySecret })`
 - `client/src/pages/SeatSelectionPage.jsx` and `ChangeSeatsPage.jsx` hard-code `MAX_SEATS` / `HOLD_MINUTES` to match the server's defaults
 - `docs/` is gitignored except its top-level `*.md` files
 

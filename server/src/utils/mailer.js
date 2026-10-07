@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { env, isMailConfigured, SMTP_SECURE } from '../config/env.js';
+import { env, isDev, isMailConfigured, SMTP_SECURE } from '../config/env.js';
 
 /**
  * สร้าง transporter ครั้งเดียวแล้วใช้ซ้ำ — nodemailer คง connection pool ไว้ให้เอง
@@ -41,8 +41,11 @@ const printToConsole = ({ to, subject, text }) => {
   );
 };
 
+/** เหลือแค่โดเมนของผู้รับ — พอให้รู้ว่ามีเมลตกหล่น โดยไม่เก็บที่อยู่อีเมลของลูกค้าไว้ใน log */
+const maskRecipient = (to) => String(to ?? '').replace(/^[^@]*/, '***');
+
 /**
- * ส่งอีเมล — คืน `delivered` บอกว่าออกไปทาง SMTP จริงหรือแค่ลงคอนโซล
+ * ส่งอีเมล — คืน `delivered` บอกว่าออกไปทาง SMTP จริงหรือไม่
  *
  * ตั้งใจไม่โยน error ต่อ เพราะทุกที่ที่เรียกใช้ตอนนี้ไม่ควรพังตามเมล
  * (ขอลิงก์ตั้งรหัสผ่านแล้วเซิร์ฟเวอร์เมลล่ม ผู้ใช้ก็ยังควรได้หน้าตอบกลับปกติ)
@@ -50,8 +53,13 @@ const printToConsole = ({ to, subject, text }) => {
  */
 export const sendMail = async ({ to, subject, text, html }) => {
   if (!isMailConfigured) {
-    // ตอนรันเทสต์ไม่ต้องพิมพ์ — ทุกการอนุมัติสลิปส่งใบเสร็จ ถ้าพิมพ์หมดผลเทสต์จะจมอยู่ใต้เนื้ออีเมล
-    if (env.NODE_ENV !== 'test') printToConsole({ to, subject, text });
+    // พิมพ์ทั้งฉบับเฉพาะตอนพัฒนา จะได้กดลิงก์ทดสอบจนจบขั้นตอนได้โดยไม่ต้องมีเมลเซิร์ฟเวอร์
+    // production ห้ามพิมพ์เนื้อเมล — ลิงก์ตั้งรหัสผ่านใน log = ใครเปิด log ได้ก็ยึดบัญชีนั้นได้ (log มักถูกส่งต่อไปเก็บที่อื่นด้วย)
+    // ตอนรันเทสต์ไม่ต้องพิมพ์อะไรเลย — ทุกการอนุมัติสลิปส่งใบเสร็จ ถ้าพิมพ์หมดผลเทสต์จะจมอยู่ใต้เนื้ออีเมล
+    if (isDev) printToConsole({ to, subject, text });
+    else if (env.NODE_ENV === 'production') {
+      console.warn(`[mail] ยังไม่ได้ตั้ง SMTP_HOST — ไม่ได้ส่งอีเมล "${subject}" ถึง ${maskRecipient(to)}`);
+    }
     return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' };
   }
 

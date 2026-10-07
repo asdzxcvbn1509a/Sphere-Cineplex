@@ -62,7 +62,9 @@ const diskStorage = {
     const filePath = resolveSlipPath(name, kind);
     // เช็กก่อนส่ง — ปล่อยให้ sendFile ไปเจอเองจะตอบเป็น 500 ทั้งที่แค่หาไฟล์ไม่เจอ
     if (!fs.existsSync(filePath)) throw missingFile(kind, name);
-    res.sendFile(filePath);
+    // สลิปเป็นเอกสารการเงินส่วนตัว ไม่ให้ cache ไหนเก็บไว้ แบบเดียวกับที่เก็บบน Supabase
+    // (cacheControl: false — ไม่งั้น sendFile ตั้ง public, max-age=0 ให้เอง)
+    res.set('Cache-Control', 'private, no-store').sendFile(filePath, { cacheControl: false });
   },
 };
 

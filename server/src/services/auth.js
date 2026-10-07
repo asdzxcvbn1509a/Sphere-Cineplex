@@ -4,7 +4,8 @@ import ApiError from '../utils/ApiError.js';
 import { APP_URL, env, isDev, isMailConfigured } from '../config/env.js';
 import { sendMail } from '../utils/mailer.js';
 import { passwordResetEmail } from '../emails/passwordReset.js';
-import { normalizePhone, requireThaiMobile } from '../utils/phone.js';
+import { requireThaiMobile } from '../utils/phone.js';
+import { loginLookup, normalizeEmail } from '../utils/loginIdentifier.js';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../utils/password.js';
 import {
   generateRefreshToken,
@@ -23,15 +24,15 @@ export const publicUser = (user) => {
   };
 };
 
-/** อีเมลเก็บเป็นตัวพิมพ์เล็กเสมอ — ตัวพิมพ์ต่างกันจะได้ไม่กลายเป็นคนละบัญชี (ผู้ดูแลแก้อีเมลให้ก็ใช้ตัวนี้) */
-export const normalizeEmail = (raw) => String(raw ?? '').trim().toLowerCase();
+// ย้ายไปอยู่ utils/loginIdentifier.js คู่กับ loginLookup — ส่งต่อจากที่นี่ให้ service อื่นที่ import ไว้เดิม
+export { normalizeEmail };
 
 /**
  * เพิกถอนทุกเซสชันที่ยังใช้ได้ของผู้ใช้ — except = refresh token ของเครื่องที่ให้คงไว้ (ไม่ส่ง = ไม่เว้นเครื่องไหน)
- * คืน PrismaPromise จึงใส่ใน prisma.$transaction([...]) ได้ด้วย
+ * คืน PrismaPromise จึงใส่ใน prisma.$transaction([...]) ได้ด้วย · ใน interactive transaction ส่ง tx มาเป็น client
  */
-export const revokeAllSessions = (userId, { except, at = new Date() } = {}) => {
-  return prisma.refreshToken.updateMany({
+export const revokeAllSessions = (userId, { except, at = new Date(), client = prisma } = {}) => {
+  return client.refreshToken.updateMany({
     where: { userId, revokedAt: null, ...(except && { NOT: { tokenHash: hashToken(except) } }) },
     data: { revokedAt: at },
   });
@@ -90,14 +91,13 @@ export const register = async ({ name, email, phone, password, userAgent }) => {
   }
 };
 
-/** เข้าสู่ระบบด้วยอีเมลหรือเบอร์โทรศัพท์ก็ได้ — ดูจากว่ามี @ อยู่ในสิ่งที่กรอกมาหรือไม่ */
+/**
+ * เข้าสู่ระบบด้วยอีเมลหรือเบอร์โทรศัพท์ก็ได้ — ดูจากว่ามี @ อยู่ในสิ่งที่กรอกมาหรือไม่
+ * loginLookup ตัวเดียวกับที่ rate limit ใช้ทำกุญแจ (routes/auth.js) โควตาจึงนับตรงกับบัญชีที่ค้นเจอจริง
+ */
 export const login = async ({ identifier, password, userAgent }) => {
-  const value = String(identifier ?? '').trim();
-  const where = value.includes('@')
-    ? { email: normalizeEmail(value) }
-    : { phone: normalizePhone(value) };
-
-  const user = where.email || where.phone ? await prisma.user.findUnique({ where }) : null;
+  const where = loginLookup(identifier);
+  const user = where ? await prisma.user.findUnique({ where }) : null;
   // เทียบรหัสผ่านเสมอแม้ไม่เจอบัญชี เพื่อให้เวลาที่ใช้ตอบใกล้เคียงกันทุกกรณี
   const matched = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
 
@@ -339,33 +339,71 @@ export const resetPassword = async ({ token, password }) => {
   const passwordHash = await hashPassword(password);
   const now = new Date();
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: stored.userId },
-      data: { passwordHash, tokenVersion: { increment: 1 } },
-    }),
-    prisma.passwordResetToken.updateMany({
+  // ลำดับล็อก PasswordResetToken → User → RefreshToken ให้ตรงกับ updateProfile
+  await prisma.$transaction(async (tx) => {
+    // ลิงก์ใช้ได้ครั้งเดียวจริง ๆ — สองคำขอที่ถือลิงก์เดียวกันมาพร้อมกันผ่าน findLiveResetToken ได้ทั้งคู่
+    // เงื่อนไข "ยังไม่ถูกใช้" อยู่ใน where จึงมีคำขอเดียวที่ปิดลิงก์ได้ อีกคำขอได้ข้อความเดียวกับลิงก์ที่ใช้ไปแล้ว
+    // (เดิมทั้งสองคำขอตั้งรหัสสำเร็จทั้งคู่ คำขอที่ช้ากว่าเขียนทับรหัสของคำขอแรกโดยไม่มีใครรู้)
+    const { count } = await tx.passwordResetToken.updateMany({
+      where: { id: stored.id, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+    if (count === 0) throw invalidResetLink();
+
+    // ลิงก์อื่นของบัญชีนี้ที่ยังค้างอยู่ก็ใช้ไม่ได้อีก (ปกติไม่มี เพราะขอลิงก์ใหม่แล้วใบเก่าถูกลบ)
+    await tx.passwordResetToken.updateMany({
       where: { userId: stored.userId, usedAt: null },
       data: { usedAt: now },
-    }),
-    revokeAllSessions(stored.userId, { at: now }),
-  ]);
+    });
+    await tx.user.update({
+      where: { id: stored.userId },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    });
+    await revokeAllSessions(stored.userId, { at: now, client: tx });
+  });
 
   // คืนอีเมลเต็มให้หน้าเว็บเอาไปเติมในช่องล็อกอินต่อ — คนที่ถือลิงก์คือคนที่เปิดเมลฉบับนั้นได้อยู่แล้ว
   return { ok: true, email: stored.user.email };
 };
 
-export const updateProfile = async (userId, data) => {
-  const email = data.email !== undefined ? normalizeEmail(data.email) : undefined;
+/**
+ * แก้ข้อมูลของตัวเอง — แก้ชื่ออย่างเดียวไม่ต้องยืนยันอะไร
+ *
+ * เปลี่ยนอีเมลต้องยืนยันรหัสผ่านปัจจุบันก่อน แบบเดียวกับการเปลี่ยนรหัสผ่าน เพราะอีเมลคือช่องทางกู้บัญชี (ลืมรหัสผ่าน)
+ * ถ้าเปลี่ยนได้ด้วย access token อย่างเดียว คนที่ขโมยเซสชันไปได้จะเปลี่ยนเป็นอีเมลของตัวเอง
+ * แล้วขอลิงก์ตั้งรหัสใหม่ ยึดบัญชีไปถาวร และการรีเซ็ตยังเตะเจ้าของตัวจริงออกจากทุกเครื่องด้วย
+ */
+export const updateProfile = async (userId, { name, email, currentPassword } = {}) => {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+
+  const nextEmail = email === undefined ? undefined : normalizeEmail(email);
+  const emailChanged = nextEmail !== undefined && nextEmail !== user.email;
+  if (emailChanged) {
+    if (!currentPassword) {
+      throw ApiError.badRequest(
+        'CURRENT_PASSWORD_REQUIRED',
+        'กรุณากรอกรหัสผ่านปัจจุบันเพื่อยืนยันการเปลี่ยนอีเมล',
+      );
+    }
+    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+      throw ApiError.badRequest('WRONG_PASSWORD', 'รหัสผ่านปัจจุบันไม่ถูกต้อง');
+    }
+  }
+
   try {
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(data.name !== undefined && { name: data.name }),
-        ...(email !== undefined && { email }),
-      },
-    });
-    return publicUser(user);
+    const results = await prisma.$transaction([
+      // ลิงก์ตั้งรหัสผ่านที่ส่งไปอีเมลเดิมต้องใช้ไม่ได้อีก — ลบก่อนแก้ผู้ใช้ ตามลำดับล็อกเดียวกับ resetPassword
+      ...(emailChanged ? [prisma.passwordResetToken.deleteMany({ where: { userId } })] : []),
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(emailChanged && { email: nextEmail }),
+        },
+      }),
+    ]);
+    return publicUser(results.at(-1));
   } catch (error) {
     if (error?.code === 'P2002') throw duplicateFieldError(error.meta?.target);
     throw error;

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { env, isDev } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { requireProxy } from './middleware/requireProxy.js';
 import { parseTrustProxy } from './utils/trustProxy.js';
 
 import authRoutes from './routes/auth.js';
@@ -16,13 +17,16 @@ import paymentRoutes from './routes/payments.js';
 import notificationRoutes from './routes/notifications.js';
 import adminRoutes from './routes/admin.js';
 
-export const createApp = () => {
+/** proxySecret ส่งเข้ามาเองได้ (เทสต์ใช้เปิดการบังคับ) — ไม่ส่งใช้ PROXY_SECRET จาก .env */
+export const createApp = ({ proxySecret = env.PROXY_SECRET } = {}) => {
   const app = express();
 
   // req.ip ใช้เป็นกุญแจของ rate limit ทุกตัว ต้องเชื่อ X-Forwarded-For เฉพาะ proxy ที่ตั้งไว้จริงเท่านั้น
   app.set('trust proxy', parseTrustProxy(env.TRUST_PROXY));
   // security headers มาตรฐาน — สำคัญสุดคือ nosniff: รูปสลิปที่ส่งออกไปต้องไม่ถูกเบราว์เซอร์เดาเป็น HTML/สคริปต์
   app.use(helmet());
+  // ก่อน CORS และการอ่าน body — คำขอที่ไม่ได้มาทางหน้าเว็บถูกปัดตกโดยไม่ต้องเสียแรง parse อะไรเลย
+  app.use(requireProxy(proxySecret));
   app.use(
     cors({
       origin: env.CLIENT_ORIGIN,
@@ -44,6 +48,9 @@ export const createApp = () => {
       // ตั้งถูกแล้ว ip ต้องเป็นไอพีจริงของผู้เรียก ไม่ใช่ไอพีของ proxy ตัวใดตัวหนึ่ง
       ip: req.ip,
       proxyHops: forwardedFor.split(',').filter((part) => part.trim()).length,
+      // ไว้ตรวจการตั้ง PROXY_SECRET (ดู DEPLOY.md) — เปิดผ่าน URL หน้าเว็บ: ตั้งฝั่ง Vercel แล้วต้องได้ unchecked
+      // ตั้งครบทั้งสองฝั่งต้องได้ valid · ค่าทั้งหมดดูใน middleware/requireProxy.js
+      proxySecret: req.proxySecret,
     });
   });
 

@@ -22,6 +22,8 @@ Ready-to-run request examples are in [server/api.http](../server/api.http) (VS C
 
 Browsers should always call the API on the web app's own origin; the refresh cookie is `SameSite=lax` and isn't sent cross-site
 
+When the API has `PROXY_SECRET` set (production), every request except `GET /api/health` must carry the matching `x-proxy-secret` header, which Vercel adds when it forwards `/api/*`. Anything else — such as a request sent straight to the Render URL — gets 403 `DIRECT_ACCESS_FORBIDDEN` before any route runs
+
 ### Authentication
 
 | Level | Meaning |
@@ -31,14 +33,14 @@ Browsers should always call the API on the web app's own origin; the refresh coo
 | Owner | User who owns the booking; admins pass the ownership check where noted |
 | Admin | Account with role `ADMIN` — every `/api/admin/*` route |
 
-- **Access token**: JWT returned by register, login, refresh and password change. Lifetime `ACCESS_TOKEN_TTL` (15 minutes). It embeds the user's `tokenVersion`, so a password change or reset invalidates every older token immediately
+- **Access token**: JWT (HS256) returned by register, login, refresh and password change. Lifetime `ACCESS_TOKEN_TTL` (15 minutes). Its payload holds only `sub`, `role` and `tv` (the user's `tokenVersion`), so a password change or reset invalidates every older token immediately
 - **Refresh token**: httpOnly cookie `trs_refresh` (path `/api/auth`, `SameSite=lax`, `Secure` in production, `REFRESH_TOKEN_TTL_DAYS` days). Rotated on every refresh; only its SHA-256 hash is stored
 - Token errors: 401 `NO_TOKEN`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_REVOKED` · wrong role: 403 `ROLE_REQUIRED`
 
 ### Requests
 
 - Bodies are JSON (`Content-Type: application/json`, max 1 MB)
-- Slip uploads are `multipart/form-data` with the file in the field `slip`: JPG, PNG or WEBP, at most `MAX_SLIP_SIZE_MB` (5). The server checks the file's magic bytes, not just its declared type
+- Slip uploads are `multipart/form-data` with the file in the field `slip`: JPG, PNG or WEBP, at most `MAX_SLIP_SIZE_MB` (5). The server checks the file's magic bytes, not just its declared type. Besides the file, a request may carry at most 5 text fields of up to 4 KB each (400 `UPLOAD_ERROR` otherwise)
 - Query booleans accept only `true` / `false`
 - `:id` path parameters are opaque string ids (cuid)
 
@@ -66,15 +68,17 @@ Limited requests get **429** with the code below. Limits come from [configuratio
 
 | Endpoint | Limit | Counted per | Code |
 |---|---|---|---|
-| `POST /auth/login` | `LOGIN_LIMIT` per `LOGIN_WINDOW_MINUTES` — failed attempts only | IP + identifier | `LOGIN_RATE_LIMITED` |
-| `PATCH /auth/password` | `LOGIN_LIMIT` per `LOGIN_WINDOW_MINUTES` — failed attempts only | account | `LOGIN_RATE_LIMITED` |
+| `POST /auth/login` | `LOGIN_LIMIT` per `LOGIN_WINDOW_MINUTES` — failed attempts only | IP + identifier, normalized like the account lookup (`081-234-5678` = `0812345678`) | `LOGIN_RATE_LIMITED` |
+| `PATCH /auth/password`, `PATCH /auth/me` (one shared count) | `LOGIN_LIMIT` per `LOGIN_WINDOW_MINUTES` — failed attempts only | account | `LOGIN_RATE_LIMITED` |
 | `POST /auth/register` | `REGISTER_LIMIT` per `REGISTER_WINDOW_MINUTES` — successful sign-ups only | IP | `REGISTER_RATE_LIMITED` |
+| `POST /auth/register` | 30 per 15 minutes — failed attempts only | IP | `REGISTER_RATE_LIMITED` |
 | `POST /auth/forgot-password` | `PASSWORD_RESET_LIMIT` per `PASSWORD_RESET_WINDOW_MINUTES` | IP + email | `RESET_RATE_LIMITED` |
 | `POST /auth/reset-password`, `/auth/reset-password/check` | 60 per `PASSWORD_RESET_WINDOW_MINUTES` | IP | `RESET_RATE_LIMITED` |
 | `POST /bookings` | 10 per 10 minutes — successful bookings only | account | `BOOKING_RATE_LIMITED` |
 | `POST /bookings/:id/seat-changes` | 10 per 10 minutes — successful requests only | account | `SEAT_CHANGE_RATE_LIMITED` |
+| `POST /payments/:bookingId/slip`, `POST /seat-changes/:id/slip` (one shared count) | 20 per hour — every request | account | `SLIP_RATE_LIMITED` |
 
-Responses carry the `RateLimit` and `RateLimit-Policy` headers (IETF draft 7). The client IP comes from `TRUST_PROXY` — see [DEPLOY.md](../DEPLOY.md#7-match-trust_proxy-to-the-real-number-of-proxies)
+Responses carry the `RateLimit` and `RateLimit-Policy` headers (IETF draft 7). The client IP comes from `TRUST_PROXY` — see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy)
 
 ### Data conventions
 
@@ -140,7 +144,14 @@ Seats are labels (`"C5"`). `diffAmount` > 0 = the customer pays more, < 0 = refu
 
 #### `GET /api/health` — Public
 
-Liveness check that doesn't touch the database. Returns `{ ok: true, service, time, ip, proxyHops }` — `ip` and `proxyHops` are used to set `TRUST_PROXY` (see [DEPLOY.md](../DEPLOY.md#7-match-trust_proxy-to-the-real-number-of-proxies))
+Liveness check that doesn't touch the database, and the only route open without `x-proxy-secret` when `PROXY_SECRET` is set. Returns `{ ok: true, service, time, ip, proxyHops, proxySecret }` — `ip` and `proxyHops` are used to set `TRUST_PROXY`, and `proxySecret` shows how this request's `x-proxy-secret` header compares (see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy)):
+
+| `proxySecret` | Meaning |
+|---|---|
+| `missing` | No header — the request didn't come through Vercel |
+| `unresolved` | The header is the literal `$PROXY_SECRET`: the Vercel project has no `PROXY_SECRET` variable (or wasn't redeployed) |
+| `unchecked` | A header arrived, but the API has no `PROXY_SECRET` to compare it with |
+| `valid` · `invalid` | The header matches · doesn't match the API's `PROXY_SECRET` |
 
 ---
 
@@ -153,7 +164,7 @@ Liveness check that doesn't touch the database. Returns `{ ok: true, service, ti
 | `POST` | `/api/auth/refresh` | Cookie | Rotate the session |
 | `POST` | `/api/auth/logout` | Cookie | Revoke this session |
 | `GET` | `/api/auth/me` | User | Current user |
-| `PATCH` | `/api/auth/me` | User | Edit own name / email |
+| `PATCH` | `/api/auth/me` | User | Edit own name / email (email needs the current password) |
 | `PATCH` | `/api/auth/password` | User | Change own password |
 | `POST` | `/api/auth/forgot-password` | Public | Email a reset link |
 | `POST` | `/api/auth/reset-password/check` | Public | Validate a reset link |
@@ -162,7 +173,7 @@ Liveness check that doesn't touch the database. Returns `{ ok: true, service, ti
 #### `POST /api/auth/register`
 - Body: `name` (2–60), `email` (≤120), `phone` (Thai mobile; `089-123-4567`, `+6689…` are normalized to 10 digits), `password` (8–72, letters and digits)
 - **201** `{ user, accessToken, isNewUser: true }` and sets the refresh cookie
-- Errors: 400 `INVALID_PHONE` · 409 `EMAIL_TAKEN`, `PHONE_TAKEN`, `DUPLICATE` · 429 `REGISTER_RATE_LIMITED`
+- Errors: 400 `INVALID_PHONE` · 409 `EMAIL_TAKEN`, `PHONE_TAKEN`, `DUPLICATE` · 429 `REGISTER_RATE_LIMITED` (too many sign-ups, or too many failed attempts, from this IP)
 
 #### `POST /api/auth/login`
 - Body: `identifier` (email if it contains `@`, otherwise phone), `password`
@@ -181,8 +192,9 @@ Liveness check that doesn't touch the database. Returns `{ ok: true, service, ti
 - **200** `{ user }`
 
 #### `PATCH /api/auth/me`
-- Body: `name` (1–60) and/or `email`
-- **200** `{ user }` · Errors: 409 `EMAIL_TAKEN`, `DUPLICATE`
+- Body: `name` (1–60) and/or `email`, plus `currentPassword` when the email changes — the email is how the account is recovered, so a stolen session alone must not be able to redirect it
+- **200** `{ user }` — changing the email also voids any password reset link sent to the old address
+- Errors: 400 `CURRENT_PASSWORD_REQUIRED`, `WRONG_PASSWORD` · 409 `EMAIL_TAKEN`, `DUPLICATE` · 429 `LOGIN_RATE_LIMITED`
 
 #### `PATCH /api/auth/password`
 - Body: `currentPassword`, `newPassword` (8–72, letters and digits)
@@ -299,7 +311,7 @@ The next steps of a seat change that costs more. All routes require a signed-in 
 #### `POST /api/seat-changes/:id/slip` — Owner
 - Multipart field `slip`
 - **201** `{ seatChange }` — moves to `PENDING_VERIFICATION` (late slips within `LATE_SLIP_GRACE_MINUTES` included)
-- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `SEAT_CHANGE_NOT_FOUND` · 409 `SEAT_CHANGE_NOT_PAYABLE` (already sent, or the request is closed), `HOLD_EXPIRED` (grace period over)
+- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `SEAT_CHANGE_NOT_FOUND` · 409 `SEAT_CHANGE_NOT_PAYABLE` (already sent, or the request is closed), `HOLD_EXPIRED` (grace period over) · 429 `SLIP_RATE_LIMITED`
 
 #### `POST /api/seat-changes/:id/cancel` — Owner
 - **200** `{ seatChange }` — held new seats released; the current seats are untouched
@@ -318,7 +330,7 @@ All routes require a signed-in user
 #### `POST /api/payments/:bookingId/slip` — Owner
 - Multipart field `slip`
 - **201** `{ payment }` (PaymentPage) — the countdown stops and the seats stay held until an admin decides. Accepted past the deadline while the seats are still held, and for `LATE_SLIP_GRACE_MINUTES` after expiry (see [Late slip submission](architecture.md#late-slip-submission))
-- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND` · 409 `BOOKING_NOT_PAYABLE` (already sent, or the booking can't be paid), `HOLD_EXPIRED`
+- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND` · 409 `BOOKING_NOT_PAYABLE` (already sent, or the booking can't be paid), `HOLD_EXPIRED` · 429 `SLIP_RATE_LIMITED`
 
 #### `GET /api/payments/:bookingId/slip` — Owner / admin
 - Query: `payment` — a seat-change difference payment of this booking (omit for the ticket payment)
@@ -547,6 +559,7 @@ Status, code and meaning. Codes are stable; messages may be reworded
 |---|---|---|
 | 400 | `CANNOT_CHANGE_OWN_ROLE` | Admins can't change their own role |
 | 400 | `CANNOT_DELETE_SELF` | Admins can't delete their own account |
+| 400 | `CURRENT_PASSWORD_REQUIRED` | Changing your email needs `currentPassword` |
 | 400 | `FILE_TOO_LARGE` | Upload larger than `MAX_SLIP_SIZE_MB` |
 | 400 | `INVALID_DATE` | Date isn't `YYYY-MM-DD` |
 | 400 | `INVALID_GRID` | Theatre size outside 1–26 rows / 1–30 seats per row |
@@ -580,6 +593,7 @@ Status, code and meaning. Codes are stable; messages may be reworded
 | 401 | `TOKEN_REVOKED` | Password changed or user removed since the token was issued |
 | 401 | `UNAUTHORIZED` | Role check reached without a signed-in user |
 | 403 | `CANCEL_WINDOW_CLOSED` | Less than `CANCEL_CUTOFF_HOURS` before the showtime |
+| 403 | `DIRECT_ACCESS_FORBIDDEN` | `PROXY_SECRET` is set and the request didn't come through the web app's proxy |
 | 403 | `NOT_BOOKING_OWNER` | The booking belongs to someone else |
 | 403 | `RECEIPT_NOT_READY` | No receipt has been issued for this payment |
 | 403 | `ROLE_REQUIRED` | Admin role required |
@@ -633,7 +647,8 @@ Status, code and meaning. Codes are stable; messages may be reworded
 | 422 | `VALIDATION_ERROR` | Request body or query failed validation (`details[]`) |
 | 429 | `BOOKING_RATE_LIMITED` | Too many bookings |
 | 429 | `LOGIN_RATE_LIMITED` | Too many failed sign-ins or current-password attempts |
-| 429 | `REGISTER_RATE_LIMITED` | Too many sign-ups from this IP |
+| 429 | `REGISTER_RATE_LIMITED` | Too many sign-ups, or failed sign-up attempts, from this IP |
 | 429 | `RESET_RATE_LIMITED` | Too many password reset requests |
 | 429 | `SEAT_CHANGE_RATE_LIMITED` | Too many seat-change requests |
+| 429 | `SLIP_RATE_LIMITED` | Too many slip uploads from this account |
 | 500 | `INTERNAL_ERROR` | Unexpected server error (logged) |

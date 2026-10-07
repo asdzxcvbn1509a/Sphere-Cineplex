@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createApp } from '../../src/app.js';
-import { PAYMENT_SLIP_DIR } from '../../src/config/env.js';
+import { PAYMENT_SLIP_DIR, env } from '../../src/config/env.js';
+import prisma from '../../src/lib/prisma.js';
 import { issueSession, rotateSession } from '../../src/services/auth.js';
 import { markRead, notify } from '../../src/services/notifications.js';
 import { hashPassword } from '../../src/utils/password.js';
@@ -78,6 +79,54 @@ describe('GET /api/health', () => {
   test('เรียกตรงไม่ผ่าน proxy ได้ proxyHops เป็น 0', async () => {
     const body = await (await fetch(`${base}/api/health`)).json();
     assert.equal(body.proxyHops, 0);
+    assert.equal(body.proxySecret, 'missing');
+  });
+
+  test('ยังไม่ได้ตั้ง PROXY_SECRET — มี header ก็ได้ unchecked และไม่มีคำขอไหนถูกปัดตก', async () => {
+    const res = await fetch(`${base}/api/health`, { headers: { 'X-Proxy-Secret': 'anything' } });
+    assert.equal((await res.json()).proxySecret, 'unchecked');
+    assert.equal((await fetch(`${base}/api/movies`)).status, 200);
+  });
+});
+
+describe('PROXY_SECRET — รับเฉพาะคำขอที่มาทางหน้าเว็บ', () => {
+  const SECRET = 'proxy-secret-for-tests-'.padEnd(48, 'x');
+  let guarded;
+  let guardedBase;
+
+  before(async () => {
+    guarded = createApp({ proxySecret: SECRET }).listen(0, '127.0.0.1');
+    await once(guarded, 'listening');
+    guardedBase = `http://127.0.0.1:${guarded.address().port}`;
+  });
+  after(() => guarded.close());
+
+  const get = (path, secret) =>
+    fetch(`${guardedBase}${path}`, { headers: secret === undefined ? {} : { 'X-Proxy-Secret': secret } });
+
+  test('ยิงตรงไม่มี secret หรือ secret ผิด → 403 DIRECT_ACCESS_FORBIDDEN', async () => {
+    for (const secret of [undefined, 'wrong', '$PROXY_SECRET']) {
+      const res = await get('/api/movies', secret);
+      assert.equal(res.status, 403, String(secret));
+      assert.equal((await res.json()).error.code, 'DIRECT_ACCESS_FORBIDDEN');
+    }
+  });
+
+  test('secret ถูก → ผ่านไปถึง route ตามปกติ', async () => {
+    assert.equal((await get('/api/movies', SECRET)).status, 200);
+  });
+
+  test('/api/health เปิดได้เสมอ และบอกสถานะ secret ของคำขอไว้ตรวจการตั้งค่า', async () => {
+    const statusOf = async (secret) => {
+      const res = await get('/api/health', secret);
+      assert.equal(res.status, 200);
+      return (await res.json()).proxySecret;
+    };
+    assert.equal(await statusOf(undefined), 'missing');
+    // Vercel ส่งข้อความนี้มาตรง ๆ เมื่อโปรเจกต์ยังไม่มีตัวแปร PROXY_SECRET
+    assert.equal(await statusOf('$PROXY_SECRET'), 'unresolved');
+    assert.equal(await statusOf('wrong'), 'invalid');
+    assert.equal(await statusOf(SECRET), 'valid');
   });
 });
 
@@ -106,6 +155,47 @@ describe('อัปโหลดสลิป', () => {
     assert.equal(res.status, 201);
     assert.equal((await bookingOf(booking.id)).status, 'PENDING_VERIFICATION');
   });
+
+  test('ช่องข้อความเกินจำนวนหรือยาวเกิน ถูกปฏิเสธตั้งแต่ตอนรับไฟล์ และไม่เหลือไฟล์ค้าง', async () => {
+    const { showtime, seats } = await createShowtimeFixture();
+    const user = await createUser();
+    const booking = await book({ user, showtime, seats: [seats[0]] });
+    const before = await slipFileCount();
+    const withSlip = (form) => {
+      form.append('slip', new Blob([TINY_PNG], { type: 'image/png' }), 'slip.png');
+      return form;
+    };
+
+    const tooMany = new FormData();
+    for (let i = 0; i < 6; i += 1) tooMany.append(`field${i}`, 'x');
+    const tooLong = new FormData();
+    tooLong.append('note', 'x'.repeat(5 * 1024));
+
+    for (const form of [withSlip(tooMany), withSlip(tooLong)]) {
+      const res = await fetch(`${base}/api/payments/${booking.id}/slip`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${signAccessToken(user)}` },
+        body: form,
+      });
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).error.code, 'UPLOAD_ERROR');
+    }
+    assert.equal(await slipFileCount(), before);
+    assert.equal((await bookingOf(booking.id)).status, 'PENDING_PAYMENT');
+  });
+
+  test('อัปโหลดสลิปได้ไม่เกิน 20 ครั้งต่อชั่วโมงต่อบัญชี', async () => {
+    const user = await createUser();
+    const token = signAccessToken(user);
+    // การจองที่ไม่มีอยู่จริง — service ตอบ 404 และลบไฟล์ทิ้งทุกครั้ง แต่ทุกคำขอนับโควตา
+    for (let i = 0; i < 20; i += 1) {
+      assert.equal((await postSlip('no-such-booking', token, TINY_PNG)).status, 404);
+    }
+
+    const res = await postSlip('no-such-booking', token, TINY_PNG);
+    assert.equal(res.status, 429);
+    assert.equal((await res.json()).error.code, 'SLIP_RATE_LIMITED');
+  });
 });
 
 describe('เปิดดูสลิป', () => {
@@ -123,6 +213,7 @@ describe('เปิดดูสลิป', () => {
 
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'image/png');
+    assert.equal(res.headers.get('cache-control'), 'private, no-store');
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), TINY_PNG);
   });
 
@@ -297,5 +388,77 @@ describe('POST /api/auth/refresh', () => {
     assert.equal(res.status, 409);
     assert.equal((await res.json()).error.code, 'REFRESH_RACE');
     assert.deepEqual(res.headers.getSetCookie(), []);
+  });
+});
+
+const sendJson = (method, path, body, token) =>
+  fetch(`${base}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+    body: JSON.stringify(body),
+  });
+
+describe('rate limit ล็อกอิน', () => {
+  test('เบอร์เดียวกันที่พิมพ์คนละรูปแบบใช้โควตาเดียวกัน — เปลี่ยนรูปแบบเบอร์ไม่ได้โควตาใหม่', async () => {
+    const login = (identifier) =>
+      sendJson('POST', '/api/auth/login', { identifier, password: 'WrongPassword1' });
+    const formats = ['0861234567', '086-123-4567', '+66861234567', '086 123 4567'];
+
+    for (let i = 0; i < env.LOGIN_LIMIT; i += 1) {
+      assert.equal((await login(formats[i % formats.length])).status, 401);
+    }
+    const res = await login('66861234567');
+    assert.equal(res.status, 429);
+    assert.equal((await res.json()).error.code, 'LOGIN_RATE_LIMITED');
+  });
+});
+
+describe('PATCH /api/auth/me', () => {
+  test('แก้ชื่อไม่ต้องใช้รหัสผ่าน แต่เปลี่ยนอีเมลต้องยืนยันรหัสผ่านปัจจุบัน และลิงก์รีเซ็ตที่ค้างอยู่ใช้ไม่ได้อีก', async () => {
+    const user = await createUser({ passwordHash: await hashPassword('Password123') });
+    await prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: 'pending-link', expiresAt: new Date(Date.now() + 60 * 1000) },
+    });
+    const patch = (body) => sendJson('PATCH', '/api/auth/me', body, signAccessToken(user));
+    const errorCode = async (res) => (await res.json()).error.code;
+
+    const renamed = await patch({ name: 'ชื่อใหม่' });
+    assert.equal(renamed.status, 200);
+    assert.equal((await renamed.json()).user.name, 'ชื่อใหม่');
+    // อีเมลเดิมที่ต่างแค่ตัวพิมพ์ไม่นับว่าเปลี่ยน
+    assert.equal((await patch({ email: user.email.toUpperCase() })).status, 200);
+
+    const noPassword = await patch({ email: 'new-address@test.local' });
+    assert.equal(noPassword.status, 400);
+    assert.equal(await errorCode(noPassword), 'CURRENT_PASSWORD_REQUIRED');
+
+    const wrongPassword = await patch({ email: 'new-address@test.local', currentPassword: 'Wrong12345' });
+    assert.equal(wrongPassword.status, 400);
+    assert.equal(await errorCode(wrongPassword), 'WRONG_PASSWORD');
+    assert.equal((await prisma.user.findUnique({ where: { id: user.id } })).email, user.email);
+    assert.equal(await prisma.passwordResetToken.count({ where: { userId: user.id } }), 1);
+
+    const changed = await patch({ email: 'New-Address@test.local', currentPassword: 'Password123' });
+    assert.equal(changed.status, 200);
+    assert.equal((await changed.json()).user.email, 'new-address@test.local');
+    assert.equal(await prisma.passwordResetToken.count({ where: { userId: user.id } }), 0);
+  });
+});
+
+// ไว้ท้ายไฟล์ — ตัวนับเป็นรายไอพี (127.0.0.1) ใช้ร่วมกันทั้งไฟล์ เคสหลังจากนี้จะสมัครไม่ได้ไปอีก 15 นาที
+describe('rate limit สมัครสมาชิก', () => {
+  test('สมัครไม่สำเร็จเกิน 30 ครั้งจากไอพีเดียว → 429 กันการใช้หน้าสมัครไล่เช็กอีเมล/เบอร์', async () => {
+    const register = () =>
+      sendJson('POST', '/api/auth/register', {
+        name: 'ทดสอบ',
+        email: 'not-an-email',
+        phone: '0861234567',
+        password: 'Password123',
+      });
+
+    for (let i = 0; i < 30; i += 1) assert.equal((await register()).status, 422);
+    const res = await register();
+    assert.equal(res.status, 429);
+    assert.equal((await res.json()).error.code, 'REGISTER_RATE_LIMITED');
   });
 });

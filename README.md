@@ -1,4 +1,4 @@
-# 🎬 Theatre Reservation System (CineBook)
+# 🎬 Theatre Reservation System (Sphere-Cineplex)
 
 A full-stack movie theatre seat booking system — users pick a movie, date, showtime and seats, pay with a PromptPay QR, then get an E-Ticket along with a receipt (E-Receipt), and can change seats afterwards. Admins manage theatres and showtimes, review payment slips and view sales reports
 
@@ -40,7 +40,7 @@ UX/UI designed from a survey of 30 real users (details in [chat_history.md](chat
 | Backend | Node.js · Express 5 (ESM) |
 | Database | PostgreSQL · Prisma ORM 6 |
 | Auth | Sign up / log in with email or phone + password (bcrypt) · 15-minute JWT access token + 7-day rotating refresh token · Forgot password via an emailed link |
-| Email | nodemailer over SMTP — when not configured, email content is printed to the console instead |
+| Email | nodemailer over SMTP — when not configured, email content is printed to the console instead (development only; production never logs message content) |
 | Payment | PromptPay QR (EMVCo payload) + slip upload for admin review |
 | Language | Thai / English, switchable across the whole system |
 

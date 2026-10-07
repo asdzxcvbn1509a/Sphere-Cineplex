@@ -17,11 +17,17 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # จำนวน proxy หน้า API (Vercel → Cloudflare ของ Render → load balancer ของ Render)
+      # จำนวน proxy หน้า API ตามเส้นทางผ่านหน้าเว็บ (Vercel + proxy ของ Render อีก 3 ชั้น)
       # ค่าที่ถูกต้องดูได้จาก proxyHops ของ <URL Vercel>/api/health — แก้ที่ไฟล์นี้แล้ว push
       # (ค่าที่กำหนดในไฟล์นี้จะเขียนทับค่าที่แก้ใน dashboard ทุกครั้งที่ Blueprint sync)
+      # เดิมตั้ง 3 ซึ่งเป็นจำนวนของทางยิงตรงไป Render — ผู้ใช้ทุกคนที่เข้าผ่านหน้าเว็บจึงได้ไอพีของ Vercel
+      # ทางตรงมี proxy น้อยกว่าหนึ่งชั้นจึงปลอมไอพีได้ ต้องตั้ง PROXY_SECRET ด้านล่างเพื่อปิดทางนั้น
       - key: TRUST_PROXY
-        value: "3"
+        value: "4"
+      # ต้องตรงกับ PROXY_SECRET ใน Environment Variables ของ Vercel (ดู DEPLOY.md ข้อ 7)
+      # ตั้งแล้ว API รับเฉพาะคำขอที่มาทางหน้าเว็บ (ยกเว้น /api/health) · เว้นว่าง = ยังไม่บังคับ
+      - key: PROXY_SECRET
+        sync: false
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET

@@ -6,8 +6,9 @@ import * as seatChangeService from '../services/seatChanges.js';
 export const createBooking = async (req, res, next) => {
   try {
     const booking = await bookingService.createBooking({
-      userId: req.user.id,
       ...req.body,
+      // ต่อท้าย body เสมอ — ถ้าวันหน้า schema ปล่อย key อื่นผ่าน body ก็ทับเจ้าของการจองไม่ได้
+      userId: req.user.id,
     });
     res.status(201).json({ booking });
   } catch (error) {
