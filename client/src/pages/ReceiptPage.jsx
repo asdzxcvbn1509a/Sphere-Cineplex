@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { Clapperboard, Printer, Ticket } from 'lucide-react';
 import clsx from 'clsx';
-import { apiError } from '../api/client.js';
 import { getReceipt } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useAuthUser } from '../store/authStore.js';
@@ -10,6 +9,7 @@ import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 import { formatDate, formatDateTime, formatMoney } from '../utils/format.js';
 
 /** เอกสารการเงินแสดงทศนิยม 2 ตำแหน่งเสมอ (560.00) แม้ระบบเก็บเงินเป็นบาทเต็ม */
@@ -25,18 +25,10 @@ const ReceiptPage = () => {
   const paymentId = searchParams.get('payment');
   const { t, lang, pick } = useI18n();
   const user = useAuthUser();
-  const [receipt, setReceipt] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
-
-  useEffect(() => {
-    setState({ loading: true, error: null });
-    getReceipt(bookingId, paymentId)
-      .then(({ data }) => {
-        setReceipt(data.receipt);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [bookingId, paymentId]);
+  const { data: receipt, loading, error } = useApi(
+    () => getReceipt(bookingId, paymentId).then(({ data }) => data.receipt),
+    [bookingId, paymentId],
+  );
 
   // "บันทึกเป็น PDF" ของเบราว์เซอร์ตั้งชื่อไฟล์ตาม title ของหน้า — ใช้เลขที่ใบเสร็จ ไฟล์จะได้ไม่ชื่อซ้ำกันทุกใบ
   useEffect(() => {
@@ -48,11 +40,11 @@ const ReceiptPage = () => {
     };
   }, [receipt]);
 
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-lg px-4 py-10">
-        <ErrorBlock message={state.error} />
+        <ErrorBlock message={error} />
       </div>
     );
   }

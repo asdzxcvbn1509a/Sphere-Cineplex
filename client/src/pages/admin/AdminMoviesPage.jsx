@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { apiError } from '../../api/client.js';
 import { createMovie, deleteMovie, listMovies, updateMovie } from '../../api/admin.js';
@@ -13,6 +13,7 @@ import Textarea from '../../components/ui/Textarea.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import useApi from '../../hooks/useApi.js';
 import { formatDate } from '../../utils/format.js';
 
 const emptyMovie = {
@@ -30,11 +31,9 @@ const emptyMovie = {
 };
 
 const AdminMoviesPage = () => {
-  const { t, lang } = useI18n();
+  const { t, lang, pick } = useI18n();
   const toast = useToast();
-  const [movies, setMovies] = useState([]);
   const [query, setQuery] = useState('');
-  const [state, setState] = useState({ loading: true, error: null });
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyMovie);
   const [saving, setSaving] = useState(false);
@@ -43,21 +42,12 @@ const AdminMoviesPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const titleOf = (movie) => (lang === 'en' ? movie.titleEn : movie.titleTh);
+  const { data: movies = [], loading, error, reload } = useApi(
+    () => listMovies().then(({ data }) => data.movies),
+    [],
+  );
 
-  const load = () => {
-    setState({ loading: true, error: null });
-    listMovies()
-      .then(({ data }) => {
-        setMovies(data.movies);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  };
-
-  useEffect(load, []);
-
-  // ได้หนังครบทุกเรื่องมาอยู่แล้ว จึงกรองฝั่ง client แบบหน้าแรก — ผลขึ้นทันที และคำค้นไม่หายตอน load() ใหม่หลังบันทึก/ลบ
+  // ได้หนังครบทุกเรื่องมาอยู่แล้ว จึงกรองฝั่ง client แบบหน้าแรก — ผลขึ้นทันที และคำค้นไม่หายตอน reload() หลังบันทึก/ลบ
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return movies;
@@ -104,7 +94,7 @@ const AdminMoviesPage = () => {
       else await updateMovie(editing, payload);
       toast.success(t('common.save'));
       setEditing(null);
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -117,9 +107,9 @@ const AdminMoviesPage = () => {
     setDeleting(true);
     try {
       await deleteMovie(deleteTarget.movie.id, { force });
-      toast.success(`${t('common.delete')}: ${titleOf(deleteTarget.movie)}`);
+      toast.success(`${t('common.delete')}: ${pick(deleteTarget.movie, 'title')}`);
       setDeleteTarget(null);
-      load();
+      reload();
     } catch (error) {
       const problem = apiError(error);
       // มีการจองค้างอยู่ — ยังไม่ลบให้ แต่เปิดตัวเลือกให้ตัดสินใจ
@@ -140,7 +130,7 @@ const AdminMoviesPage = () => {
       await updateMovie(deleteTarget.movie.id, { status: 'ARCHIVED' });
       toast.success(t('admin.movieForm.archivedInstead'));
       setDeleteTarget(null);
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -175,10 +165,10 @@ const AdminMoviesPage = () => {
         </div>
       </Field>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <div className="card overflow-x-auto">
           {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
           <table className="stack-table w-full min-w-180 text-sm sm:text-base">
@@ -365,7 +355,7 @@ const AdminMoviesPage = () => {
           <div className="flex flex-col gap-3 text-sm">
             <p className="text-muted">
               {t('admin.movieForm.deleteBlockedBody', {
-                title: titleOf(deleteTarget.movie),
+                title: pick(deleteTarget.movie, 'title'),
                 bookings: deleteTarget.blocked.bookingCount,
                 showtimes: deleteTarget.blocked.showtimeCount,
               })}
@@ -387,7 +377,7 @@ const AdminMoviesPage = () => {
           </div>
         ) : (
           <p className="text-sm text-muted">
-            {t('admin.movieForm.deleteBody', { title: deleteTarget && titleOf(deleteTarget.movie) })}
+            {t('admin.movieForm.deleteBody', { title: deleteTarget && pick(deleteTarget.movie, 'title') })}
           </p>
         )}
       </Modal>

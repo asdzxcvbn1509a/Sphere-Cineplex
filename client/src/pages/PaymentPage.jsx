@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, FileText, Hourglass, Ticket, TicketX } from 'lucide-react';
 import { apiError } from '../api/client.js';
@@ -12,6 +11,7 @@ import SlipUploadForm from '../components/payment/SlipUploadForm.jsx';
 import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
 import { formatDateTime, formatMoney, formatTime } from '../utils/format.js';
@@ -22,51 +22,34 @@ const PaymentPage = () => {
   const { t, lang } = useI18n();
   const toast = useToast();
 
-  const [booking, setBooking] = useState(null);
-  const [payment, setPayment] = useState(null);
-  // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = หมดเวลาแล้ว/ไม่ได้นับ)
-  const [holdDeadline, setHoldDeadline] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
-
-  const load = useCallback(
-    async (silent = false) => {
-      if (!silent) setState({ loading: true, error: null });
-      try {
-        const [bookingRes, paymentRes] = await Promise.all([
-          getBooking(bookingId),
-          getPayment(bookingId),
-        ]);
-        const nextPayment = paymentRes.data.payment;
-        setBooking(bookingRes.data.booking);
-        setPayment(nextPayment);
-        // นับถอยหลังจากวินาทีที่เหลือที่ server คำนวณ ไม่ใช่เทียบ holdExpiresAt กับนาฬิกาเครื่องลูกค้า
-        // เครื่องที่ตั้งเวลาช้าจะเห็นเวลาเหลือมากกว่าจริง แล้วโอนเงินไปทั้งที่ระบบปิดรับไปแล้ว
-        setHoldDeadline(
-          nextPayment.holdSecondsLeft > 0
-            ? new Date(Date.now() + nextPayment.holdSecondsLeft * 1000).toISOString()
-            : null,
-        );
-        setState({ loading: false, error: null });
-      } catch (error) {
-        setState({ loading: false, error: apiError(error).message });
-      }
-    },
-    [bookingId],
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, error, reload } = useApi(async () => {
+    const [bookingRes, paymentRes] = await Promise.all([getBooking(bookingId), getPayment(bookingId)]);
+    const nextPayment = paymentRes.data.payment;
+    return {
+      booking: bookingRes.data.booking,
+      payment: nextPayment,
+      // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = หมดเวลาแล้ว/ไม่ได้นับ)
+      // นับถอยหลังจากวินาทีที่เหลือที่ server คำนวณ ไม่ใช่เทียบ holdExpiresAt กับนาฬิกาเครื่องลูกค้า
+      // เครื่องที่ตั้งเวลาช้าจะเห็นเวลาเหลือมากกว่าจริง แล้วโอนเงินไปทั้งที่ระบบปิดรับไปแล้ว
+      holdDeadline:
+        nextPayment.holdSecondsLeft > 0
+          ? new Date(Date.now() + nextPayment.holdSecondsLeft * 1000).toISOString()
+          : null,
+    };
+  }, [bookingId]);
+  const booking = data?.booking;
+  const payment = data?.payment;
+  const holdDeadline = data?.holdDeadline ?? null;
 
   const status = booking?.status;
   // ส่งสลิปหลังหมดเวลาแล้วที่นั่งไม่ว่าง — การจองคงหมดเวลา แต่สลิปรอผู้ดูแลตรวจเพื่อคืนเงิน
   const lateWaiting = status === 'EXPIRED' && payment?.status === 'PENDING_VERIFICATION';
 
   // ระหว่างรอ admin ตรวจสลิป หน้าจะอัปเดตเองโดยไม่ต้องให้ผู้ใช้กดรีเฟรช
-  usePolling(() => load(true), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
+  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
 
   const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () =>
-    load(true),
+    reload({ silent: true }),
   );
 
   /** คืน true เมื่อส่งสำเร็จ — SlipUploadForm จะล้างไฟล์ที่เลือกไว้ */
@@ -74,7 +57,7 @@ const PaymentPage = () => {
     try {
       await uploadSlip(bookingId, file);
       toast.success(t('payment.waitingTitle'));
-      await load(true);
+      await reload({ silent: true });
       return true;
     } catch (error) {
       toast.error(apiError(error).message);
@@ -82,11 +65,11 @@ const PaymentPage = () => {
     }
   };
 
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-10">
-        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
       </div>
     );
   }

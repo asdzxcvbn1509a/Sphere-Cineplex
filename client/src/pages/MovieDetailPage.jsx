@@ -1,53 +1,43 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CalendarDays, Clock, Sofa } from 'lucide-react';
 import clsx from 'clsx';
-import { apiError } from '../api/client.js';
 import { getMovie } from '../api/movies.js';
 import { listShowtimes } from '../api/showtimes.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 import { bangkokDateKey, buildDateStrip, formatDate, formatMoney, formatTime, formatWeekday } from '../utils/format.js';
 
 const MovieDetailPage = () => {
   const { movieId } = useParams();
   const { t, lang, pick } = useI18n();
-
-  const [movie, setMovie] = useState(null);
-  // รอบที่ยังไม่เริ่มของทุกวัน — กดเปลี่ยนวันแค่กรองในเครื่อง ไม่ต้องรอโหลดใหม่
-  const [showtimes, setShowtimes] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
 
   const dateStrip = buildDateStrip(7);
   const todayKey = bangkokDateKey();
 
   // ขอพร้อมกันในรอบเดียว — เดิมรอรายละเอียดหนังเสร็จก่อนค่อยขอรอบของวันแรก แล้วขอใหม่ทุกครั้งที่กดเปลี่ยนวัน
-  const load = useCallback(() => {
-    setState({ loading: true, error: null });
-    Promise.all([getMovie(movieId), listShowtimes({ movieId })])
-      .then(([movieRes, showtimesRes]) => {
-        setMovie(movieRes.data.movie);
-        setShowtimes(showtimesRes.data.showtimes);
-        // เลือกวันแรกที่มีรอบฉายให้อัตโนมัติ ผู้ใช้จะได้เห็นรอบทันทีโดยไม่ต้องกดอะไรก่อน
-        setSelectedDate(movieRes.data.movie.availableDates?.[0] ?? todayKey);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
+  const { data, loading, error, reload } = useApi(async () => {
+    const [movieRes, showtimesRes] = await Promise.all([getMovie(movieId), listShowtimes({ movieId })]);
+    // เลือกวันแรกที่มีรอบฉายให้อัตโนมัติ ผู้ใช้จะได้เห็นรอบทันทีโดยไม่ต้องกดอะไรก่อน
+    setSelectedDate(movieRes.data.movie.availableDates?.[0] ?? todayKey);
+    return { movie: movieRes.data.movie, showtimes: showtimesRes.data.showtimes };
   }, [movieId, todayKey]);
 
-  useEffect(load, [load]);
-
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
-        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
       </div>
     );
   }
+
+  // รอบที่ยังไม่เริ่มของทุกวัน — กดเปลี่ยนวันแค่กรองในเครื่อง ไม่ต้องรอโหลดใหม่
+  const { movie, showtimes } = data;
 
   // ตัดรอบที่เริ่มไปแล้วระหว่างเปิดหน้าค้างไว้ด้วย (เดิมได้จากการโหลดใหม่ทุกครั้งที่กดวัน)
   const now = Date.now();

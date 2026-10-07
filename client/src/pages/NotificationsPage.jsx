@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BellOff, CheckCheck } from 'lucide-react';
 import clsx from 'clsx';
-import { apiError } from '../api/client.js';
 import { useNotificationStore } from '../store/notificationStore.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import Button from '../components/ui/Button.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 import { formatDateTime } from '../utils/format.js';
 
 const typeTone = {
@@ -36,7 +35,6 @@ const linkFor = (item) => {
 
 const NotificationsPage = () => {
   const { t, lang, pick } = useI18n();
-  const [state, setState] = useState({ loading: true, error: null });
 
   // ใช้ store เดียวกับกระดิ่งบน Header ตัวเลขจึงเปลี่ยนพร้อมกันทั้งสองที่
   const items = useNotificationStore((store) => store.items);
@@ -45,14 +43,8 @@ const NotificationsPage = () => {
   const markAllRead = useNotificationStore((store) => store.markAllRead);
   const markRead = useNotificationStore((store) => store.markRead);
 
-  const load = useCallback(() => {
-    setState({ loading: true, error: null });
-    fetchNotifications()
-      .then(() => setState({ loading: false, error: null }))
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [fetchNotifications]);
-
-  useEffect(load, [load]);
+  // รายการอยู่ใน store — หน้านี้ดูแลแค่สถานะการโหลด
+  const { loading, error, reload } = useApi(() => fetchNotifications(), [fetchNotifications]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -72,10 +64,10 @@ const NotificationsPage = () => {
         )}
       </div>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <EmptyState icon={BellOff} title={t('notifications.empty')} />
       )}
 

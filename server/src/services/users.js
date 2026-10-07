@@ -1,8 +1,9 @@
 import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { hashPassword } from '../utils/password.js';
-import { isValidThaiMobile, normalizePhone } from '../utils/phone.js';
-import { toPage } from '../utils/pagination.js';
+import { normalizePhone, requireThaiMobile } from '../utils/phone.js';
+import { findPage } from '../utils/pagination.js';
+import { normalizeEmail, revokeAllSessions } from './auth.js';
 
 /**
  * ผู้ดูแลระบบเห็นข้อมูลผู้ใช้ได้เท่าที่จำเป็นต่อการช่วยลูกค้า
@@ -18,7 +19,12 @@ const shapeUser = (user) => ({
   bookingCount: user._count?.bookings ?? 0,
 });
 
-const normalizeEmail = (raw) => String(raw ?? '').trim().toLowerCase();
+/** จำนวนการจองของบัญชี — หน้าผู้ใช้โชว์ และใช้ตัดสินว่าลบบัญชีได้ไหม */
+const WITH_BOOKING_COUNT = { _count: { select: { bookings: true } } };
+
+const userNotFound = () => {
+  return ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+};
 
 const duplicateFieldError = (target) => {
   const fields = Array.isArray(target) ? target : [target];
@@ -32,7 +38,6 @@ const duplicateFieldError = (target) => {
 };
 
 export const listUsers = async ({ q, role, page, pageSize } = {}) => {
-  const paging = toPage({ page, pageSize });
   const where = {};
   if (role) where.role = role;
   if (q) {
@@ -44,27 +49,17 @@ export const listUsers = async ({ q, role, page, pageSize } = {}) => {
     ];
   }
 
-  // อ่านอย่างเดียว ยิงพร้อมกัน — เหตุผลเดียวกับ listAllBookings ใน services/bookings.js
-  const [users, total] = await Promise.all([
-    prisma.user.findMany({
-      where,
-      include: { _count: { select: { bookings: true } } },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: paging.skip,
-      take: paging.take,
-    }),
-    prisma.user.count({ where }),
-  ]);
-
-  return { items: users.map(shapeUser), total, page: paging.page, pageSize: paging.pageSize };
+  const { rows, ...pageInfo } = await findPage(
+    prisma.user,
+    { where, include: WITH_BOOKING_COUNT, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] },
+    { page, pageSize },
+  );
+  return { items: rows.map(shapeUser), ...pageInfo };
 };
 
 export const getUser = async (userId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { _count: { select: { bookings: true } } },
-  });
-  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: WITH_BOOKING_COUNT });
+  if (!user) throw userNotFound();
   return shapeUser(user);
 };
 
@@ -76,7 +71,7 @@ export const getUser = async (userId) => {
  */
 export const updateUser = async ({ userId, actorId, name, email, phone, role }) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+  if (!user) throw userNotFound();
 
   if (role && role !== user.role && userId === actorId) {
     throw ApiError.badRequest(
@@ -88,20 +83,14 @@ export const updateUser = async ({ userId, actorId, name, email, phone, role }) 
   const data = {};
   if (name !== undefined) data.name = name.trim();
   if (email !== undefined) data.email = normalizeEmail(email);
-  if (phone !== undefined) {
-    const normalized = normalizePhone(phone);
-    if (!isValidThaiMobile(normalized)) {
-      throw ApiError.badRequest('INVALID_PHONE', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ต้องเป็นเบอร์มือถือ 10 หลัก)');
-    }
-    data.phone = normalized;
-  }
+  if (phone !== undefined) data.phone = requireThaiMobile(phone);
   if (role !== undefined) data.role = role;
 
   try {
     const updated = await prisma.user.update({
       where: { id: userId },
       data,
-      include: { _count: { select: { bookings: true } } },
+      include: WITH_BOOKING_COUNT,
     });
     return shapeUser(updated);
   } catch (error) {
@@ -125,7 +114,7 @@ export const resetUserPassword = async ({ userId, actorId, newPassword }) => {
   }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+  if (!user) throw userNotFound();
 
   await prisma.$transaction([
     prisma.user.update({
@@ -133,10 +122,7 @@ export const resetUserPassword = async ({ userId, actorId, newPassword }) => {
       // access token ที่ค้างอยู่ในเครื่องคนที่ยึดบัญชีไปก็ใช้ไม่ได้ทันทีด้วย ไม่ใช่แค่ refresh token
       data: { passwordHash: await hashPassword(newPassword), tokenVersion: { increment: 1 } },
     }),
-    prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    }),
+    revokeAllSessions(userId),
   ]);
 
   return { ok: true };
@@ -153,11 +139,8 @@ export const deleteUser = async ({ userId, actorId }) => {
     throw ApiError.badRequest('CANNOT_DELETE_SELF', 'ลบบัญชีของตัวเองไม่ได้');
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { _count: { select: { bookings: true } } },
-  });
-  if (!user) throw ApiError.notFound('USER_NOT_FOUND', 'ไม่พบบัญชีผู้ใช้');
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: WITH_BOOKING_COUNT });
+  if (!user) throw userNotFound();
 
   if (user._count.bookings > 0) {
     throw ApiError.conflict(

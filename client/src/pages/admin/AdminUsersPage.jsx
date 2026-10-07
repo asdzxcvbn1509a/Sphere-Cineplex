@@ -8,7 +8,7 @@ import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useAuthUser } from '../../store/authStore.js';
 import Button from '../../components/ui/Button.jsx';
-import Modal from '../../components/ui/Modal.jsx';
+import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
 import Select from '../../components/ui/Select.jsx';
@@ -16,6 +16,7 @@ import PasswordInput from '../../components/ui/PasswordInput.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
+import { usePagedApi } from '../../hooks/useApi.js';
 import { formatDateTime } from '../../utils/format.js';
 
 const EMPTY_EDIT = { name: '', email: '', phone: '', role: 'USER' };
@@ -25,12 +26,9 @@ const AdminUsersPage = () => {
   const toast = useToast();
   const me = useAuthUser();
 
-  const [users, setUsers] = useState([]);
   // page อยู่ใน filters ด้วย — เปลี่ยนตัวกรองแล้วกลับหน้า 1 ได้ในการ set ครั้งเดียว
   const [filters, setFilters] = useState({ q: '', role: '', page: 1 });
-  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [search, setSearch] = useState('');
-  const [state, setState] = useState({ loading: true, error: null });
 
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState(EMPTY_EDIT);
@@ -43,23 +41,17 @@ const AdminUsersPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => {
-    setState({ loading: true, error: null });
-    listUsers(filters)
-      .then(({ data }) => {
-        // หน้าสุดท้ายว่างลงหลังลบบัญชี — ถอยไปหน้าก่อนหน้าแทนโชว์ตารางว่าง
-        if (data.users.length === 0 && filters.page > 1) {
-          setFilters((current) => ({ ...current, page: current.page - 1 }));
-          return;
-        }
-        setUsers(data.users);
-        setMeta({ total: data.total, pageSize: data.pageSize });
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [filters]);
-
-  useEffect(load, [load]);
+  // หน้าสุดท้ายว่างลงหลังลบบัญชี — usePagedApi พาไปหน้าสุดท้ายที่ยังมีรายการแทนโชว์ตารางว่าง
+  const setPage = useCallback((page) => setFilters((current) => ({ ...current, page })), []);
+  const { data, loading, error, reload } = usePagedApi(
+    async () => {
+      const { data: body } = await listUsers(filters);
+      return { items: body.users, total: body.total, pageSize: body.pageSize };
+    },
+    { page: filters.page, setPage },
+    [filters],
+  );
+  const users = data?.items ?? [];
 
   // พิมพ์ไปค้นไป หน่วง 400ms หลังหยุดพิมพ์ ไม่ให้ยิง API ทุกตัวอักษร
   useEffect(() => {
@@ -88,7 +80,7 @@ const AdminUsersPage = () => {
       await updateUser(editTarget.id, editForm);
       toast.success(t('admin.userPage.saved'));
       setEditTarget(null);
-      load();
+      reload();
     } catch (error) {
       const { code, message, details } = apiError(error);
       if (Array.isArray(details) && details.length) {
@@ -131,7 +123,7 @@ const AdminUsersPage = () => {
       await deleteUser(deleteTarget.id);
       toast.success(t('admin.userPage.deleted'));
       setDeleteTarget(null);
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -175,10 +167,10 @@ const AdminUsersPage = () => {
         </Field>
       </div>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <div className="card overflow-x-auto">
           {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
           <table className="stack-table w-full min-w-190 text-sm">
@@ -286,31 +278,25 @@ const AdminUsersPage = () => {
         </div>
       )}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <Pagination
           className="mt-4"
           page={filters.page}
-          pageSize={meta.pageSize}
-          total={meta.total}
-          onChange={(page) => setFilters((current) => ({ ...current, page }))}
+          pageSize={data.pageSize}
+          total={data.total}
+          onChange={setPage}
         />
       )}
 
-      <Modal
+      <ConfirmModal
         open={Boolean(editTarget)}
         onClose={() => setEditTarget(null)}
         title={t('admin.userPage.editTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setEditTarget(null)}>
-              {t('common.close')}
-            </Button>
-            <Button loading={busy} onClick={saveEdit}>
-              {t('common.save')}
-            </Button>
-          </>
-        }
+        cancelLabel={t('common.close')}
+        confirmLabel={t('common.save')}
+        variant="primary"
+        loading={busy}
+        onConfirm={saveEdit}
       >
         <div className="flex flex-col gap-3">
           <Field label={t('register.nameLabel')} error={editError.name}>
@@ -338,23 +324,17 @@ const AdminUsersPage = () => {
           </Field>
           {editError.form && <p className="text-sm text-danger">{editError.form}</p>}
         </div>
-      </Modal>
+      </ConfirmModal>
 
-      <Modal
+      <ConfirmModal
         open={Boolean(passwordTarget)}
         onClose={() => setPasswordTarget(null)}
         title={t('admin.userPage.resetTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPasswordTarget(null)}>
-              {t('common.close')}
-            </Button>
-            <Button loading={busy} onClick={savePassword}>
-              {t('admin.userPage.resetConfirm')}
-            </Button>
-          </>
-        }
+        cancelLabel={t('common.close')}
+        confirmLabel={t('admin.userPage.resetConfirm')}
+        variant="primary"
+        loading={busy}
+        onConfirm={savePassword}
       >
         <p className="mb-4 text-sm text-muted">
           {t('admin.userPage.resetBody', { name: passwordTarget?.name })}
@@ -371,28 +351,21 @@ const AdminUsersPage = () => {
             onChange={(event) => setNewPassword(event.target.value)}
           />
         </Field>
-      </Modal>
+      </ConfirmModal>
 
-      <Modal
+      <ConfirmModal
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         title={t('admin.userPage.deleteTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-              {t('common.close')}
-            </Button>
-            <Button variant="danger" loading={busy} onClick={confirmDelete}>
-              {t('common.delete')}
-            </Button>
-          </>
-        }
+        cancelLabel={t('common.close')}
+        confirmLabel={t('common.delete')}
+        loading={busy}
+        onConfirm={confirmDelete}
       >
         <p className="text-sm text-muted">
           {t('admin.userPage.deleteBody', { name: deleteTarget?.name, email: deleteTarget?.email })}
         </p>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 };

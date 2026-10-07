@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { BadgeCheck, Copy, Info, Pencil, ReceiptText, Upload } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
@@ -7,6 +7,7 @@ import { useI18n } from '../../context/I18nContext.jsx';
 import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
+import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Textarea from '../../components/ui/Textarea.jsx';
@@ -16,6 +17,7 @@ import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import SlipImage from '../../components/ui/SlipImage.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
+import { usePagedApi } from '../../hooks/useApi.js';
 import usePolling from '../../hooks/usePolling.js';
 import { formatDateTime, formatMoney } from '../../utils/format.js';
 
@@ -28,13 +30,10 @@ const refundOf = (item) => item.refundAmount ?? item.amount;
 const isSeatChangeMoney = (item) => item.kind && item.kind !== 'BOOKING';
 
 const AdminRefundsPage = () => {
-  const { t, lang } = useI18n();
+  const { t, lang, pick } = useI18n();
   const toast = useToast();
   const [tab, setTab] = useState('REFUND_PENDING');
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
-  const [refunds, setRefunds] = useState([]);
-  const [state, setState] = useState({ loading: true, error: null });
 
   // target = รายการที่เปิดหน้าต่างอยู่ — รอคืนเงิน = บันทึกการคืน, คืนแล้ว = แก้ไขรายการ
   const [target, setTarget] = useState(null);
@@ -49,33 +48,21 @@ const AdminRefundsPage = () => {
   const pendingRefunds = useAdminQueueStore((state) => state.pendingRefunds);
   const pendingRefundAmount = useAdminQueueStore((state) => state.pendingRefundAmount);
 
-  const load = useCallback(
-    (silent = false) => {
-      if (!silent) setState({ loading: true, error: null });
-      return listRefunds(tab, { page })
-        .then(({ data }) => {
-          // บันทึกคืนเงินใบสุดท้ายของหน้าแล้ว — ถอยไปหน้าก่อนหน้า
-          if (data.refunds.length === 0 && page > 1) {
-            setPage((current) => current - 1);
-            return;
-          }
-          setRefunds(data.refunds);
-          setMeta({ total: data.total, pageSize: data.pageSize });
-          setState({ loading: false, error: null });
-          // เช่นเดียวกับคิวตรวจสลิป กดบันทึกคืนเงินแล้วป้ายต้องลดลงเลย
-          refreshCounts();
-        })
-        .catch((error) => setState({ loading: false, error: apiError(error).message }));
+  // บันทึกคืนเงินใบสุดท้ายของหน้าแล้ว usePagedApi พาไปหน้าสุดท้ายที่ยังมีรายการเอง
+  const { data, loading, error, reload } = usePagedApi(
+    async () => {
+      const { data: body } = await listRefunds(tab, { page });
+      // เช่นเดียวกับคิวตรวจสลิป กดบันทึกคืนเงินแล้วป้ายต้องลดลงเลย
+      refreshCounts();
+      return { items: body.refunds, total: body.total, pageSize: body.pageSize };
     },
+    { page, setPage },
     [tab, page, refreshCounts],
   );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const refunds = data?.items ?? [];
 
   // มีการยกเลิกเข้ามาระหว่างเปิดหน้าอยู่ได้ตลอด จึงรีเฟรชคิวเองเป็นระยะ
-  usePolling(() => load(true), 20000, tab === 'REFUND_PENDING');
+  usePolling(() => reload({ silent: true }), 20000, tab === 'REFUND_PENDING');
 
   const openTarget = (item) => {
     setTarget(item);
@@ -96,10 +83,10 @@ const AdminRefundsPage = () => {
       setTarget(null);
       setNote('');
       setFile(null);
-      load(true);
+      reload({ silent: true });
     } catch (error) {
       toast.error(apiError(error).message);
-      load(true);
+      reload({ silent: true });
     } finally {
       setBusy(false);
     }
@@ -157,10 +144,10 @@ const AdminRefundsPage = () => {
           </p>
         )}
 
-        {state.loading && <LoadingBlock label={t('common.loading')} />}
-        {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+        {loading && <LoadingBlock label={t('common.loading')} />}
+        {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-        {!state.loading && !state.error && refunds.length === 0 && (
+        {!loading && !error && refunds.length === 0 && (
           <EmptyState
             compact
             icon={BadgeCheck}
@@ -187,9 +174,7 @@ const AdminRefundsPage = () => {
             )}
 
             <p className="mt-2 text-base font-bold sm:text-lg">
-              {lang === 'en'
-                ? item.booking.showtime.movie.titleEn
-                : item.booking.showtime.movie.titleTh}
+              {pick(item.booking.showtime.movie, 'title')}
             </p>
             <p className="text-sm text-muted sm:text-base">
               {item.booking.showtime.theatre.name} ·{' '}
@@ -274,27 +259,21 @@ const AdminRefundsPage = () => {
           </article>
         ))}
 
-        {!state.loading && !state.error && (
-          <Pagination page={page} pageSize={meta.pageSize} total={meta.total} onChange={setPage} />
+        {!loading && !error && (
+          <Pagination page={page} pageSize={data.pageSize} total={data.total} onChange={setPage} />
         )}
       </div>
 
-      <Modal
+      {/* บันทึกการคืนต้องมีสลิป (ลูกค้าเปิดดูเป็นหลักฐานได้) ส่วนตอนแก้ไขไม่แนบ = ใช้สลิปเดิม */}
+      <ConfirmModal
         open={Boolean(target)}
         onClose={() => setTarget(null)}
         title={editing ? t('admin.refundPage.editTitle') : t('admin.refundPage.confirmTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setTarget(null)}>
-              {t('common.cancel')}
-            </Button>
-            {/* บันทึกการคืนต้องมีสลิป (ลูกค้าเปิดดูเป็นหลักฐานได้) ส่วนตอนแก้ไขไม่แนบ = ใช้สลิปเดิม */}
-            <Button variant="success" loading={busy} disabled={!editing && !file} onClick={submit}>
-              {t('common.save')}
-            </Button>
-          </>
-        }
+        variant="success"
+        confirmLabel={t('common.save')}
+        loading={busy}
+        disabled={!editing && !file}
+        onConfirm={submit}
       >
         <p className="mb-3 text-sm text-muted">
           {t(editing ? 'admin.refundPage.editBody' : 'admin.refundPage.confirmBody', {
@@ -356,7 +335,7 @@ const AdminRefundsPage = () => {
             maxLength={200}
           />
         </Field>
-      </Modal>
+      </ConfirmModal>
 
       {/* แบบเดียวกับที่ลูกค้าเห็นในหน้าการจองของฉัน + ชื่อผู้ดูแลที่บันทึก */}
       <Modal

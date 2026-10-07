@@ -1,6 +1,7 @@
 import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { APP_URL, env } from '../config/env.js';
+import { bookingNotFound, canAccessBooking, notBookingOwner } from '../utils/bookingAccess.js';
 import { sendMail } from '../utils/mailer.js';
 import { formatReceiptNo, receiptYear, shapeReceipt } from '../utils/receipt.js';
 import { receiptEmail } from '../emails/receipt.js';
@@ -61,9 +62,9 @@ export const issueReceiptNo = async (client, at = new Date()) => {
  */
 export const getReceipt = async ({ bookingId, paymentId, requester }) => {
   const booking = await loadReceiptBooking(bookingId);
-  if (!booking) throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
-  if (requester.role !== 'ADMIN' && booking.userId !== requester.id) {
-    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์ดูใบเสร็จของรายการนี้');
+  if (!booking) throw bookingNotFound();
+  if (!canAccessBooking(requester, booking.userId)) {
+    throw notBookingOwner('ไม่มีสิทธิ์ดูใบเสร็จของรายการนี้');
   }
   // ออกให้เฉพาะใบที่อนุมัติแล้วการจองเป็น PAID — สลิปที่ส่งหลังหมดเวลาแล้วเข้าคิวคืนเงินทันทีไม่มีใบเสร็จ
   const payment = await receiptPayment(booking, paymentId);

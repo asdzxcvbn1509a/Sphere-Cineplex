@@ -17,3 +17,19 @@ export const paginationQuery = {
 export const toPage = ({ page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}) => {
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 };
+
+/**
+ * อ่านหนึ่งหน้าของรายการพร้อมจำนวนทั้งหมด — delegate คือ prisma.booking, prisma.payment ฯลฯ
+ * query = where / include / orderBy ของ findMany (orderBy ควรลงท้ายด้วย id ให้ลำดับคงที่ระหว่างหน้า)
+ *
+ * อ่านอย่างเดียว ยิงสองคำสั่งพร้อมกันได้ — ห่อ transaction ไม่ได้ทำให้สองคำสั่งเห็นข้อมูลชุดเดียวกัน
+ * (READ COMMITTED แต่ละคำสั่งเห็น snapshot ของตัวเอง) ได้แค่ BEGIN/COMMIT เพิ่มและต้องรอกันทีละคำสั่ง
+ */
+export const findPage = async (delegate, query, { page, pageSize } = {}) => {
+  const paging = toPage({ page, pageSize });
+  const [rows, total] = await Promise.all([
+    delegate.findMany({ ...query, skip: paging.skip, take: paging.take }),
+    delegate.count({ where: query.where }),
+  ]);
+  return { rows, total, page: paging.page, pageSize: paging.pageSize };
+};

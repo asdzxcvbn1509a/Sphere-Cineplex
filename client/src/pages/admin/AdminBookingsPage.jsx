@@ -6,7 +6,7 @@ import { cancelBooking, listAllBookings } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
-import Modal from '../../components/ui/Modal.jsx';
+import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
 import Select from '../../components/ui/Select.jsx';
@@ -15,6 +15,7 @@ import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
+import { usePagedApi } from '../../hooks/useApi.js';
 import { formatDateTime, formatMoney } from '../../utils/format.js';
 
 const STATUSES = ['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID', 'CANCELLED', 'EXPIRED'];
@@ -51,42 +52,30 @@ const movedCount = (booking) => {
 };
 
 const AdminBookingsPage = () => {
-  const { t, lang } = useI18n();
+  const { t, lang, pick } = useI18n();
   const toast = useToast();
-  const [bookings, setBookings] = useState([]);
   const location = useLocation();
   // ตัวกรองเริ่มจาก URL — กลับมาจากใบเสร็จ/ย้ายที่นั่ง
   // หรือ ?q= จากลิงก์ในหน้าจัดการผู้ใช้ (กดที่จำนวนการจองแล้วมาดูรายการของคนนั้นเลย)
   const [searchParams, setSearchParams] = useSearchParams();
   // page อยู่ใน filters ด้วย — เปลี่ยนตัวกรองแล้วกลับหน้า 1 ได้ในการ set ครั้งเดียว ไม่โหลดซ้ำสองรอบ
   const [filters, setFilters] = useState(() => readFilters(searchParams));
-  const [meta, setMeta] = useState({ total: 0, pageSize: 50 });
   const [search, setSearch] = useState(filters.q);
-  const [state, setState] = useState({ loading: true, error: null });
   const [cancelTarget, setCancelTarget] = useState(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => {
-    setState({ loading: true, error: null });
-    listAllBookings(filters)
-      .then(({ data }) => {
-        // หน้าเกินหน้าสุดท้าย (ยกเลิกใบสุดท้ายของหน้า หรือ ?page= ใน URL เก่า) — ไปหน้าสุดท้ายที่มีข้อมูลแทนโชว์ตารางว่าง
-        // คิดจาก total ในคำตอบ ไม่ลบหนึ่งจากหน้าปัจจุบัน — ?page=500 ไปถึงในรอบเดียว
-        // และคำตอบซ้ำ (StrictMode โหลดสองรอบ) ไม่ถอยเลยไปถึงหน้า 0 ซึ่ง server ตอบ 422
-        const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
-        if (data.bookings.length === 0 && filters.page > lastPage) {
-          setFilters((current) => (current.page > lastPage ? { ...current, page: lastPage } : current));
-          return;
-        }
-        setBookings(data.bookings);
-        setMeta({ total: data.total, pageSize: data.pageSize });
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [filters]);
-
-  useEffect(load, [load]);
+  // หน้าเกินหน้าสุดท้าย (ยกเลิกใบสุดท้ายของหน้า หรือ ?page= ใน URL เก่า) — usePagedApi พาไปหน้าสุดท้ายที่มีข้อมูลเอง
+  const setPage = useCallback((page) => setFilters((current) => ({ ...current, page })), []);
+  const { data, loading, error, reload } = usePagedApi(
+    async () => {
+      const { data: body } = await listAllBookings(filters);
+      return { items: body.bookings, total: body.total, pageSize: body.pageSize };
+    },
+    { page: filters.page, setPage },
+    [filters],
+  );
+  const bookings = data?.items ?? [];
 
   /**
    * ค้นหาแบบพิมพ์ไปค้นไป — หน่วง 400ms หลังหยุดพิมพ์ค่อยยิง API
@@ -120,7 +109,7 @@ const AdminBookingsPage = () => {
       toast.success(t('bookings.statusCANCELLED'));
       setCancelTarget(null);
       setReason('');
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -177,10 +166,10 @@ const AdminBookingsPage = () => {
         </Field>
       </div>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <div className="card overflow-x-auto">
           {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
           <table className="stack-table w-full min-w-190 text-sm">
@@ -217,7 +206,7 @@ const AdminBookingsPage = () => {
                     <p className="text-[11px] text-muted">{booking.user?.phone}</p>
                   </td>
                   <td className="px-4 py-3" data-label={t('admin.showtimes')}>
-                    {lang === 'en' ? booking.showtime.movie.titleEn : booking.showtime.movie.titleTh}
+                    {pick(booking.showtime.movie, 'title')}
                     <p className="text-[11px] text-muted">
                       {booking.showtime.theatre.name} · {formatDateTime(booking.showtime.startsAt, lang)}
                     </p>
@@ -280,31 +269,24 @@ const AdminBookingsPage = () => {
         </div>
       )}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <Pagination
           className="mt-4"
           page={filters.page}
-          pageSize={meta.pageSize}
-          total={meta.total}
-          onChange={(page) => setFilters((current) => ({ ...current, page }))}
+          pageSize={data.pageSize}
+          total={data.total}
+          onChange={setPage}
         />
       )}
 
-      <Modal
+      <ConfirmModal
         open={Boolean(cancelTarget)}
         onClose={() => setCancelTarget(null)}
         title={t('bookings.cancelTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setCancelTarget(null)}>
-              {t('common.close')}
-            </Button>
-            <Button variant="danger" loading={busy} onClick={handleCancel}>
-              {t('bookings.cancel')}
-            </Button>
-          </>
-        }
+        cancelLabel={t('common.close')}
+        confirmLabel={t('bookings.cancel')}
+        loading={busy}
+        onConfirm={handleCancel}
       >
         <p className="mb-3 text-sm text-muted">
           {t('bookings.cancelBody', { code: cancelTarget?.code })}
@@ -312,7 +294,7 @@ const AdminBookingsPage = () => {
         <Field label={t('admin.paymentQueue.rejectReason')}>
           <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={200} />
         </Field>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 };

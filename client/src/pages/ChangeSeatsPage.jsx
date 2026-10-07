@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Clock3, Info, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
@@ -12,13 +12,14 @@ import RefundAccountFields from '../components/booking/RefundAccountFields.jsx';
 import BottomBar from '../components/layout/BottomBar.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
+import ConfirmModal from '../components/ui/ConfirmModal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import Field from '../components/ui/Field.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
-import Modal from '../components/ui/Modal.jsx';
 import Textarea from '../components/ui/Textarea.jsx';
 import SeatMap from '../components/seatmap/SeatMap.jsx';
 import SeatLegend from '../components/seatmap/SeatLegend.jsx';
+import useApi from '../hooks/useApi.js';
 import { EMPTY_REFUND_FORM, readRefundAccountForm } from '../utils/banks.js';
 import { formatDate, formatMoney, formatTime } from '../utils/format.js';
 import { previewSeatChange, sameZones } from '../utils/seatChange.js';
@@ -40,51 +41,37 @@ const ChangeSeatsPage = ({ admin = false }) => {
   const { t, lang, pick } = useI18n();
   const toast = useToast();
 
-  const [booking, setBooking] = useState(null);
-  const [seatMap, setSeatMap] = useState(null);
   const [selected, setSelected] = useState([]);
-  const [state, setState] = useState({ loading: true, error: null });
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [refundForm, setRefundForm] = useState(EMPTY_REFUND_FORM);
   const [refundErrors, setRefundErrors] = useState({});
   const [reason, setReason] = useState('');
 
-  const load = useCallback(
-    async (silent = false) => {
-      if (!silent) setState({ loading: true, error: null });
-      try {
-        const { data } = await getBooking(bookingId);
-        const next = data.booking;
-        // มีคำขอที่รอโอนส่วนต่างค้างอยู่ — ลูกค้าต้องไปจัดการคำขอนั้นก่อน (โอนต่อหรือยกเลิก)
-        if (!admin && next.seatChange.open) {
-          navigate(`/booking/${next.id}/seat-change/${next.seatChange.open.id}`, { replace: true });
-          return;
-        }
-        const map = await getSeatMap(next.showtime.id);
-        const ownIds = next.seats.map((seat) => seat.id);
-        const free = new Set(
-          map.data.rows
-            .flatMap((row) => row.seats)
-            .filter((seat) => seat.status === 'AVAILABLE' || ownIds.includes(seat.id))
-            .map((seat) => seat.id),
-        );
-        setBooking(next);
-        setSeatMap(map.data);
-        // โหลดครั้งแรกเริ่มจากที่นั่งเดิม · โหลดซ้ำ (ที่นั่งถูกตัดหน้า) ตัดเฉพาะที่นั่งที่ไม่ว่างแล้วออก
-        // ที่นั่งเดิมที่ผู้ดูแลปิดใช้งาน (เช่น ชำรุด) ไม่อยู่ในผัง ถ้าปล่อยไว้ใน selected จะแตะเอาออกไม่ได้จนเลือกที่ใหม่ไม่ได้เลย
-        setSelected((current) => (silent ? current : ownIds).filter((id) => free.has(id)));
-        setState({ loading: false, error: null });
-      } catch (error) {
-        setState({ loading: false, error: apiError(error).message });
-      }
-    },
-    [bookingId, admin, navigate],
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  // คืน null = มีคำขอที่รอโอนส่วนต่างค้างอยู่และกำลังพาไปหน้านั้น (หน้านี้โชว์ loading ระหว่างเปลี่ยนหน้า)
+  const { data, loading, error, reload } = useApi(async ({ silent }) => {
+    const { data: body } = await getBooking(bookingId);
+    const next = body.booking;
+    // มีคำขอที่รอโอนส่วนต่างค้างอยู่ — ลูกค้าต้องไปจัดการคำขอนั้นก่อน (โอนต่อหรือยกเลิก)
+    if (!admin && next.seatChange.open) {
+      navigate(`/booking/${next.id}/seat-change/${next.seatChange.open.id}`, { replace: true });
+      return null;
+    }
+    const map = await getSeatMap(next.showtime.id);
+    const ownIds = next.seats.map((seat) => seat.id);
+    const free = new Set(
+      map.data.rows
+        .flatMap((row) => row.seats)
+        .filter((seat) => seat.status === 'AVAILABLE' || ownIds.includes(seat.id))
+        .map((seat) => seat.id),
+    );
+    // โหลดครั้งแรกเริ่มจากที่นั่งเดิม · โหลดซ้ำ (ที่นั่งถูกตัดหน้า) ตัดเฉพาะที่นั่งที่ไม่ว่างแล้วออก
+    // ที่นั่งเดิมที่ผู้ดูแลปิดใช้งาน (เช่น ชำรุด) ไม่อยู่ในผัง ถ้าปล่อยไว้ใน selected จะแตะเอาออกไม่ได้จนเลือกที่ใหม่ไม่ได้เลย
+    setSelected((current) => (silent ? current : ownIds).filter((id) => free.has(id)));
+    return { booking: next, seatMap: map.data };
+  }, [bookingId, admin, navigate]);
+  const booking = data?.booking;
+  const seatMap = data?.seatMap;
 
   const seatsById = useMemo(() => {
     const map = new Map();
@@ -94,14 +81,15 @@ const ChangeSeatsPage = ({ admin = false }) => {
     return map;
   }, [seatMap]);
 
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
-        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
       </div>
     );
   }
+  if (!data) return <LoadingBlock label={t('common.loading')} />;
 
   // ผู้ดูแลเปิดมาจากตารางการจอง (ลิงก์ส่ง state.from มา) — กลับไปหน้าเดิมพร้อมตัวกรองที่ค้างไว้
   const from = location.state?.from;
@@ -176,7 +164,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
       if (problem.code === 'SEAT_TAKEN') {
         toast.error(t('seats.seatTaken', { seats: problem.details?.seats?.join(', ') ?? '' }));
         setConfirming(false);
-        await load(true);
+        await reload({ silent: true });
       } else if (problem.code === 'SEAT_CHANGE_PENDING' && problem.details?.seatChangeId && !admin) {
         navigate(`/booking/${bookingId}/seat-change/${problem.details.seatChangeId}`);
       } else {
@@ -228,7 +216,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
           </p>
         </div>
         {!blockedReason && (
-          <Button variant="ghost" size="sm" onClick={() => load(true)}>
+          <Button variant="ghost" size="sm" onClick={() => reload({ silent: true })}>
             <RefreshCw size={14} /> {t('seats.refreshMap')}
           </Button>
         )}
@@ -329,21 +317,14 @@ const ChangeSeatsPage = ({ admin = false }) => {
         </div>
       </BottomBar>
 
-      <Modal
+      <ConfirmModal
         open={confirming}
         onClose={() => setConfirming(false)}
         title={t('seatChange.confirmTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfirming(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button loading={submitting} onClick={submit}>
-              {preview.diffAmount > 0 ? t('seatChange.payDifference', { amount }) : t('seatChange.confirm')}
-            </Button>
-          </>
-        }
+        variant="primary"
+        confirmLabel={preview.diffAmount > 0 ? t('seatChange.payDifference', { amount }) : t('seatChange.confirm')}
+        loading={submitting}
+        onConfirm={submit}
       >
         <div className="flex flex-col gap-3 text-sm">
           <p className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 font-semibold">
@@ -377,7 +358,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
             </Field>
           )}
         </div>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 };

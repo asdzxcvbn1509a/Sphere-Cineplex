@@ -6,20 +6,36 @@ import { generatePaymentReference } from '../utils/codes.js';
 import { toPriceMap } from '../utils/pricing.js';
 import { createPromptPayPayload } from '../utils/promptpay.js';
 import { planSeatChange, sameZones } from '../utils/seatChange.js';
+import { compareIds, seatLabels } from '../utils/seats.js';
+import {
+  bookingNotFound,
+  canAccessBooking,
+  notBookingOwner,
+  seatChangeNotFound,
+} from '../utils/bookingAccess.js';
 import { removeSlip } from '../lib/slipStorage.js';
 import { notify } from './notifications.js';
 import { emailReceipt, issueReceiptNo } from './receipts.js';
 import {
-  OPEN_SEAT_CHANGE_STATUSES,
-  SLIP_ACCEPTING_PAYMENT_STATUSES,
   bookingStateChanged,
-  countsTowardSeatChangeQuota,
-  getBookingById,
   isSeatConflict,
-  seatChangeBlocker,
+  lockBooking,
+  lockShowtime,
+  paymentNotPending,
   seatTakenError,
-  shapeSeatChange,
-} from './bookings.js';
+} from './locks.js';
+import {
+  SLIP_ACCEPTING_PAYMENT_STATUSES,
+  SeatsUnavailableError,
+  approvedPaymentData,
+  discardSlipOnError,
+  lateRefundPaymentData,
+  queueSlipForReview,
+  rejectedPaymentData,
+  slipUploadWindow,
+} from './slips.js';
+import { openSeatChange, seatChangeBlocker, seatChangesUsed, shapeSeatChange } from './seatChangeRules.js';
+import { getBookingById, readRefundAccount } from './bookings.js';
 
 /**
  * เปลี่ยนที่นั่งของการจองที่จ่ายแล้ว (จำนวนที่นั่งเท่าเดิม)
@@ -28,8 +44,8 @@ import {
  * - แพงขึ้น → กันที่นั่งใหม่ไว้ SEAT_HOLD_MINUTES รอโอนส่วนต่าง ระหว่างนี้ที่นั่งเดิมยังเป็นของลูกค้า
  *   ย้ายจริงเมื่อผู้ดูแลอนุมัติสลิปส่วนต่าง (คิวตรวจสลิปเดียวกับค่าตั๋ว) แล้วออกใบเสร็จส่วนต่างให้
  *
- * ลำดับล็อกทั้งระบบ: Showtime (FOR SHARE) → Booking → SeatChange → BookingSeat → Payment → ReceiptCounter
- * ทุกฟังก์ชันในไฟล์นี้ล็อกตามลำดับนี้ สองรายการที่ชนกันจึงต่อคิวกัน ไม่รอกันเองจน deadlock
+ * ทุกฟังก์ชันในไฟล์นี้ล็อกตามลำดับล็อกทั้งระบบ (ดู services/locks.js)
+ * สองรายการที่ชนกันจึงต่อคิวกัน ไม่รอกันเองจน deadlock
  */
 
 const seatIdsKey = (seats) => {
@@ -39,7 +55,7 @@ const seatIdsKey = (seats) => {
     .join();
 };
 
-const labels = (seats) => (seats ?? []).map((seat) => seat.label).join(', ');
+const labels = (seats) => seatLabels(seats).join(', ');
 
 const pendingError = (seatChangeId) => {
   return ApiError.conflict(
@@ -83,9 +99,7 @@ const blockedError = (reason, booking) => {
         { cutoffMinutes: env.SEAT_CHANGE_CUTOFF_MINUTES },
       );
     case 'PENDING':
-      return pendingError(
-        booking.seatChanges.find((change) => OPEN_SEAT_CHANGE_STATUSES.includes(change.status))?.id,
-      );
+      return pendingError(openSeatChange(booking.seatChanges)?.id);
     default:
       return limitError();
   }
@@ -243,14 +257,11 @@ const applySeatChange = async ({ booking, plan, refundAccount, admin = null }) =
   try {
     const change = await prisma.$transaction(async (tx) => {
       // ล็อกแถวรอบฉายแบบแชร์แบบเดียวกับตอนจอง — ถ้าผู้ดูแลกำลังยกเลิกทั้งรอบ ตรงนี้รอจนเขาเสร็จแล้วเห็นสถานะใหม่
-      const [showtime] = await tx.$queryRaw`
-        SELECT "status" FROM "Showtime" WHERE "id" = ${booking.showtimeId} FOR SHARE`;
-      if (showtime?.status !== 'SCHEDULED') throw showtimeCancelledError();
+      if ((await lockShowtime(tx, booking.showtimeId)) !== 'SCHEDULED') throw showtimeCancelledError();
 
       // ล็อกแถวการจอง แล้วยืนยันว่ายังเป็นที่นั่งชุดเดียวกับที่ใช้คิดส่วนต่าง — สองคำขอที่มาพร้อมกันต่อคิวกันตรงนี้
       // คำขอที่ช้ากว่าเห็นที่นั่งชุดใหม่แล้วจึงตกไป แทนที่จะลบที่นั่งตามชุดเก่า จนเหลือที่นั่งค้างที่ไม่มีใครจ่าย
-      const [live] = await tx.$queryRaw`
-        SELECT "status", "seatSnapshot" FROM "Booking" WHERE "id" = ${booking.id} FOR UPDATE`;
+      const live = await lockBooking(tx, booking.id);
       if (live?.status !== 'PAID' || seatIdsKey(live.seatSnapshot) !== seatIdsKey(booking.seatSnapshot)) {
         throw bookingStateChanged();
       }
@@ -259,9 +270,9 @@ const applySeatChange = async ({ booking, plan, refundAccount, admin = null }) =
         where: { bookingId: booking.id },
         select: { id: true, status: true, byAdmin: true },
       });
-      const open = changes.find((item) => OPEN_SEAT_CHANGE_STATUSES.includes(item.status));
+      const open = openSeatChange(changes);
       if (open) throw pendingError(open.id);
-      if (!admin && changes.filter(countsTowardSeatChangeQuota).length >= env.MAX_SEAT_CHANGES_PER_BOOKING) {
+      if (!admin && seatChangesUsed(changes) >= env.MAX_SEAT_CHANGES_PER_BOOKING) {
         throw limitError();
       }
 
@@ -285,18 +296,15 @@ const applySeatChange = async ({ booking, plan, refundAccount, admin = null }) =
 /** ลูกค้าขอเปลี่ยนที่นั่งเอง */
 export const requestSeatChange = async ({ bookingId, userId, seatIds, refundAccount }) => {
   const booking = await loadBooking(bookingId);
-  if (!booking) throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
-  if (booking.userId !== userId) {
-    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เปลี่ยนที่นั่งของรายการจองนี้');
-  }
+  if (!booking) throw bookingNotFound();
+  if (booking.userId !== userId) throw notBookingOwner('ไม่มีสิทธิ์เปลี่ยนที่นั่งของรายการจองนี้');
   const blocked = seatChangeBlocker(booking);
   if (blocked) throw blockedError(blocked, booking);
 
   const plan = await planFor(booking, seatIds);
 
   // ย้ายไปที่นั่งที่ถูกกว่า — ส่วนต่างต้องโอนคืนด้วยมือ จึงต้องรู้บัญชีปลายทางก่อน (แบบเดียวกับยกเลิกหลังจ่ายเงิน)
-  const bankName = refundAccount?.bankName?.trim();
-  const accountNo = refundAccount?.accountNo?.trim();
+  const { bankName, accountNo } = readRefundAccount(refundAccount);
   if (plan.diffAmount < 0 && !(bankName && accountNo)) {
     throw ApiError.badRequest(
       'REFUND_ACCOUNT_REQUIRED',
@@ -314,13 +322,13 @@ export const requestSeatChange = async ({ bookingId, userId, seatIds, refundAcco
  */
 export const adminChangeSeats = async ({ bookingId, adminId, seatIds, reason }) => {
   const booking = await loadBooking(bookingId);
-  if (!booking) throw ApiError.notFound('BOOKING_NOT_FOUND', 'ไม่พบรายการจองนี้');
+  if (!booking) throw bookingNotFound();
   if (booking.status !== 'PAID') throw notAllowedError();
   if (booking.showtime.status !== 'SCHEDULED') throw showtimeCancelledError();
   if (booking.showtime.endsAt <= new Date()) {
     throw ApiError.conflict('SHOWTIME_ENDED', 'รอบนี้ฉายจบไปแล้ว เปลี่ยนที่นั่งย้อนหลังไม่ได้');
   }
-  const open = booking.seatChanges.find((change) => OPEN_SEAT_CHANGE_STATUSES.includes(change.status));
+  const open = openSeatChange(booking.seatChanges);
   if (open) throw pendingError(open.id);
 
   const plan = await planFor(booking, seatIds);
@@ -337,32 +345,12 @@ export const adminChangeSeats = async ({ bookingId, adminId, seatIds, reason }) 
 // ---------- ส่วนต่างที่ต้องโอนเพิ่ม ----------
 
 /**
- * คำขอนี้ส่งสลิปส่วนต่างได้ไหม และถ้าเลยเวลาไปแล้ว ส่งช้าได้ถึงเมื่อไหร่ — กติกาเดียวกับ slipUploadWindow ของการจอง
- * change ต้อง include payment มาแล้ว
+ * คำขอนี้ส่งสลิปส่วนต่างได้ไหม และถ้าเลยเวลาไปแล้ว ส่งช้าได้ถึงเมื่อไหร่ — กติกาเดียวกับค่าตั๋ว (slipUploadWindow)
+ * ใช้ได้เฉพาะคำขอที่มีรายการโอนส่วนต่าง · change ต้อง include payment มาแล้ว
  */
 export const topUpSlipWindow = (change, now = new Date()) => {
-  const grace = env.LATE_SLIP_GRACE_MINUTES;
   if (change.payment?.kind !== 'SEAT_CHANGE_TOPUP') return { canUpload: false, lateUntil: null };
-
-  if (change.status === 'PENDING_PAYMENT') {
-    const overdue = change.holdExpiresAt && change.holdExpiresAt <= now;
-    return {
-      canUpload: true,
-      lateUntil: overdue && grace > 0 ? addMinutes(change.holdExpiresAt, grace) : null,
-    };
-  }
-
-  if (
-    change.status === 'EXPIRED' &&
-    change.expiredAt &&
-    grace > 0 &&
-    SLIP_ACCEPTING_PAYMENT_STATUSES.includes(change.payment.status)
-  ) {
-    const lateUntil = addMinutes(change.expiredAt, grace);
-    if (lateUntil > now) return { canUpload: true, lateUntil };
-  }
-
-  return { canUpload: false, lateUntil: null };
+  return slipUploadWindow(change, now);
 };
 
 const detailInclude = {
@@ -420,10 +408,8 @@ export const getSeatChange = async ({ seatChangeId, requester }) => {
     where: { id: seatChangeId },
     include: detailInclude,
   });
-  if (!change) throw ApiError.notFound('SEAT_CHANGE_NOT_FOUND', 'ไม่พบคำขอเปลี่ยนที่นั่งนี้');
-  if (requester.role !== 'ADMIN' && change.booking.userId !== requester.id) {
-    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
-  }
+  if (!change) throw seatChangeNotFound();
+  if (!canAccessBooking(requester, change.booking.userId)) throw notBookingOwner();
   return shapeSeatChangeDetail(change);
 };
 
@@ -447,9 +433,6 @@ const loadForSlip = (seatChangeId) => {
   });
 };
 
-/** ที่นั่งใหม่ของคำขอที่หมดเวลาไปแล้วเอาคืนไม่ได้ (ถูกจองต่อ, ปิดใช้งาน, รอบเริ่ม/ถูกยกเลิก, การจองเปลี่ยนไปแล้ว) */
-class SeatsUnavailableError extends Error {}
-
 /**
  * ส่งสลิปส่วนต่างหลังคำขอหมดเวลาไปแล้ว (ภายในช่วงผ่อนผัน) — ทำแบบเดียวกับ acceptLateSlip ของการจอง
  * ลองกันที่นั่งใหม่อีกครั้งก่อน ถ้ายังว่างก็เข้าคิวตรวจตามปกติเหมือนไม่เคยหมดเวลา
@@ -463,13 +446,10 @@ const acceptLateTopUp = async (change, slipData) => {
   if (showtimeOpen && booking.status === 'PAID') {
     try {
       await prisma.$transaction(async (tx) => {
-        const [showtime] = await tx.$queryRaw`
-          SELECT "status" FROM "Showtime" WHERE "id" = ${booking.showtimeId} FOR SHARE`;
-        if (showtime?.status !== 'SCHEDULED') throw new SeatsUnavailableError();
+        if ((await lockShowtime(tx, booking.showtimeId)) !== 'SCHEDULED') throw new SeatsUnavailableError();
 
         // ส่วนต่างคิดจากที่นั่งชุดเดิมของคำขอนี้ — การจองที่ย้ายไปแล้ว (หรือมีคำขออื่นค้าง) ใช้ส่วนต่างนี้ไม่ได้แล้ว
-        const [live] = await tx.$queryRaw`
-          SELECT "status", "seatSnapshot" FROM "Booking" WHERE "id" = ${booking.id} FOR UPDATE`;
+        const live = await lockBooking(tx, booking.id);
         if (live?.status !== 'PAID' || seatIdsKey(live.seatSnapshot) !== seatIdsKey(change.fromSeats)) {
           throw new SeatsUnavailableError();
         }
@@ -477,10 +457,9 @@ const acceptLateTopUp = async (change, slipData) => {
           where: { bookingId: booking.id, id: { not: change.id } },
           select: { status: true, byAdmin: true },
         });
-        const quotaUsed = others.filter(countsTowardSeatChangeQuota).length;
         if (
-          others.some((item) => OPEN_SEAT_CHANGE_STATUSES.includes(item.status)) ||
-          (!change.byAdmin && quotaUsed >= env.MAX_SEAT_CHANGES_PER_BOOKING)
+          openSeatChange(others) ||
+          (!change.byAdmin && seatChangesUsed(others) >= env.MAX_SEAT_CHANGES_PER_BOOKING)
         ) {
           throw new SeatsUnavailableError();
         }
@@ -488,7 +467,7 @@ const acceptLateTopUp = async (change, slipData) => {
         const fromIds = new Set(change.fromSeats.map((seat) => seat.id));
         const added = change.toSeats
           .filter((seat) => !fromIds.has(seat.id))
-          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+          .sort((a, b) => compareIds(a.id, b.id));
         const usable = await tx.seat.count({
           where: { id: { in: added.map((seat) => seat.id) }, isActive: true },
         });
@@ -536,71 +515,28 @@ const acceptLateTopUp = async (change, slipData) => {
 
 /**
  * ลูกค้าส่งสลิปส่วนต่าง — หยุดนับถอยหลังระหว่างรอผู้ดูแลตรวจ ที่นั่งใหม่ถูกกันไว้ต่อจนกว่าจะรู้ผล
- * โครงเดียวกับ uploadSlip ของค่าตั๋ว (รวมทางสลิปส่งช้า และลบไฟล์ทิ้งเมื่อทำรายการไม่สำเร็จ)
+ * ใช้ขั้นตอนเดียวกับ uploadSlip ของค่าตั๋ว (queueSlipForReview — รวมทางสลิปส่งช้า และลบไฟล์ทิ้งเมื่อทำรายการไม่สำเร็จ)
  */
 export const uploadSeatChangeSlip = async ({ seatChangeId, userId, file }) => {
   if (!file) throw ApiError.badRequest('NO_FILE', 'กรุณาแนบรูปสลิปการโอนเงิน');
 
-  const cleanup = () => removeSlip('payment', file.filename);
-
-  const change = await loadForSlip(seatChangeId);
-  if (!change?.payment) {
-    await cleanup();
-    throw ApiError.notFound('SEAT_CHANGE_NOT_FOUND', 'ไม่พบคำขอเปลี่ยนที่นั่งนี้');
-  }
-  if (change.booking.userId !== userId) {
-    await cleanup();
-    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
-  }
-
-  if (!topUpSlipWindow(change).canUpload) {
-    await cleanup();
-    if (change.payment.status === 'PENDING_VERIFICATION') {
-      throw ApiError.conflict('SEAT_CHANGE_NOT_PAYABLE', 'ส่งสลิปแล้ว กำลังรอผู้ดูแลระบบตรวจสอบ');
-    }
-    if (change.status === 'EXPIRED') {
-      throw ApiError.conflict(
-        'HOLD_EXPIRED',
-        `หมดเวลาส่งสลิปแล้ว หากโอนเงินไปแล้วกรุณาติดต่อเจ้าหน้าที่ พร้อมรหัสการจอง ${change.booking.code}`,
-      );
-    }
-    throw notPayable();
-  }
-
-  const previousSlip = change.payment.slipPath;
-  const slipData = {
-    slipPath: file.filename,
-    slipUploadedAt: new Date(),
-    status: 'PENDING_VERIFICATION',
-    rejectReason: null,
-    verifiedById: null,
-    verifiedAt: null,
-  };
-
-  try {
-    let current = change;
-    if (current.status === 'PENDING_PAYMENT') {
-      const moved = await prisma.$transaction(async (tx) => {
-        // เงื่อนไขสถานะอยู่ใน update — job หมดเวลาหรือการยกเลิกที่ชิงเปลี่ยนสถานะไปก่อนจะทำให้ไม่โดนแถวไหน
-        const { count } = await tx.seatChange.updateMany({
-          where: { id: change.id, status: 'PENDING_PAYMENT' },
-          data: { status: 'PENDING_VERIFICATION', holdExpiresAt: null },
-        });
-        if (count === 0) return false;
-        await tx.payment.update({ where: { id: change.payment.id }, data: slipData });
-        return true;
-      });
-      if (!moved) {
-        // job เพิ่งปิดคำขอไปในจังหวะเดียวกันพอดี — อ่านใหม่แล้วไปทางสลิปส่งช้า
-        current = await loadForSlip(seatChangeId);
-        if (current.status !== 'EXPIRED' || !topUpSlipWindow(current).canUpload) throw notPayable();
-      }
-    }
-    if (current.status === 'EXPIRED') await acceptLateTopUp(current, slipData);
-  } catch (error) {
-    await cleanup();
-    throw error;
-  }
+  const previousSlip = await discardSlipOnError('payment', file, async () => {
+    const change = await loadForSlip(seatChangeId);
+    if (!change?.payment) throw seatChangeNotFound();
+    if (change.booking.userId !== userId) throw notBookingOwner();
+    await queueSlipForReview({
+      model: 'seatChange',
+      holder: change,
+      file,
+      reload: () => loadForSlip(seatChangeId),
+      acceptLate: acceptLateTopUp,
+      window: topUpSlipWindow,
+      notPayable,
+      alreadySentCode: 'SEAT_CHANGE_NOT_PAYABLE',
+      bookingCode: change.booking.code,
+    });
+    return change.payment.slipPath;
+  });
 
   // ลบสลิปเก่าทิ้ง (ส่งใหม่หลังถูกปฏิเสธ) หลังบันทึกสำเร็จแล้วเท่านั้น
   if (previousSlip && previousSlip !== file.filename) {
@@ -625,10 +561,8 @@ export const cancelSeatChange = async ({ seatChangeId, userId }) => {
     where: { id: seatChangeId },
     include: { booking: { select: { userId: true } } },
   });
-  if (!change) throw ApiError.notFound('SEAT_CHANGE_NOT_FOUND', 'ไม่พบคำขอเปลี่ยนที่นั่งนี้');
-  if (change.booking.userId !== userId) {
-    throw ApiError.forbidden('NOT_BOOKING_OWNER', 'ไม่มีสิทธิ์เข้าถึงรายการจองนี้');
-  }
+  if (!change) throw seatChangeNotFound();
+  if (change.booking.userId !== userId) throw notBookingOwner();
   if (change.status === 'PENDING_VERIFICATION') {
     throw ApiError.conflict(
       'SEAT_CHANGE_AWAITING_VERIFICATION',
@@ -697,13 +631,6 @@ export const releaseExpiredSeatChanges = async () => {
 
 // ---------- ผู้ดูแลตรวจสลิปส่วนต่าง (เรียกจาก approvePayment / rejectPayment) ----------
 
-const paymentNotPending = () => {
-  return ApiError.conflict(
-    'PAYMENT_NOT_PENDING',
-    'รายการนี้ถูกตรวจสอบหรือเปลี่ยนสถานะไปแล้ว กรุณารีเฟรชหน้าจอ',
-  );
-};
-
 /**
  * อนุมัติสลิปส่วนต่าง → ย้ายที่นั่งจริง + ออกใบเสร็จส่วนต่าง (และส่งทางอีเมล)
  * ยกเว้นสลิปที่ส่งหลังหมดเวลาและกันที่นั่งใหม่ไม่ได้ (คำขอยัง EXPIRED) — ยืนยันยอดแล้วคืนส่วนต่าง ไม่ได้ย้าย ไม่มีใบเสร็จ
@@ -725,14 +652,7 @@ export const approveTopUp = async ({ payment, adminId }) => {
       });
       const refunded = await tx.payment.updateMany({
         where: { id: payment.id, status: 'PENDING_VERIFICATION' },
-        data: {
-          status: 'REFUND_PENDING',
-          verifiedById: adminId,
-          verifiedAt: now,
-          rejectReason: null,
-          refundDueAt: now,
-          refundAmount: payment.amount,
-        },
+        data: lateRefundPaymentData(adminId, now, payment.amount),
       });
       if (settled.count === 0 || refunded.count === 0) throw paymentNotPending();
       await notify(
@@ -768,7 +688,7 @@ export const approveTopUp = async ({ payment, adminId }) => {
 
     const paid = await tx.payment.updateMany({
       where: { id: payment.id, status: 'PENDING_VERIFICATION' },
-      data: { status: 'APPROVED', verifiedById: adminId, verifiedAt: now, rejectReason: null },
+      data: approvedPaymentData(adminId, now),
     });
     if (paid.count === 0) throw paymentNotPending();
     // ออกเลขหลังผ่านด่านเช็กสถานะแล้วเท่านั้น (ผู้ดูแลที่กดซ้ำตกไปก่อนถึงตรงนี้ จึงไม่เปลืองเลข) — ReceiptCounter ล็อกเป็นลำดับสุดท้าย
@@ -831,7 +751,7 @@ export const rejectTopUp = async ({ payment, adminId, reason }) => {
 
     const rejected = await tx.payment.updateMany({
       where: { id: payment.id, status: 'PENDING_VERIFICATION' },
-      data: { status: 'REJECTED', rejectReason: reason, verifiedById: adminId, verifiedAt: now },
+      data: rejectedPaymentData(adminId, now, reason),
     });
     if (settled.count === 0 || rejected.count === 0) throw paymentNotPending();
 

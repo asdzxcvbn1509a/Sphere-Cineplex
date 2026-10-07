@@ -1,37 +1,28 @@
-import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Clapperboard, FileText } from 'lucide-react';
-import { apiError } from '../api/client.js';
 import { getTicket } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 import { formatDate, formatMoney, formatTime } from '../utils/format.js';
 
 const TicketPage = () => {
   const { bookingId } = useParams();
   const { t, lang, pick } = useI18n();
-  const [ticket, setTicket] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
+  const { data: ticket, loading, error } = useApi(
+    () => getTicket(bookingId).then(({ data }) => data.ticket),
+    [bookingId],
+  );
 
-  useEffect(() => {
-    setState({ loading: true, error: null });
-    getTicket(bookingId)
-      .then(({ data }) => {
-        setTicket(data.ticket);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  }, [bookingId]);
-
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-lg px-4 py-10">
-        <ErrorBlock message={state.error} />
+        <ErrorBlock message={error} />
       </div>
     );
   }

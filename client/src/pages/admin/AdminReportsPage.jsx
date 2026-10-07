@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Download } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
@@ -10,6 +10,7 @@ import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
+import useApi from '../../hooks/useApi.js';
 import { bangkokDateKey, formatDateTime, formatMoney } from '../../utils/format.js';
 
 const GROUPS = [
@@ -21,26 +22,20 @@ const GROUPS = [
 const sevenDaysAgo = () => bangkokDateKey(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
 
 const AdminReportsPage = () => {
-  const { t, lang } = useI18n();
+  const { t, lang, pick } = useI18n();
   const toast = useToast();
   const [groupBy, setGroupBy] = useState('day');
   const [range, setRange] = useState({ from: sevenDaysAgo(), to: bangkokDateKey() });
-  const [report, setReport] = useState(null);
-  const [occupancy, setOccupancy] = useState([]);
-  const [state, setState] = useState({ loading: true, error: null });
 
-  const load = useCallback(() => {
-    setState({ loading: true, error: null });
-    Promise.all([getSalesReport({ groupBy, ...range }), getOccupancyReport(range)])
-      .then(([salesRes, occupancyRes]) => {
-        setReport(salesRes.data);
-        setOccupancy(occupancyRes.data.showtimes.slice(0, 20));
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
+  const { data, loading, error, reload } = useApi(async () => {
+    const [salesRes, occupancyRes] = await Promise.all([
+      getSalesReport({ groupBy, ...range }),
+      getOccupancyReport(range),
+    ]);
+    return { report: salesRes.data, occupancy: occupancyRes.data.showtimes.slice(0, 20) };
   }, [groupBy, range]);
-
-  useEffect(load, [load]);
+  const report = data?.report;
+  const occupancy = data?.occupancy ?? [];
 
   /** ต้องดึงผ่าน axios เพราะ endpoint ต้องใช้ access token — เปิด URL ตรง ๆ ไม่ได้ */
   const downloadCsv = async () => {
@@ -104,10 +99,10 @@ const AdminReportsPage = () => {
         </Button>
       </div>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && report && (
+      {!loading && !error && report && (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <div className="card p-4">
@@ -202,7 +197,7 @@ const AdminReportsPage = () => {
               <div key={item.showtimeId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium sm:text-base">
-                    {lang === 'en' ? item.movie.titleEn : item.movie.titleTh}
+                    {pick(item.movie, 'title')}
                   </p>
                   <p className="text-xs text-muted">
                     {item.theatre} · {formatDateTime(item.startsAt, lang)}

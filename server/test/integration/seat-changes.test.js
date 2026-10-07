@@ -632,6 +632,30 @@ describe('สลิปส่วนต่างที่ส่งหลังห�
     assert.equal(await prisma.notification.count({ where: { type: 'SEAT_CHANGE_LATE_REFUND' } }), 1);
     assert.deepEqual(labelsOf(await getBookingById(paid.id)), ['A1']);
   });
+
+  test('ส่งสลิปส่วนต่างพร้อมกับที่ job กำลังปิดคำขอ — ลูกค้าไม่เห็น error และที่นั่งใหม่ยังถูกกันไว้', async () => {
+    const { showtime, seats } = await createShowtimeFixture();
+    const admin = await createAdmin();
+    // วนหลายรอบให้มีโอกาสสลับลำดับกันจริง ๆ — บางรอบ job ปิดคำขอก่อน (สลิปไปทางส่งช้า) บางรอบสลิปเข้าก่อน
+    for (let i = 0; i < 4; i += 1) {
+      const user = await createUser();
+      const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[i]] });
+      const pending = await change(paid, user, [seats[4 + i]]);
+      await prisma.seatChange.update({
+        where: { id: pending.seatChange.id },
+        data: { holdExpiresAt: minutesFromNow(-1) },
+      });
+
+      const [, upload] = await Promise.allSettled([
+        releaseExpiredSeatChanges(),
+        payTopUp(pending.seatChange.id, user),
+      ]);
+
+      assert.equal(upload.status, 'fulfilled', upload.reason?.message);
+      assert.equal(upload.value.status, 'PENDING_VERIFICATION');
+      assert.equal(await seatStatus(showtime, `B${i + 1}`), 'HELD');
+    }
+  });
 });
 
 describe('HTTP', () => {

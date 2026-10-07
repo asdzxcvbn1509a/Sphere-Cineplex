@@ -26,4 +26,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
-docs/
+# docs/: only the top-level Markdown docs are tracked; the slide generator (docs/mvc-slides) stays local
+docs/*
+!docs/*.md

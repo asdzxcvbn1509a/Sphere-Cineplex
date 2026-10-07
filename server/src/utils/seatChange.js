@@ -1,5 +1,5 @@
 import ApiError from './ApiError.js';
-import { snapshotSeat, sortSeats } from './seats.js';
+import { compareIds, snapshotSeat, sortSeats } from './seats.js';
 
 /**
  * คำนวณการเปลี่ยนที่นั่ง — ส่วนที่ไม่แตะฐานข้อมูล เทสต์ได้ตรง ๆ (ตรวจสิทธิ์ ล็อก และบันทึกอยู่ที่ services/seatChanges.js)
@@ -45,7 +45,7 @@ export const planSeatChange = ({ fromSeats, newSeats, priceMap }) => {
   const added = toSeats
     .filter((seat) => !fromById.has(seat.id))
     .map((seat) => ({ seatId: seat.id, price: seat.price }))
-    .sort((a, b) => (a.seatId < b.seatId ? -1 : a.seatId > b.seatId ? 1 : 0));
+    .sort((a, b) => compareIds(a.seatId, b.seatId));
 
   const total = (seats) => seats.reduce((sum, seat) => sum + seat.price, 0);
   const fromAmount = total(fromSeats);

@@ -61,6 +61,21 @@ export const dateKeyToDate = (dateKey) => {
   return new Date(`${dateKey}T00:00:00+07:00`);
 };
 
+/**
+ * ค่าของ input[type=datetime-local] — input ทำงานบนเวลาเครื่อง จึงต้องแปลงเป็น/จากเวลาไทยให้ชัดเจน
+ * ISO → "YYYY-MM-DDTHH:mm" ตามเวลาไทย
+ */
+export const toBangkokInputValue = (iso) => {
+  const bangkok = new Date(new Date(iso).getTime() + 7 * 60 * 60 * 1000);
+  return bangkok.toISOString().slice(0, 16);
+};
+
+/** "YYYY-MM-DDTHH:mm" (เวลาไทย) → ISO */
+export const fromBangkokInputValue = (value) => new Date(`${value}:00+07:00`).toISOString();
+
+/** ดึงเฉพาะส่วนวันที่ (YYYY-MM-DD) ออกจากค่าใน input datetime-local */
+export const dateOfInputValue = (value) => (value ? value.slice(0, 10) : '');
+
 /** สร้างรายการวันสำหรับแถบเลือกวันที่ */
 export const buildDateStrip = (days = 7) => {
   const today = new Date();

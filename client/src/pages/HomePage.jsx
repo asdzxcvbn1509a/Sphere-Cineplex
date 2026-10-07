@@ -1,32 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Search, Film } from 'lucide-react';
-import { apiError } from '../api/client.js';
 import { listMovies } from '../api/movies.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import MovieCard from '../components/movie/MovieCard.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import useApi from '../hooks/useApi.js';
 
 const gridClass = 'grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-6 lg:gap-5';
 
 const HomePage = () => {
   const { t } = useI18n();
-  const [movies, setMovies] = useState([]);
   const [query, setQuery] = useState('');
-  const [state, setState] = useState({ loading: true, error: null });
-
-  const load = () => {
-    setState({ loading: true, error: null });
-    listMovies()
-      .then(({ data }) => {
-        setMovies(data.movies);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  };
-
-  useEffect(load, []);
+  const { data: movies = [], loading, error, reload } = useApi(
+    () => listMovies().then(({ data }) => data.movies),
+    [],
+  );
 
   // ผลสำรวจ: 18 จาก 30 คนเริ่มต้นด้วยการค้นหา "ชื่อเรื่อง" จึงกรองที่ฝั่ง client ให้ผลขึ้นทันทีที่พิมพ์
   const filtered = useMemo(() => {
@@ -62,10 +52,10 @@ const HomePage = () => {
         </div>
       </section>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!state.loading && !state.error && (
+      {!loading && !error && (
         <>
           {filtered.length === 0 && (
             <EmptyState icon={Film} title={t('home.noResults')} description={query} />

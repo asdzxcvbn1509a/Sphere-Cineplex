@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, CheckCircle2, FileText, Hourglass, Ticket } from 'lucide-react';
 import { apiError } from '../api/client.js';
@@ -10,9 +10,10 @@ import PromptPayPanel from '../components/payment/PromptPayPanel.jsx';
 import SlipUploadForm from '../components/payment/SlipUploadForm.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
+import ConfirmModal from '../components/ui/ConfirmModal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
-import Modal from '../components/ui/Modal.jsx';
+import useApi from '../hooks/useApi.js';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
 import { formatMoney, formatTime } from '../utils/format.js';
@@ -26,37 +27,23 @@ const SeatChangePaymentPage = () => {
   const { changeId } = useParams();
   const { t, lang } = useI18n();
   const toast = useToast();
-
-  const [change, setChange] = useState(null);
-  // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = ไม่ได้นับ)
-  const [holdDeadline, setHoldDeadline] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  const load = useCallback(
-    async (silent = false) => {
-      if (!silent) setState({ loading: true, error: null });
-      try {
-        const { data } = await getSeatChange(changeId);
-        setChange(data.seatChange);
-        // นับถอยหลังจากวินาทีที่เหลือที่ server คำนวณ ไม่ใช่เทียบ holdExpiresAt กับนาฬิกาเครื่องลูกค้า
-        setHoldDeadline(
-          data.seatChange.holdSecondsLeft > 0
-            ? new Date(Date.now() + data.seatChange.holdSecondsLeft * 1000).toISOString()
-            : null,
-        );
-        setState({ loading: false, error: null });
-      } catch (error) {
-        setState({ loading: false, error: apiError(error).message });
-      }
-    },
-    [changeId],
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, error, reload } = useApi(async () => {
+    const { data: body } = await getSeatChange(changeId);
+    return {
+      change: body.seatChange,
+      // เส้นตายตามนาฬิกาเครื่องนี้ คำนวณจากจำนวนวินาทีที่ server บอก (null = ไม่ได้นับ)
+      // นับถอยหลังจากวินาทีที่เหลือที่ server คำนวณ ไม่ใช่เทียบ holdExpiresAt กับนาฬิกาเครื่องลูกค้า
+      holdDeadline:
+        body.seatChange.holdSecondsLeft > 0
+          ? new Date(Date.now() + body.seatChange.holdSecondsLeft * 1000).toISOString()
+          : null,
+    };
+  }, [changeId]);
+  const change = data?.change;
+  const holdDeadline = data?.holdDeadline ?? null;
 
   const status = change?.status;
   const paymentStatus = change?.payment?.status;
@@ -64,16 +51,18 @@ const SeatChangePaymentPage = () => {
   const lateWaiting = status === 'EXPIRED' && paymentStatus === 'PENDING_VERIFICATION';
 
   // ระหว่างรอผู้ดูแลตรวจสลิป หน้าจะอัปเดตเองโดยไม่ต้องกดรีเฟรช
-  usePolling(() => load(true), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
+  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
 
-  const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () => load(true));
+  const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () =>
+    reload({ silent: true }),
+  );
 
   /** คืน true เมื่อส่งสำเร็จ — SlipUploadForm จะล้างไฟล์ที่เลือกไว้ */
   const handleUpload = async (file) => {
     try {
       await uploadSeatChangeSlip(changeId, file);
       toast.success(t('seatChange.waitingTitle'));
-      await load(true);
+      await reload({ silent: true });
       return true;
     } catch (error) {
       toast.error(apiError(error).message);
@@ -87,20 +76,20 @@ const SeatChangePaymentPage = () => {
       await cancelSeatChange(changeId);
       toast.success(t('seatChange.requestCancelled'));
       setConfirmCancel(false);
-      await load(true);
+      await reload({ silent: true });
     } catch (error) {
       toast.error(apiError(error).message);
-      await load(true);
+      await reload({ silent: true });
     } finally {
       setCancelling(false);
     }
   };
 
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-10">
-        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
       </div>
     );
   }
@@ -258,26 +247,19 @@ const SeatChangePaymentPage = () => {
         </>
       )}
 
-      <Modal
+      <ConfirmModal
         open={confirmCancel}
         onClose={() => setConfirmCancel(false)}
         title={t('seatChange.cancelRequestTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfirmCancel(false)}>
-              {t('seatChange.keepRequest')}
-            </Button>
-            <Button variant="danger" loading={cancelling} onClick={handleCancel}>
-              {t('seatChange.cancelRequest')}
-            </Button>
-          </>
-        }
+        cancelLabel={t('seatChange.keepRequest')}
+        confirmLabel={t('seatChange.cancelRequest')}
+        loading={cancelling}
+        onConfirm={handleCancel}
       >
         <p className="text-sm text-muted">
           {t('seatChange.cancelRequestBody', { seats: change.fromSeats.join(', ') })}
         </p>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 };

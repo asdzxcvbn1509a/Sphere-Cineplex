@@ -1,3 +1,5 @@
+import ApiError from './ApiError.js';
+
 /**
  * ทำให้เบอร์อยู่ในรูปเดียวกันเสมอ: 10 หลักขึ้นต้นด้วย 0
  * รองรับ 0812345678 / 081-234-5678 / +66812345678 / 66812345678
@@ -15,4 +17,13 @@ export const normalizePhone = (raw) => {
 
 export const isValidThaiMobile = (phone) => {
   return /^0[689]\d{8}$/.test(phone);
+};
+
+/** normalize แล้วต้องเป็นเบอร์มือถือไทย ไม่งั้น 400 INVALID_PHONE — ใช้ทั้งตอนสมัครและตอนผู้ดูแลแก้ข้อมูลให้ */
+export const requireThaiMobile = (raw) => {
+  const phone = normalizePhone(raw);
+  if (!isValidThaiMobile(phone)) {
+    throw ApiError.badRequest('INVALID_PHONE', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ต้องเป็นเบอร์มือถือ 10 หลัก)');
+  }
+  return phone;
 };

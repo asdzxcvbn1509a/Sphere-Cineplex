@@ -4,7 +4,7 @@ import ApiError from '../utils/ApiError.js';
 import { APP_URL, env, isDev, isMailConfigured } from '../config/env.js';
 import { sendMail } from '../utils/mailer.js';
 import { passwordResetEmail } from '../emails/passwordReset.js';
-import { isValidThaiMobile, normalizePhone } from '../utils/phone.js';
+import { normalizePhone, requireThaiMobile } from '../utils/phone.js';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../utils/password.js';
 import {
   generateRefreshToken,
@@ -23,7 +23,19 @@ export const publicUser = (user) => {
   };
 };
 
-const normalizeEmail = (raw) => String(raw ?? '').trim().toLowerCase();
+/** อีเมลเก็บเป็นตัวพิมพ์เล็กเสมอ — ตัวพิมพ์ต่างกันจะได้ไม่กลายเป็นคนละบัญชี (ผู้ดูแลแก้อีเมลให้ก็ใช้ตัวนี้) */
+export const normalizeEmail = (raw) => String(raw ?? '').trim().toLowerCase();
+
+/**
+ * เพิกถอนทุกเซสชันที่ยังใช้ได้ของผู้ใช้ — except = refresh token ของเครื่องที่ให้คงไว้ (ไม่ส่ง = ไม่เว้นเครื่องไหน)
+ * คืน PrismaPromise จึงใส่ใน prisma.$transaction([...]) ได้ด้วย
+ */
+export const revokeAllSessions = (userId, { except, at = new Date() } = {}) => {
+  return prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null, ...(except && { NOT: { tokenHash: hashToken(except) } }) },
+    data: { revokedAt: at },
+  });
+};
 
 /** ข้อความเดียวกันทุกกรณีที่ล็อกอินไม่ผ่าน — ไม่บอกว่าผิดที่บัญชีหรือรหัสผ่าน */
 const invalidCredentials = () => {
@@ -51,11 +63,7 @@ const duplicateFieldError = (target) => {
  */
 export const register = async ({ name, email, phone, password, userAgent }) => {
   const normalizedEmail = normalizeEmail(email);
-  const normalizedPhone = normalizePhone(phone);
-
-  if (!isValidThaiMobile(normalizedPhone)) {
-    throw ApiError.badRequest('INVALID_PHONE', 'เบอร์โทรศัพท์ไม่ถูกต้อง (ต้องเป็นเบอร์มือถือ 10 หลัก)');
-  }
+  const normalizedPhone = requireThaiMobile(phone);
 
   // เช็กก่อนเพื่อให้ได้ข้อความที่ชี้ช่องถูก — ส่วน unique index ใน DB เป็นด่านสุดท้ายกันสมัครพร้อมกัน
   const existing = await prisma.user.findFirst({
@@ -149,10 +157,7 @@ export const rotateSession = async (rawToken, userAgent) => {
       stored.replacedById && Date.now() - stored.revokedAt.getTime() < REFRESH_RACE_GRACE_MS;
     if (justRotated) throw refreshRace();
 
-    await prisma.refreshToken.updateMany({
-      where: { userId: stored.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await revokeAllSessions(stored.userId);
     throw ApiError.unauthorized(
       'REFRESH_TOKEN_REUSED',
       'ตรวจพบการใช้เซสชันซ้ำ ระบบได้ออกจากระบบทุกอุปกรณ์เพื่อความปลอดภัย',
@@ -219,14 +224,7 @@ export const changePassword = async ({ userId, currentPassword, newPassword, kee
     data: { passwordHash: await hashPassword(newPassword), tokenVersion: { increment: 1 } },
   });
 
-  await prisma.refreshToken.updateMany({
-    where: {
-      userId,
-      revokedAt: null,
-      ...(keepToken && { NOT: { tokenHash: hashToken(keepToken) } }),
-    },
-    data: { revokedAt: new Date() },
-  });
+  await revokeAllSessions(userId, { except: keepToken });
 
   return { ok: true, accessToken: signAccessToken(updated) };
 };
@@ -350,10 +348,7 @@ export const resetPassword = async ({ token, password }) => {
       where: { userId: stored.userId, usedAt: null },
       data: { usedAt: now },
     }),
-    prisma.refreshToken.updateMany({
-      where: { userId: stored.userId, revokedAt: null },
-      data: { revokedAt: now },
-    }),
+    revokeAllSessions(stored.userId, { at: now }),
   ]);
 
   // คืนอีเมลเต็มให้หน้าเว็บเอาไปเติมในช่องล็อกอินต่อ — คนที่ถือลิงก์คือคนที่เปิดเมลฉบับนั้นได้อยู่แล้ว

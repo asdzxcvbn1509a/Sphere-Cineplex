@@ -14,6 +14,20 @@ export const sortSeats = (seats) => {
   );
 };
 
+/** ป้ายของที่นั่งใน snapshot (A1, A2, …) — ไม่มี snapshot ได้รายการว่าง */
+export const seatLabels = (seats) => {
+  return (seats ?? []).map((seat) => seat.label);
+};
+
+/**
+ * เทียบ id ให้ได้ลำดับคงที่ — ทุกรายการเขียนที่นั่งเรียงตามลำดับนี้
+ * สองรายการที่แย่งที่นั่งชุดเดียวกันจึงชนกันที่ที่นั่งแรกเหมือนกัน แทนที่จะรอกันเองจน deadlock
+ */
+export const compareIds = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
+
 /** หนึ่งรายการใน seatSnapshot — price คือราคาที่ลูกค้าจ่ายจริงของที่นั่งนั้น */
 export const snapshotSeat = (seat, price) => {
   return {

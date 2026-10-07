@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Banknote, CalendarClock, HandCoins, Hourglass, ScanLine, Ticket, TicketCheck } from 'lucide-react';
-import { apiError } from '../../api/client.js';
 import { getOverview } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import useApi from '../../hooks/useApi.js';
 import { formatMoney } from '../../utils/format.js';
 
 const StatCard = ({ icon: Icon, label, value, unit, tone = 'text-fg' }) => (
@@ -82,31 +81,21 @@ const QueuePanel = ({ icon: Icon, title, to, rows }) => {
 
 const AdminOverviewPage = () => {
   const { t, lang } = useI18n();
-  const [data, setData] = useState(null);
-  const [state, setState] = useState({ loading: true, error: null });
+  const { data, loading, error, reload } = useApi(async () => {
+    const res = await getOverview();
+    // หน้านี้มีตัวเลขอยู่แล้ว ป้อนให้ป้ายบนเมนูเลย จะได้ไม่ต้องยิงซ้ำ
+    useAdminQueueStore.getState().setCounts({
+      pendingSlips: res.data.pendingSlips,
+      pendingRefunds: res.data.pendingRefunds,
+    });
+    return res.data;
+  }, []);
 
-  const load = () => {
-    setState({ loading: true, error: null });
-    getOverview()
-      .then((res) => {
-        setData(res.data);
-        setState({ loading: false, error: null });
-        // หน้านี้มีตัวเลขอยู่แล้ว ป้อนให้ป้ายบนเมนูเลย จะได้ไม่ต้องยิงซ้ำ
-        useAdminQueueStore.getState().setCounts({
-          pendingSlips: res.data.pendingSlips,
-          pendingRefunds: res.data.pendingRefunds,
-        });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  };
-
-  useEffect(load, []);
-
-  if (state.loading) return <LoadingBlock label={t('common.loading')} />;
-  if (state.error) {
+  if (loading) return <LoadingBlock label={t('common.loading')} />;
+  if (error) {
     return (
       <div className="p-6">
-        <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
       </div>
     );
   }

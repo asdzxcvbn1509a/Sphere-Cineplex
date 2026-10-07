@@ -82,7 +82,7 @@ The result is your `DATABASE_URL`. Keep it for steps 3 and 4
 
 ### 2.3 Bucket for slips
 
-Follow the [Slip storage](README.md#slip-storage) section of the README: Storage → **New bucket**, name it `slips` and **turn off Public bucket**
+Follow the [Slip storage](docs/architecture.md#slip-storage) section of the architecture notes: Storage → **New bucket**, name it `slips` and **turn off Public bucket**
 
 ### 2.4 Storage connection values
 

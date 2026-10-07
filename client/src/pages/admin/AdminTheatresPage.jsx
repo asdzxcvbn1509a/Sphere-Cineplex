@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
@@ -13,6 +13,7 @@ import {
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
+import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
@@ -20,6 +21,7 @@ import Select from '../../components/ui/Select.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import useApi from '../../hooks/useApi.js';
 
 const emptyTheatre = { name: '', screenType: '2D', rowsCount: 8, colsCount: 12, isActive: true };
 
@@ -32,8 +34,6 @@ const zoneStyle = {
 const AdminTheatresPage = () => {
   const { t } = useI18n();
   const toast = useToast();
-  const [theatres, setTheatres] = useState([]);
-  const [state, setState] = useState({ loading: true, error: null });
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyTheatre);
   const [saving, setSaving] = useState(false);
@@ -44,17 +44,10 @@ const AdminTheatresPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const load = () => {
-    setState({ loading: true, error: null });
-    listTheatres()
-      .then(({ data }) => {
-        setTheatres(data.theatres);
-        setState({ loading: false, error: null });
-      })
-      .catch((error) => setState({ loading: false, error: apiError(error).message }));
-  };
-
-  useEffect(load, []);
+  const { data: theatres = [], loading, error, reload } = useApi(
+    () => listTheatres().then(({ data }) => data.theatres),
+    [],
+  );
 
   const save = async (event) => {
     event.preventDefault();
@@ -71,7 +64,7 @@ const AdminTheatresPage = () => {
       else await updateTheatre(editing, payload);
       toast.success(t('common.save'));
       setEditing(null);
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -85,7 +78,7 @@ const AdminTheatresPage = () => {
       await deleteTheatre(deleteTarget.id);
       toast.success(`${t('common.delete')}: ${deleteTarget.name}`);
       setDeleteTarget(null);
-      load();
+      reload();
     } catch (error) {
       toast.error(apiError(error).message);
     } finally {
@@ -130,8 +123,8 @@ const AdminTheatresPage = () => {
         </Button>
       </div>
 
-      {state.loading && <LoadingBlock label={t('common.loading')} />}
-      {state.error && <ErrorBlock message={state.error} onRetry={load} retryLabel={t('common.retry')} />}
+      {loading && <LoadingBlock label={t('common.loading')} />}
+      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {theatres.map((theatre) => (
@@ -344,21 +337,13 @@ const AdminTheatresPage = () => {
         </div>
       </Modal>
 
-      <Modal
+      <ConfirmModal
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         title={t('admin.theatreForm.deleteTitle')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-              {t('common.cancel')}
-            </Button>
-            <Button variant="danger" loading={deleting} onClick={remove}>
-              {t('common.delete')}
-            </Button>
-          </>
-        }
+        confirmLabel={t('common.delete')}
+        loading={deleting}
+        onConfirm={remove}
       >
         <p className="text-sm text-muted">
           {t('admin.theatreForm.deleteBody', { name: deleteTarget?.name })}
@@ -369,7 +354,7 @@ const AdminTheatresPage = () => {
             {t('admin.theatreForm.deleteShowtimesNote', { count: deleteTarget.showtimeCount })}
           </p>
         )}
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 };
