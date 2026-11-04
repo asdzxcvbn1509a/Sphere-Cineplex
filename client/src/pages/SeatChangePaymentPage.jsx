@@ -115,13 +115,13 @@ const SeatChangePaymentPage = () => {
           { label: t('seatChange.payTitle') },
         ]}
       />
-      <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('seatChange.payTitle')}</h1>
-      <p className="mb-6 text-sm text-muted">
-        {t('payment.bookingCode')}: <span className="font-mono text-accent">{booking.code}</span>
+      <h1 className="mb-1 text-h1 font-bold">{t('seatChange.payTitle')}</h1>
+      <p className="mb-6 text-body-2 text-muted">
+        {t('payment.bookingCode')}: <span className="font-code text-accent">{booking.code}</span>
       </p>
 
       <PaymentSummaryCard booking={booking} amountLabel={t('seatChange.amount')} amount={amount}>
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-muted">
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 text-muted">
           {t('ticket.seats')}:
           <span className="font-semibold text-fg">{change.fromSeats.join(', ')}</span>
           <ArrowRight size={14} />
@@ -132,7 +132,7 @@ const SeatChangePaymentPage = () => {
       {status === 'COMPLETED' && (
         <div className="card border-success/40 p-6 text-center sm:p-8">
           <CheckCircle2 className="mx-auto mb-3 text-success" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('seatChange.completedTitle')}</h2>
+          <h2 className="text-h2 font-bold">{t('seatChange.completedTitle')}</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Button as={Link} to={`/booking/${booking.id}/ticket`}>
               <Ticket size={16} /> {t('payment.viewTicket')}
@@ -149,17 +149,17 @@ const SeatChangePaymentPage = () => {
       {status === 'PENDING_VERIFICATION' && (
         <div className="card border-info/40 p-6 text-center sm:p-8">
           <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('seatChange.waitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">{t('seatChange.waitingBody')}</p>
-          <p className="mt-3 text-xs text-muted">{t('payment.waitingHint')}</p>
+          <h2 className="text-h2 font-bold">{t('seatChange.waitingTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('seatChange.waitingBody')}</p>
+          <p className="mt-3 text-caption text-muted">{t('payment.waitingHint')}</p>
         </div>
       )}
 
       {lateWaiting && (
         <div className="card border-info/40 p-6 text-center sm:p-8">
           <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('seatChange.lateWaitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+          <h2 className="text-h2 font-bold">{t('seatChange.lateWaitingTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
             {t('seatChange.lateWaitingBody')}
           </p>
         </div>
@@ -168,8 +168,8 @@ const SeatChangePaymentPage = () => {
       {lateRefund && (
         <div className="card border-accent/40 p-6 text-center sm:p-8">
           <CheckCircle2 className="mx-auto mb-3 text-accent" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('seatChange.lateRefundTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">{t('payment.lateRefundBody')}</p>
+          <h2 className="text-h2 font-bold">{t('seatChange.lateRefundTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('payment.lateRefundBody')}</p>
           <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
           </Button>
@@ -177,18 +177,18 @@ const SeatChangePaymentPage = () => {
       )}
 
       {lateUpload && (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="flex flex-col gap-4">
           <div className="card border-accent/40 p-5 sm:p-6">
-            <h2 className="flex items-center gap-2 text-lg font-bold">
+            <h2 className="flex items-center gap-2 text-h2 font-bold">
               <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('seatChange.lateTitle')}
             </h2>
-            <p className="mt-2 text-sm text-muted sm:text-base">
+            <p className="mt-2 text-body-2 text-muted sm:text-body-1">
               {t('seatChange.lateBody', {
                 time: change.lateSlipUntil ? formatTime(change.lateSlipUntil, lang) : '—',
               })}
             </p>
-            <p className="mt-3 text-sm text-muted">
-              {t('payment.reference')}: <span className="font-mono text-fg">{payment.reference}</span>
+            <p className="mt-3 text-body-2 text-muted">
+              {t('payment.reference')}: <span className="font-code text-fg">{payment.reference}</span>
             </p>
           </div>
           <SlipUploadForm onUpload={handleUpload} />
@@ -198,10 +198,10 @@ const SeatChangePaymentPage = () => {
       {(closed || status === 'CANCELLED') && (
         <div className="card p-6 text-center sm:p-8">
           <AlertTriangle className="mx-auto mb-3 text-muted" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">
+          <h2 className="text-h2 font-bold">
             {status === 'CANCELLED' ? t('seatChange.cancelledTitle') : t('seatChange.expiredTitle')}
           </h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">{t('seatChange.expiredBody')}</p>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('seatChange.expiredBody')}</p>
           <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
           </Button>
@@ -211,29 +211,30 @@ const SeatChangePaymentPage = () => {
       {status === 'PENDING_PAYMENT' && !expired && (
         <>
           {wasRejected && (
-            <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
+            <div className="mb-4 rounded-xl border border-danger/40 bg-danger-bg p-4">
               <p className="flex items-center gap-2 font-semibold text-danger">
                 <AlertTriangle size={16} /> {t('payment.rejectedTitle')}
               </p>
-              <p className="mt-1 text-sm text-fg/90">
+              <p className="mt-1 text-body-2 text-fg/90">
                 {t('payment.rejectedReason')}: {payment.rejectReason}
               </p>
-              <p className="mt-1 text-xs text-muted">{t('payment.rejectedRetry')}</p>
+              <p className="mt-1 text-caption text-muted">{t('payment.rejectedRetry')}</p>
             </div>
           )}
 
-          <p className="mb-4 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-sm text-muted">
+          <p className="mb-4 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-body-2 text-muted">
             {t('seatChange.keepOriginal')}
           </p>
 
-          {/* จอใหญ่วาง QR คู่กับช่องส่งสลิป เห็นทั้งสองขั้นตอนในจอเดียว */}
-          <div className="grid items-start gap-4 lg:grid-cols-2">
+          {/* เรียงตามขั้นตอน สแกนจ่าย → แจ้งชำระ จากบนลงล่างทุกขนาดจอ — โครงเดียวกับหน้าชำระค่าตั๋ว */}
+          <div className="flex flex-col gap-4">
             <PromptPayPanel
               qrPayload={payment.qrPayload}
               reference={payment.reference}
               promptPayId={payment.promptPayId}
               secondsLeft={secondsLeft}
               downloadName={`promptpay-${booking.code}-seats`}
+              notice={t('seatChange.payNotice')}
             />
 
             <SlipUploadForm onUpload={handleUpload} />
@@ -256,7 +257,7 @@ const SeatChangePaymentPage = () => {
         loading={cancelling}
         onConfirm={handleCancel}
       >
-        <p className="text-sm text-muted">
+        <p className="text-body-2 text-muted">
           {t('seatChange.cancelRequestBody', { seats: change.fromSeats.join(', ') })}
         </p>
       </ConfirmModal>

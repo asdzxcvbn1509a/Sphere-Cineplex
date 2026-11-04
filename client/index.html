@@ -3,13 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0B0B0F" />
+    <meta name="theme-color" content="#1C1A17" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      ฟอนต์ตาม Design System: Cinzel (หัวข้ออังกฤษ/แบรนด์) · Inter (ละติน ตัวเลข รหัส) · Noto Sans Thai (ไทยทั้งหมด) · Sarabun (เรื่องย่อหนัง)
+      โหลดเฉพาะน้ำหนักที่ DS ใช้ — Google Fonts แบ่งไฟล์ตามช่วงอักขระ ฟอนต์ไทยจะดาวน์โหลดเมื่อมีตัวไทยแสดงจริงเท่านั้น
+      crossorigin: ปุ่ม "บันทึก E-Ticket" (modern-screenshot) ต้องอ่าน @font-face จาก stylesheet นี้ไปฝังในรูป
+      ถ้าไม่มี เบราว์เซอร์จะไม่ยอมให้อ่าน แล้วรูปตั๋วจะได้ฟอนต์ของเครื่องแทน (preconnect ของ googleapis ต้องมีด้วย ถึงจะใช้ connection เดียวกัน)
+    -->
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun&display=swap"
       rel="stylesheet"
+      crossorigin
     />
     <title>Sphere Cineplex — ระบบจองตั๋วภาพยนตร์</title>
   </head>

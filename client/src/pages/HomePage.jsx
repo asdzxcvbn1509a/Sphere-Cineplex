@@ -35,19 +35,19 @@ const HomePage = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
       {/* มือถือย่อ hero ลง โปสเตอร์แถวแรกจะโผล่ขึ้นมาในจอแรกเลย */}
-      <section className="mb-6 overflow-hidden rounded-3xl border border-line bg-linear-to-br from-surface via-surface to-accent/10 px-5 py-8 sm:mb-8 sm:px-10 sm:py-14">
-        <h1 className="text-2xl font-bold leading-tight sm:text-4xl">{t('home.heroTitle')}</h1>
-        <p className="mt-3 max-w-2xl text-sm text-muted sm:text-base">{t('home.heroSubtitle')}</p>
+      <section className="mb-6 overflow-hidden rounded-3xl border border-card-line bg-linear-to-br from-surface via-surface to-accent/10 px-5 py-8 sm:mb-8 sm:px-10 sm:py-14">
+        <h1 className="text-h1 font-bold">{t('home.heroTitle')}</h1>
+        <p className="mt-3 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('home.heroSubtitle')}</p>
 
         <div className="relative mt-6 max-w-2xl">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
+          <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-field-muted" size={18} />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('home.searchPlaceholder')}
             aria-label={t('home.searchPlaceholder')}
-            className="input-base py-3.5 pl-11 text-base"
+            className="input-base py-3.5 pl-11 text-body-1"
           />
         </div>
       </section>
@@ -63,7 +63,7 @@ const HomePage = () => {
 
           {nowShowing.length > 0 && (
             <section className="mb-10">
-              <h2 className="mb-4 text-xl font-semibold">{t('home.nowShowing')}</h2>
+              <h2 className="mb-4 text-h2 font-semibold">{t('home.nowShowing')}</h2>
               <div className={gridClass}>
                 {nowShowing.map((movie) => (
                   <MovieCard key={movie.id} movie={movie} />
@@ -74,7 +74,7 @@ const HomePage = () => {
 
           {comingSoon.length > 0 && (
             <section>
-              <h2 className="mb-4 text-xl font-semibold">{t('home.comingSoon')}</h2>
+              <h2 className="mb-4 text-h2 font-semibold">{t('home.comingSoon')}</h2>
               <div className={gridClass}>
                 {comingSoon.map((movie) => (
                   <MovieCard key={movie.id} movie={movie} />

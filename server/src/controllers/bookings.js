@@ -77,6 +77,7 @@ export const cancelBooking = async (req, res, next) => {
       refundAccount: {
         bankName: req.body.refundBankName,
         accountNo: req.body.refundAccountNo,
+        accountName: req.body.refundAccountName,
       },
     });
     res.json({ booking });
@@ -94,6 +95,7 @@ export const updateRefundAccount = async (req, res, next) => {
       userId: req.user.id,
       bankName: req.body.refundBankName,
       accountNo: req.body.refundAccountNo,
+      accountName: req.body.refundAccountName,
     });
     res.json({ booking });
   } catch (error) {
@@ -112,6 +114,7 @@ export const requestSeatChange = async (req, res, next) => {
       refundAccount: {
         bankName: req.body.refundBankName,
         accountNo: req.body.refundAccountNo,
+        accountName: req.body.refundAccountName,
       },
     });
     res.status(201).json(result);

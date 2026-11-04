@@ -9,10 +9,13 @@ import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import usePolling from '../../hooks/usePolling.js';
 import Button from '../ui/Button.jsx';
 
+// เมนูของหน้าที่เปิดอยู่ = "รายการที่เลือก" ใน DS (น้ำเงิน) — ขอบโปร่งในเมนูอื่นกันความสูงกระโดดตอนสลับหน้า
 const navClass = ({ isActive }) =>
   clsx(
-    'whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition',
-    isActive ? 'bg-surface-2 text-accent' : 'text-muted hover:text-fg',
+    'whitespace-nowrap rounded-lg border px-3 py-2 text-body-2 font-medium transition',
+    isActive
+      ? 'border-selected-line bg-selected text-on-selected'
+      : 'border-transparent text-muted hover:text-fg',
   );
 
 const Header = () => {
@@ -71,9 +74,10 @@ const Header = () => {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur print:hidden">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
-        <Link to="/" className="flex min-w-0 items-center gap-2 font-bold tracking-tight">
+        <Link to="/" className="flex min-w-0 items-center gap-2">
           <Clapperboard className="shrink-0 text-accent" size={22} />
-          <span className="truncate text-lg">{t('common.appName')}</span>
+          {/* ชื่อแบรนด์ใช้ Cinzel ทั้งสองภาษาตาม DS */}
+          <span className="truncate font-brand text-h2 font-bold">{t('common.appName')}</span>
         </Link>
 
         <nav className="ml-4 hidden items-center gap-1 md:flex">
@@ -96,7 +100,7 @@ const Header = () => {
           <button
             type="button"
             onClick={toggleLang}
-            className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-muted transition hover:border-accent/60 hover:text-fg"
+            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-caption font-medium text-muted transition hover:border-accent/60 hover:text-fg"
             title="เปลี่ยนภาษา / Switch language"
           >
             {t('nav.language')}
@@ -111,7 +115,7 @@ const Header = () => {
               >
                 <Bell size={18} />
                 {unread > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-ink">
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-caption font-medium text-ink">
                     {unread > 9 ? '9+' : unread}
                   </span>
                 )}
@@ -119,13 +123,14 @@ const Header = () => {
 
               <div className="hidden items-center gap-2 md:flex">
                 {/* ช่วง md–lg ที่ว่างไม่พอ (เมนูผู้ดูแล + ชื่อยาว) แสดงแค่ไอคอน ชื่อยาวจอใหญ่ก็ตัดด้วย … */}
+                {/* ปุ่มผู้ใช้เป็นสีน้ำเงินตามบทบาทใน DS */}
                 <Link
                   to="/profile"
-                  className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-1.5 text-sm transition hover:text-accent"
+                  className="flex items-center gap-1.5 rounded-lg bg-blue-70 px-3 py-1.5 text-body-2 text-fg transition hover:bg-blue-60"
                   title={t('nav.profile')}
                   aria-label={t('nav.profile')}
                 >
-                  <User size={14} className="shrink-0 text-muted" />
+                  <User size={14} className="shrink-0 text-blue-30" />
                   <span className="hidden max-w-40 truncate lg:inline">{user?.name}</span>
                 </Link>
                 <Button variant="ghost" size="sm" onClick={handleLogout} title={t('nav.logout')}>
@@ -188,7 +193,7 @@ const Header = () => {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-lg px-3 py-2 text-left text-sm font-medium text-muted transition hover:text-fg"
+                className="rounded-lg border border-transparent px-3 py-2 text-left text-body-2 font-medium text-muted transition hover:text-fg"
               >
                 {t('nav.logout')} ({user?.name})
               </button>

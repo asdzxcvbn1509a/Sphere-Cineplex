@@ -32,33 +32,50 @@ export const normalizeAccountNo = (value) => String(value ?? '').replace(/[\s-]/
 
 export const isValidAccountNo = (value) => /^[0-9]{10,15}$/.test(normalizeAccountNo(value));
 
+/**
+ * เลขบัญชีแบบเว้นวรรคทุก 4 หลัก ไว้ให้ผู้ดูแลอ่านทีละช่วงตอนพิมพ์ลงแอปธนาคาร
+ * ใช้แสดงผลอย่างเดียว — ปุ่มคัดลอกยังคัดลอกเลขดิบที่ไม่มีช่องว่าง
+ */
+export const formatAccountNo = (value) => normalizeAccountNo(value).replace(/(\d{4})(?=\d)/g, '$1 ');
+
+/** ชื่อบัญชีสั้นกว่านี้ไม่น่าใช่ชื่อจริง — server ตรวจแบบเดียวกัน (2–100 ตัวอักษร) */
+const MIN_ACCOUNT_NAME = 2;
+
 /** ค่าเริ่มต้นของฟอร์มบัญชีรับเงินคืน (ใช้กับ RefundAccountFields) */
-export const EMPTY_REFUND_FORM = { bankCode: '', customBank: '', accountNo: '' };
+export const EMPTY_REFUND_FORM = { bankCode: '', customBank: '', accountNo: '', accountName: '' };
 
 /**
  * แปลงบัญชีที่บันทึกไว้แล้วกลับเป็นค่าในฟอร์ม — ตอนลูกค้ากด "แก้ไขบัญชี" จะได้เห็นค่าเดิม
  * ชื่อธนาคารเก็บเป็นภาษาไทย ถ้าไม่ตรงกับรายการให้ถือว่าเป็น "อื่น ๆ" ที่พิมพ์เองไว้
  */
-export const refundFormFromAccount = (bankName, accountNo) => {
+export const refundFormFromAccount = (bankName, accountNo, accountName) => {
   if (!bankName) return EMPTY_REFUND_FORM;
   const bank = BANKS.find((item) => item.th === bankName);
+  const rest = { accountNo: accountNo ?? '', accountName: accountName ?? '' };
   return bank
-    ? { bankCode: bank.code, customBank: '', accountNo: accountNo ?? '' }
-    : { bankCode: OTHER_BANK, customBank: bankName, accountNo: accountNo ?? '' };
+    ? { bankCode: bank.code, customBank: '', ...rest }
+    : { bankCode: OTHER_BANK, customBank: bankName, ...rest };
 };
 
 /**
  * ตรวจฟอร์มบัญชีรับเงินคืน — คืน { value, errors }
- * value = { refundBankName, refundAccountNo } พร้อมส่ง server เมื่อกรอกครบ ไม่งั้นเป็น null
+ * value = { refundBankName, refundAccountNo, refundAccountName } พร้อมส่ง server เมื่อกรอกครบ ไม่งั้นเป็น null
+ * ชื่อบัญชีบังคับที่ฟอร์ม (server ไม่บังคับเพื่อรองรับ client รุ่นก่อน) — ผู้ดูแลต้องใช้เทียบก่อนโอนคืน
  */
 export const readRefundAccountForm = (form, t) => {
   const bankName = form.bankCode === OTHER_BANK ? form.customBank.trim() : bankNameByCode(form.bankCode);
+  const accountName = form.accountName.trim();
   const errors = {};
   if (!bankName) errors.bank = t('bookings.bankRequired');
   if (!isValidAccountNo(form.accountNo)) errors.accountNo = t('bookings.accountNoInvalid');
+  if (accountName.length < MIN_ACCOUNT_NAME) errors.accountName = t('bookings.accountNameRequired');
   if (Object.keys(errors).length > 0) return { value: null, errors };
   return {
-    value: { refundBankName: bankName, refundAccountNo: normalizeAccountNo(form.accountNo) },
+    value: {
+      refundBankName: bankName,
+      refundAccountNo: normalizeAccountNo(form.accountNo),
+      refundAccountName: accountName,
+    },
     errors,
   };
 };

@@ -21,7 +21,7 @@ CineBook — movie theatre seat booking for a Thai audience: React SPA (`client/
 - Server: `routes/` (zod `validate`) → `controllers/` (req/res only, never Prisma) → `services/` (rules + Prisma). `utils/` pure helpers, `lib/` Prisma client + slip storage, `jobs/` interval jobs
 - Shared server modules: `services/locks.js` (lock order, row locks, 409 errors), `services/slips.js` (slip window and submission for bookings and seat changes), `services/seatChangeRules.js`, `utils/bookingAccess.js`, `utils/pagination.js` (`findPage`)
 - Client: `api/` modules, `hooks/useApi.js` (`useApi`, `usePagedApi`), `ConfirmModal`, i18n via `t()` and `pick()`
-- Reference: [architecture](docs/architecture.md) · [API](docs/api.md) · [state machines](docs/state-machines.md) · [configuration](docs/configuration.md) · [testing](docs/testing.md)
+- Reference: [architecture](docs/architecture.md) · [API](docs/api.md) · [state machines](docs/state-machines.md) · [configuration](docs/configuration.md) · [testing](docs/testing.md) · [design system](docs/design-system.md)
 
 ## Invariants — don't break these
 
@@ -42,11 +42,13 @@ CineBook — movie theatre seat booking for a Thai audience: React SPA (`client/
 - The access token lives in memory only; the refresh cookie `trs_refresh` (path `/api/auth`, `SameSite=lax`) requires the browser to call `/api` on the web app's own origin
 - With `PROXY_SECRET` set (production), every route except `/api/health` needs the `x-proxy-secret` header that `client/vercel.json` adds — calls straight to the Render URL get 403 `DIRECT_ACCESS_FORBIDDEN`. Keep it empty locally; tests pass `createApp({ proxySecret })`
 - `client/src/pages/SeatSelectionPage.jsx` and `ChangeSeatsPage.jsx` hard-code `MAX_SEATS` / `HOLD_MINUTES` to match the server's defaults
+- The fit-to-screen admin lists (bookings, showtimes, movies, theatres, users; `components/admin/fitLayout.js` + `hooks/useFitPageSize.js`) compute rows per page from a `ROW_HEIGHT` constant in each page. Keep it equal to the rows' `xl:h-*` class, and keep every `xl` cell to a fixed number of lines (`xl:truncate`, `line-clamp`), or rows overflow the box
 - `docs/` is gitignored except its top-level `*.md` files
 
 ## Conventions
 
 - Code comments are in Thai and explain why; Markdown docs are in English
 - Match the existing style: ESM, 2 spaces, single quotes, semicolons, trailing commas, arrow functions, LF line endings
+- UI styling uses only the design-system tokens in `client/src/index.css`: semantic colors (`page`, `surface`, `accent`, `selected`, `field`, status `*-bg` …), the `cocoa|blue|gold|cream-10…100` palette, and the type scale `text-h1|h2|body-1|body-2|caption`. Tailwind's default colors and sizes are disabled and silently produce no CSS. Modals and ticket/receipt re-theme via `.theme-blue` / `.theme-paper`
 - New endpoint: route + controller + service + `client/src/api` function + [docs/api.md](docs/api.md) + `server/api.http` + integration test
 - Changed state transition: update [docs/state-machines.md](docs/state-machines.md) and add a concurrency test

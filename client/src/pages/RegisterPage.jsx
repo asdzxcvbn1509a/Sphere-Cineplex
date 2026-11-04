@@ -89,8 +89,8 @@ const RegisterPage = () => {
             <UserPlus size={20} />
           </span>
           <div>
-            <h1 className="text-2xl font-bold">{t('register.title')}</h1>
-            <p className="text-sm text-muted">{t('register.subtitle')}</p>
+            <h1 className="text-h1 font-bold">{t('register.title')}</h1>
+            <p className="text-body-2 text-muted">{t('register.subtitle')}</p>
           </div>
         </div>
 
@@ -160,7 +160,7 @@ const RegisterPage = () => {
           </Field>
 
           {fieldError.form && (
-            <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <p className="rounded-lg border border-danger/40 bg-danger-bg px-3 py-2 text-body-2 text-danger">
               {fieldError.form}
             </p>
           )}
@@ -170,7 +170,7 @@ const RegisterPage = () => {
           </Button>
         </form>
 
-        <p className="mt-6 border-t border-line pt-4 text-center text-sm text-muted">
+        <p className="mt-6 border-t border-line pt-4 text-center text-body-2 text-muted">
           {t('register.haveAccount')}{' '}
           <Link
             to="/login"

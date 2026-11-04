@@ -66,8 +66,8 @@ const LoginPage = () => {
             <LogIn size={20} />
           </span>
           <div>
-            <h1 className="text-2xl font-bold">{t("login.title")}</h1>
-            <p className="text-sm text-muted">{t("login.subtitle")}</p>
+            <h1 className="text-h1 font-bold">{t("login.title")}</h1>
+            <p className="text-body-2 text-muted">{t("login.subtitle")}</p>
           </div>
         </div>
 
@@ -96,7 +96,7 @@ const LoginPage = () => {
           <p className="-mt-2 text-right">
             <Link
               to="/forgot-password"
-              className="text-sm text-muted transition hover:text-accent"
+              className="text-body-2 text-muted transition hover:text-accent"
             >
               {t("login.forgotPassword")}
             </Link>
@@ -113,7 +113,7 @@ const LoginPage = () => {
           </Button>
         </form>
 
-        <p className="mt-6 border-t border-line pt-4 text-center text-sm text-muted">
+        <p className="mt-6 border-t border-line pt-4 text-center text-body-2 text-muted">
           {t("login.noAccount")}{" "}
           <Link
             to="/register"

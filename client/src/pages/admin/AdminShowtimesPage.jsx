@@ -15,8 +15,15 @@ import Textarea from '../../components/ui/Textarea.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
+import { FIT_BODY, FIT_CARD, FIT_PAGE, FIT_PAGER } from '../../components/admin/fitLayout.js';
 import useApi from '../../hooks/useApi.js';
+import useFitPageSize from '../../hooks/useFitPageSize.js';
 import { bangkokDateKey, formatDateTime, formatMoney, formatTime, toBangkokInputValue } from '../../utils/format.js';
+import { slicePage } from '../../utils/pagination.js';
+
+/** ระยะต่อแถวบนจอ xl = xl:h-14 (56px) — เปลี่ยนคู่กับ class ของแถว · เส้นคั่นแถวรวมอยู่ในความสูงนี้แล้ว (border-collapse) */
+const ROW_HEIGHT = 56;
 
 const AdminShowtimesPage = () => {
   const { t, lang, pick } = useI18n();
@@ -24,6 +31,7 @@ const AdminShowtimesPage = () => {
   const [movies, setMovies] = useState([]);
   const [theatres, setTheatres] = useState([]);
   const [date, setDate] = useState(bangkokDateKey());
+  const [page, setPage] = useState(1);
   // หน้าต่างเพิ่ม/แก้รอบ — { id: 'new' | showtimeId, form } · null = ปิดอยู่
   const [formSeed, setFormSeed] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -40,6 +48,12 @@ const AdminShowtimesPage = () => {
     () => listShowtimes({ date }).then(({ data }) => data.showtimes),
     [date],
   );
+
+  // ได้รอบของวันนั้นครบแล้ว จึงแบ่งหน้าฝั่งเว็บ — จอใหญ่หน้าละเท่าที่วางพอดีจอ ทั้งหน้าไม่ต้องเลื่อน
+  const fit = useFitPageSize(ROW_HEIGHT);
+  const paged = slicePage(showtimes, page, fit.pageSize);
+  // โหลดครั้งแรก = ยังไม่มีอะไรให้ดู · โหลดซ้ำหลังบันทึก/ยกเลิก/ลบ คงตารางเดิมไว้แค่หรี่ลง
+  const showSpinner = loading && showtimes.length === 0;
 
   useEffect(() => {
     Promise.all([listMovies(), listTheatres()])
@@ -122,15 +136,18 @@ const AdminShowtimesPage = () => {
     showtime.status === 'SCHEDULED' && new Date(showtime.endsAt).getTime() > Date.now();
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className={FIT_PAGE}>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold sm:text-3xl">{t('admin.showtimes')}</h1>
+        <h1 className="text-h1 font-bold">{t('admin.showtimes')}</h1>
         {/* มือถือช่องวันที่ยืดเต็มแถวข้างปุ่มเพิ่ม จอใหญ่กว้างเท่าที่ต้องใช้ */}
         <div className="flex w-full items-center gap-2 sm:w-auto">
           <Input
             type="date"
             value={date}
-            onChange={(event) => setDate(event.target.value)}
+            onChange={(event) => {
+              setDate(event.target.value);
+              setPage(1);
+            }}
             className="min-w-0 flex-1 sm:w-auto sm:flex-none"
           />
           <Button onClick={openCreate} disabled={movies.length === 0 || activeTheatres.length === 0}>
@@ -139,99 +156,135 @@ const AdminShowtimesPage = () => {
         </div>
       </div>
 
-      {loading && <LoadingBlock label={t('common.loading')} />}
-      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
-
-      {!loading && !error && (
-        <div className="card overflow-x-auto">
-          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
-          <table className="stack-table w-full min-w-180 text-sm sm:text-base">
-            <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.startsAt')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.movie')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.theatre')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.basePrice')}</th>
-                <th className="px-4 py-3 font-medium">{t('seats.available')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {showtimes.length === 0 && (
+      {error ? (
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
+      ) : (
+        // แบ่งหน้าอยู่ท้ายการ์ดเดียวกับตาราง — overflow-hidden ตัดมุมแถบท้ายให้โค้งตามการ์ด
+        <div className={FIT_CARD}>
+          <div ref={fit.ref} className={FIT_BODY}>
+            {/*
+              จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด
+              จอ xl ความกว้างคอลัมน์ตายตัว (table-fixed) ทุกช่องบรรทัดเดียว ชื่อหนังกับชื่อโรงที่ยาวตัดด้วย … ทุกแถวจึงสูงเท่ากัน
+              ช่องเวลากว้างพอวางป้าย "ยกเลิกแล้ว" ต่อท้ายในบรรทัดเดียวกัน
+            */}
+            <table className="stack-table w-full min-w-180 text-body-2 sm:text-body-1 xl:table-fixed">
+              <thead className="border-b border-line bg-surface-2/60 text-left text-caption uppercase tracking-wide text-muted">
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted">
-                    {t('movie.noShowtimes')}
-                  </td>
+                  <th className="px-4 py-3 font-medium xl:w-60">{t('admin.showtimeForm.startsAt')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.showtimeForm.movie')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-44">{t('admin.showtimeForm.theatre')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-36">{t('admin.showtimeForm.basePrice')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-28">{t('seats.available')}</th>
+                  <th className="px-4 py-3 text-right font-medium xl:w-40">{t('common.actions')}</th>
                 </tr>
-              )}
-              {showtimes.map((showtime) => (
-                <tr
-                  key={showtime.id}
-                  className={clsx(
-                    'border-b border-line/60 last:border-0',
-                    showtime.status === 'CANCELLED' && 'text-muted',
-                  )}
-                >
-                  <td className="px-4 py-3 font-semibold">
-                    {formatTime(showtime.startsAt, lang)} – {formatTime(showtime.endsAt, lang)}
-                    {showtime.status === 'CANCELLED' && (
-                      <StatusBadge
-                        status="CANCELLED"
-                        label={t('admin.showtimeForm.statusCancelled')}
-                        className="ml-2 align-middle"
-                      />
-                    )}
-                  </td>
-                  <td className="px-4 py-3" data-label={t('admin.showtimeForm.movie')}>
-                    {pick(showtime.movie, 'title')}
-                  </td>
-                  <td className="px-4 py-3 text-muted" data-label={t('admin.showtimeForm.theatre')}>
-                    {showtime.theatre.name}
-                    <span className="ml-1 text-xs">({showtime.theatre.screenType})</span>
-                  </td>
-                  <td className="px-4 py-3 text-muted" data-label={t('admin.showtimeForm.basePrice')}>
-                    {formatMoney(showtime.basePrice, lang)}
-                    <span className="ml-1 text-xs">
-                      / {formatMoney(showtime.prices.PREMIUM, lang)} / {formatMoney(showtime.prices.SOFA, lang)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3" data-label={t('seats.available')}>
-                    <span className={showtime.availableSeats === 0 ? 'text-danger' : 'text-success'}>
-                      {showtime.availableSeats}
-                    </span>
-                    <span className="text-muted"> / {showtime.totalSeats}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap justify-end gap-1">
-                      {showtime.status === 'SCHEDULED' && (
-                        <Button variant="ghost" size="sm" title={t('common.edit')} onClick={() => openEdit(showtime)}>
-                          <Pencil size={14} />
-                        </Button>
+              </thead>
+              <tbody
+                aria-busy={loading || undefined}
+                className={clsx('transition', loading && !showSpinner && 'opacity-60')}
+              >
+                {showSpinner && (
+                  <tr>
+                    <td colSpan={6}>
+                      <LoadingBlock label={t('common.loading')} />
+                    </td>
+                  </tr>
+                )}
+                {!showSpinner && showtimes.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted">
+                      {t('movie.noShowtimes')}
+                    </td>
+                  </tr>
+                )}
+                {!showSpinner &&
+                  paged.items.map((showtime) => (
+                    <tr
+                      key={showtime.id}
+                      className={clsx(
+                        'border-b border-line/60 last:border-0 xl:h-14',
+                        showtime.status === 'CANCELLED' && 'text-muted',
                       )}
-                      {canCancelShowtime(showtime) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title={t('admin.showtimeForm.cancelAction')}
-                          onClick={() => openCancel(showtime)}
-                        >
-                          <Ban size={14} className="text-accent" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title={t('common.delete')}
-                        onClick={() => setDeleteTarget(showtime)}
+                    >
+                      <td className="px-4 py-3 font-semibold xl:truncate">
+                        {formatTime(showtime.startsAt, lang)} – {formatTime(showtime.endsAt, lang)}
+                        {showtime.status === 'CANCELLED' && (
+                          <StatusBadge
+                            status="CANCELLED"
+                            label={t('admin.showtimeForm.statusCancelled')}
+                            className="ml-2 align-middle"
+                          />
+                        )}
+                      </td>
+                      <td
+                        className="px-4 py-3 xl:truncate"
+                        data-label={t('admin.showtimeForm.movie')}
+                        title={pick(showtime.movie, 'title')}
                       >
-                        <Trash2 size={14} className="text-danger" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {pick(showtime.movie, 'title')}
+                      </td>
+                      <td
+                        className="px-4 py-3 text-muted xl:truncate"
+                        data-label={t('admin.showtimeForm.theatre')}
+                        title={`${showtime.theatre.name} (${showtime.theatre.screenType})`}
+                      >
+                        {showtime.theatre.name}
+                        <span className="ml-1 text-caption">({showtime.theatre.screenType})</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted xl:truncate" data-label={t('admin.showtimeForm.basePrice')}>
+                        {formatMoney(showtime.basePrice, lang)}
+                        <span className="ml-1 text-caption">
+                          / {formatMoney(showtime.prices.PREMIUM, lang)} / {formatMoney(showtime.prices.SOFA, lang)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 xl:truncate" data-label={t('seats.available')}>
+                        <span className={showtime.availableSeats === 0 ? 'text-danger' : 'text-success'}>
+                          {showtime.availableSeats}
+                        </span>
+                        <span className="text-muted"> / {showtime.totalSeats}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap justify-end gap-1 xl:flex-nowrap">
+                          {showtime.status === 'SCHEDULED' && (
+                            <Button variant="ghost" size="sm" title={t('common.edit')} onClick={() => openEdit(showtime)}>
+                              <Pencil size={14} />
+                            </Button>
+                          )}
+                          {canCancelShowtime(showtime) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title={t('admin.showtimeForm.cancelAction')}
+                              onClick={() => openCancel(showtime)}
+                            >
+                              <Ban size={14} className="text-accent" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={t('common.delete')}
+                            onClick={() => setDeleteTarget(showtime)}
+                          >
+                            <Trash2 size={14} className="text-danger" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ซ่อนตัวเองเมื่อมีหน้าเดียว — จอ xl กันที่ไว้แม้ตอนซ่อน กล่องตารางจะได้ไม่ยืดหดจนจำนวนแถวต่อหน้าเปลี่ยนตาม */}
+          <Pagination
+            numbered
+            reserveSpace={fit.active}
+            className={FIT_PAGER}
+            page={paged.page}
+            pageSize={fit.pageSize}
+            total={showtimes.length}
+            onChange={setPage}
+          />
         </div>
       )}
 
@@ -258,7 +311,7 @@ const AdminShowtimesPage = () => {
         onConfirm={remove}
       >
         {deleteTarget && (
-          <p className="text-sm text-muted">
+          <p className="text-body-2 text-muted">
             {t('admin.showtimeForm.deleteBody', {
               time: formatDateTime(deleteTarget.startsAt, lang),
               movie: pick(deleteTarget.movie, 'title'),
@@ -279,14 +332,14 @@ const AdminShowtimesPage = () => {
       >
         {cancelTarget && (
           <div className="flex flex-col gap-4">
-            <p className="text-sm font-medium">
+            <p className="text-body-2 font-medium">
               {t('admin.showtimeForm.cancelBody', {
                 time: formatDateTime(cancelTarget.startsAt, lang),
                 movie: pick(cancelTarget.movie, 'title'),
                 theatre: cancelTarget.theatre.name,
               })}
             </p>
-            <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <p className="rounded-lg border border-danger/40 bg-danger-bg px-3 py-2 text-body-2 text-danger">
               {t('admin.showtimeForm.cancelEffects')}
             </p>
             <Field label={t('admin.showtimeForm.cancelReason')}>

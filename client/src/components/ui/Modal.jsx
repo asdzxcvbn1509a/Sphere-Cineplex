@@ -21,7 +21,7 @@ const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/75 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <button
         type="button"
         aria-label="ปิดหน้าต่าง"
@@ -33,7 +33,8 @@ const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
         aria-modal="true"
         className={clsx(
           // dvh = ความสูงที่เห็นจริงบนมือถือ (vh รวมส่วนที่แถบ URL บังอยู่ ปุ่มท้ายหน้าต่างจะหลุดจอ)
-          'animate-fade-up card relative max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-b-none sm:rounded-2xl',
+          // theme-blue = หน้าต่างเป็นพื้นน้ำเงินตาม DS — การ์ด ปุ่ม เส้นคั่นข้างในเปลี่ยนสีตามเอง (ดู index.css)
+          'theme-blue animate-fade-up card relative max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-b-none sm:rounded-2xl',
           size === 'sm' && 'sm:max-w-md',
           size === 'md' && 'sm:max-w-xl',
           size === 'lg' && 'sm:max-w-3xl',
@@ -41,11 +42,11 @@ const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
         )}
       >
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-line bg-surface-2/95 px-5 py-4 backdrop-blur">
-          <h2 className="text-lg font-semibold">{title}</h2>
+          <h2 className="text-h2 font-semibold">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-muted transition hover:bg-surface-2 hover:text-fg"
+            className="rounded-lg p-1 text-muted transition hover:bg-fg/8 hover:text-fg"
             aria-label="ปิด"
           >
             <X size={18} />

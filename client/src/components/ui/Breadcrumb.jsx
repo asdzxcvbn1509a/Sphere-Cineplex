@@ -12,7 +12,7 @@ const Breadcrumb = ({ items, className }) => {
 
   return (
     <nav aria-label={t('common.breadcrumb')} className={className}>
-      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted">
+      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-body-2 text-muted">
         {items.map((item, index) => {
           const current = index === items.length - 1;
           return (

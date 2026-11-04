@@ -158,15 +158,15 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
           <div className="-mt-2 flex flex-col gap-4 rounded-xl border border-line bg-surface-2/50 p-3">
             {/* รอบที่มีอยู่แล้วในโรงนี้วันนี้ ให้เห็นภาพว่าเวลาไหนถูกจองไปแล้ว */}
             <div>
-              <p className="mb-1.5 text-sm font-medium text-muted">{t('admin.showtimeForm.busyInTheatre')}</p>
+              <p className="mb-1.5 text-body-2 font-medium text-muted">{t('admin.showtimeForm.busyInTheatre')}</p>
               {availability.busy.length === 0 ? (
-                <p className="text-sm text-success">{t('admin.showtimeForm.noBusy')}</p>
+                <p className="text-body-2 text-success">{t('admin.showtimeForm.noBusy')}</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {availability.busy.map((item) => (
                     <span
                       key={item.id}
-                      className="rounded-md border border-danger/30 bg-danger/10 px-2 py-1 text-xs text-danger"
+                      className="rounded-md border border-danger/30 bg-danger-bg px-2 py-1 text-caption text-danger"
                       title={pick(item.movie, 'title')}
                     >
                       {formatTime(item.startsAt, lang)}–{formatTime(item.endsAt, lang)}
@@ -178,11 +178,11 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
 
             {/* เวลาที่ลงรอบได้จริง คำนวณจากความยาวหนัง + เวลาเว้นระหว่างรอบ */}
             <div>
-              <p className="mb-1.5 text-sm font-medium text-muted">
+              <p className="mb-1.5 text-body-2 font-medium text-muted">
                 {t('admin.showtimeForm.freeSlots', { minutes: availability.turnaroundMinutes })}
               </p>
               {availability.freeSlots.length === 0 ? (
-                <p className="text-sm text-danger">{t('admin.showtimeForm.noFreeSlot')}</p>
+                <p className="text-body-2 text-danger">{t('admin.showtimeForm.noFreeSlot')}</p>
               ) : (
                 <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
                   {availability.freeSlots.map((slot) => {
@@ -193,10 +193,11 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
                         key={slot}
                         type="button"
                         onClick={() => setForm((current) => ({ ...current, startsAt: value }))}
+                        // เวลาที่เลือก = รายการที่เลือก (DS) — อยู่ใน Modal จึงเป็นฟ้าอ่อนจาก theme-blue
                         className={
                           active
-                            ? 'rounded-md border border-accent bg-accent px-2 py-1 text-xs font-semibold text-ink'
-                            : 'rounded-md border border-line bg-surface px-2 py-1 text-xs text-fg transition hover:border-accent hover:text-accent'
+                            ? 'rounded-md border border-selected-line bg-selected px-2 py-1 text-caption font-medium text-on-selected'
+                            : 'rounded-md border border-line-strong bg-surface px-2 py-1 text-caption text-fg transition hover:border-accent hover:text-accent'
                         }
                       >
                         {formatTime(slot, lang)}

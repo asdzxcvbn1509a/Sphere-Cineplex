@@ -68,15 +68,16 @@ The booking, payment and seat-change services share these modules. None of them 
 api/          one module per endpoint group + client.js (axios instance, token refresh) and refresh.js (cross-tab refresh lock)
 store/        zustand: authStore (in-memory access token), notificationStore, adminQueueStore
 context/      I18nContext (t, pick, lang) and ToastContext
-hooks/        useApi / usePagedApi (loading + error state), usePolling, useCountdown, useSeatSelection
+hooks/        useApi / usePagedApi (loading + error state), useFitPageSize, usePolling, useCountdown, useSeatSelection
 components/   ui kit (Button, Modal, ConfirmModal, Chip, …), layout, seat map, payment, booking, admin
 pages/        customer pages; pages/admin/ for the back office
 i18n/         th.json and en.json — every key must exist in both
 ```
 
-- **Loading data** — pages call `useApi(fetcher, deps)`, which returns `{ data, loading, error, reload }`. `reload({ silent: true })` refetches without the loading state (polling, after an action), and a response that arrives after a newer request is discarded. Paginated admin lists use `usePagedApi`, which also jumps back to the last page that has data when the requested page is out of range
+- **Loading data** — pages call `useApi(fetcher, deps)`, which returns `{ data, loading, error, reload }`. `reload({ silent: true })` refetches without the loading state (polling, after an action), and a response that arrives after a newer request is discarded. Paginated admin lists use `usePagedApi`, which also jumps back to the last page that has data when the requested page is out of range. Both take `enabled` (default `true`): while it is `false` nothing is fetched and the hook stays in the loading state, which lets the fit-to-screen admin lists wait for their page size before the first request
 - **Confirmations** — two-button dialogs use `ConfirmModal`; dialogs that are forms or offer more than one action use `Modal` directly
 - **Data from the database in two languages** — `pick(movie, 'title')` returns `titleTh` or `titleEn` for the current language
+- **Styling** — Tailwind classes built only from the design-system tokens in `index.css` (Tailwind's default colors and font sizes are switched off). Modals and the light E-Ticket/receipt re-theme their contents with the `.theme-blue` / `.theme-paper` scopes. See [Design system](design-system.md)
 
 ## Background jobs
 
@@ -348,11 +349,22 @@ The numbers live in a shared zustand store (`store/adminQueueStore.js`), like th
 This system doesn't charge money itself (it takes payment by transfer + slip review), so it can't refund automatically either. When a paid booking is cancelled, its payment becomes `REFUND_PENDING` and enters the queue at `/admin/refunds` with the customer's name and phone number. The admin transfers the refund in their banking app and records it (a refund slip must be attached); the system then changes it to `REFUNDED` and notifies the user
 Differences from [changing seats](#seat-changes) to cheaper ones go into this same queue. The amount to transfer for every item is in `refundAmount` (for a cancelled booking that had changed seats, the refund is the net amount, not what was paid at booking time)
 
-**Destination account** — since transfers are manual, the system has to know which account to refund to. The cancel dialog for **paid bookings only** has fields to choose a bank (from a list of major banks, or typed in) and enter the account number. Without them the cancellation fails (400 `REFUND_ACCOUNT_REQUIRED`). Unpaid bookings aren't asked for this, since there's no money to return
+**The refund page** has the same three panels as the slip review queue, and both pages share the list panel (`components/admin/QueueList.jsx`), the selection logic (`hooks/useQueueSelection.js`) and the layout classes (`components/admin/queueLayout.js`):
+- **List** — the "Awaiting refund" / "Refunded" switch picks the list. Awaiting refund shows the longest waiting first; refunded shows the latest refund first. The sort button reverses either order on the server, so it holds across pages
+- **Middle panel** — a slip drop zone while the item is awaiting refund (with an optional note), or the refund slip once it's refunded
+- **Detail panel**
+  - The destination account, with the amount, a copy button for the account number and a "Confirm refund" button that stays disabled until a slip is attached
+  - For refunded items, a short history: what caused the refund, then who confirmed it and when
+  - The badge and the first history entry are named after the cause, not after "the customer", because nothing records who cancelled (customer, admin or a cancelled showtime)
+  - For late payments the time shown is when the slip was sent (`slipUploadedAt`), since `refundDueAt` is when the admin approved it
 
-Account numbers are accepted with dashes or spaces (`123-4-56789-0`); the system strips them down to 10-15 digits before storing. The account given is shown on the customer's own card, on the card in the refund queue, and once more in the confirmation dialog before the admin marks it as transferred
+**Destination account** — since transfers are manual, the system has to know which account to refund to. The cancel dialog for **paid bookings only** has fields to choose a bank (from a list of major banks, or typed in) and enter the account number and the account holder's name. Without a bank and account number the cancellation fails (400 `REFUND_ACCOUNT_REQUIRED`). Unpaid bookings aren't asked for this, since there's no money to return
 
-**Proof of refund** — the slip the admin attaches when recording the refund can be viewed by the customer at `/my-bookings` (the "Refund slip" button, with the note and the date and time of the transfer). It's the customer's own money, so letting them see the proof right there cuts out "have you refunded me yet?" questions. It uses the same permission-checked route as payment slips, so nobody else can open it (403). If the wrong slip was attached or the note has a typo, the admin can click "Edit record" in the "Refunded" tab to replace the slip or fix the note (`PATCH /api/admin/refunds/:id`); the status stays refunded and the customer isn't notified again
+The holder name lets the admin check the name their banking app shows before sending money, which matters because refunds can go to someone else's account (a family member, for example). The web app requires it, but the API treats it as optional so older clients keep working. Accounts given before the field existed show "Not provided" in the queue
+
+Account numbers are accepted with dashes or spaces (`123-4-56789-0`); the system strips them down to 10-15 digits before storing. The account given is shown on the customer's own card and in the refund queue's detail panel, grouped in fours so it is easy to type into a banking app
+
+**Proof of refund** — the slip the admin attaches when recording the refund can be viewed by the customer at `/my-bookings` (the "Refund slip" button, with the note and the date and time of the transfer). It's the customer's own money, so letting them see the proof right there cuts out "have you refunded me yet?" questions. It uses the same permission-checked route as payment slips, so nobody else can open it (403). If the wrong slip was attached or the note has a typo, the admin can click "Edit" on a refunded item to replace the slip or fix the note (`PATCH /api/admin/refunds/:id`); the status stays refunded and the customer isn't notified again
 
 If the booking was cancelled by an admin (the customer phoned in, or the whole showtime was cancelled) or the money was transferred after the deadline, no account comes with it
 The customer can add one at `/my-bookings` (the "Add refund account" button — editable for as long as the refund is pending). Meanwhile the refund queue shows "No account given — call the customer"
@@ -393,7 +405,7 @@ The seat change page starts with the current seats all selected (dashed outline)
 | New seat price | Result |
 |---|---|
 | Same | Moved immediately |
-| Cheaper | Moved immediately; the customer enters a refund account and the difference goes into the `/admin/refunds` queue as a separate item ("Seat change difference" badge) |
+| Cheaper | Moved immediately; the customer enters a refund account and the difference goes into the `/admin/refunds` queue as a separate item ("Difference to refund" badge) |
 | Pricier | The new seats are held for `SEAT_HOLD_MINUTES` while the difference is transferred via PromptPay QR; meanwhile the current seats still belong to the customer → the slip enters the same `/admin/payments` queue as ticket payments → the move only happens once an admin approves, and a new difference receipt is issued (also emailed) |
 
 Not transferring in time, a rejected slip, or the customer cancelling the request = the move just doesn't happen; the current seats aren't lost
@@ -427,11 +439,18 @@ The history of every request is in the `SeatChange` table (who moved, from where
 
 ### Responsive layout
 
-Designed mobile-first (usable from 360px wide), then scaled up with Tailwind breakpoints — `sm` 640 · `md` 768 · `lg` 1024
+Designed mobile-first (usable from 360px wide), then scaled up with Tailwind breakpoints — `sm` 640 · `md` 768 · `lg` 1024 · `xl` 1280
 - **Seat map** — theatres with 12–16 seats per row are wider than a phone screen, and shrinking the map to fit makes seats too small to tap reliably, so it scrolls horizontally instead
   On load, the map scrolls by itself to the seats already selected (or the middle of the theatre), row letters stick to the left edge while scrolling, and a hint appears only when the map overflows the screen
 - **Sticky summary bar** (`BottomBar`) — measures its own height and sets it as the CSS variable `--bottom-bar`
   The layout uses it to leave space at the bottom of the page, and toasts use it to float above the bar, so neither the content nor the confirm button is covered, however many lines tall the bar is
 - **Admin tables** — on screens narrower than `lg`, each row is shown as a card using the shared `.stack-table` class in `index.css`
   Column names come from each `<td>`'s `data-label`, so the markup doesn't have to be written twice
-- **Large screens** — the payment page puts the QR next to the slip upload, the profile page splits into two columns, and the admin sidebar stays in view while scrolling
+- **Admin list pages that fit the screen** (bookings, showtimes, movies, theatres, users) — on `xl` the page is exactly as tall as the space under the header and never scrolls; the admin moves through the list with the numbered page buttons instead
+  - The layout classes are in `components/admin/fitLayout.js`. The list box stretches over the rest of the page, so its height doesn't depend on how many rows it holds
+  - `hooks/useFitPageSize.js` measures that box (minus the table header) with a `ResizeObserver` and returns how many rows fit. Resizing the window recalculates it after a short pause, keeping the page number (an out-of-range page drops to the last one)
+  - Every row has the same fixed height on `xl` (`xl:h-*`, with a matching constant in the page), so the count can be computed before any data arrives. The tables use `table-fixed` with set widths for the short columns, and long text is cut with … (hover shows it in full). A horizontal scrollbar would change the box height and the count, so the tables must never overflow sideways
+  - Bookings and users pass the count to the server as `pageSize` and wait for it (`enabled`) before the first request. Movies, showtimes and theatres are already loaded in full, so they are sliced in the browser (`utils/pagination.js`)
+  - `Pagination reserveSpace` keeps an invisible strip of the same height while there is only one page. Otherwise the box would grow and shrink as the strip appears and disappears, changing the count and causing another request
+  - Below `xl` these pages scroll as usual, 50 items per page
+- **Large screens** — the profile page splits into two columns, and the admin sidebar stays in view while scrolling

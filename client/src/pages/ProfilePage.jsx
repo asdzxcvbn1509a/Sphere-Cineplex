@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { KeyRound, Mail, Phone, ShieldCheck, UserRound } from 'lucide-react';
+import { KeyRound, Mail, Phone, UserRound } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { changePassword as changePasswordApi, updateProfile } from '../api/auth.js';
 import { useAuthStore, useAuthUser } from '../store/authStore.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import Field from '../components/ui/Field.jsx';
 import Input from '../components/ui/Input.jsx';
@@ -89,13 +90,16 @@ const ProfilePage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('profile.title')}</h1>
-      <p className="mb-6 text-sm text-muted sm:text-base">{t('profile.subtitle')}</p>
+      <Breadcrumb
+        className="mb-4"
+        items={[{ label: t('nav.home'), to: '/' }, { label: t('nav.profile') }]}
+      />
+      <h1 className="mb-1 text-h1 font-bold">{t('profile.title')}</h1>
+      <p className="mb-6 text-body-2 text-muted sm:text-body-1">{t('profile.subtitle')}</p>
 
-      {/* จอใหญ่วางสองการ์ดคู่กัน ช่องกรอกจะไม่ยืดยาวเต็มหน้า */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="flex flex-col gap-4">
         <section className="card p-5 sm:p-7">
-          <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
+          <h2 className="flex items-center gap-2 text-h2 font-bold">
             <UserRound size={20} className="text-accent" /> {t('profile.accountSection')}
           </h2>
 
@@ -106,19 +110,19 @@ const ProfilePage = () => {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-                <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
+                <p className="flex items-center gap-1.5 text-caption uppercase tracking-wide text-muted sm:text-body-2">
                   <Mail size={14} /> {t('register.emailLabel')}
                 </p>
-                <p className="mt-1 truncate text-sm sm:text-base">{user?.email}</p>
+                <p className="mt-1 truncate text-body-2 sm:text-body-1">{user?.email}</p>
               </div>
               <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-                <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted sm:text-sm">
+                <p className="flex items-center gap-1.5 text-caption uppercase tracking-wide text-muted sm:text-body-2">
                   <Phone size={14} /> {t('register.phoneLabel')}
                 </p>
-                <p className="mt-1 text-sm sm:text-base">{user?.phone}</p>
+                <p className="mt-1 text-body-2 sm:text-body-1">{user?.phone}</p>
               </div>
             </div>
-            <p className="text-xs text-muted sm:text-sm">{t('profile.contactLocked')}</p>
+            <p className="text-caption text-muted sm:text-body-2">{t('profile.contactLocked')}</p>
 
             <div>
               <Button type="submit" loading={savingName} disabled={name.trim() === user?.name}>
@@ -129,12 +133,11 @@ const ProfilePage = () => {
         </section>
 
         <section className="card p-5 sm:p-7">
-          <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
+          <h2 className="flex items-center gap-2 text-h2 font-bold">
             <KeyRound size={20} className="text-accent" /> {t('profile.passwordSection')}
           </h2>
-          <p className="mt-1 flex items-start gap-1.5 text-xs text-muted sm:text-sm">
-            <ShieldCheck size={14} className="mt-0.5 shrink-0" /> {t('profile.passwordNotice')}
-          </p>
+          {/* เยื้อง 28px = ไอคอนหัวข้อ 20px + gap-2 ให้คำเตือนตรงกับตัวหนังสือหัวข้อ อ่านเป็นคำอธิบายของหัวข้อนี้ */}
+          <p className="mt-1 pl-7 text-caption text-muted sm:text-body-2">{t('profile.passwordNotice')}</p>
 
           <form onSubmit={savePassword} className="mt-4 flex flex-col gap-4">
             <Field
@@ -146,6 +149,7 @@ const ProfilePage = () => {
                 autoComplete="current-password"
                 value={passwordForm.currentPassword}
                 onChange={setPasswordField('currentPassword')}
+                placeholder={t('login.passwordPlaceholder')}
               />
             </Field>
 
@@ -159,6 +163,7 @@ const ProfilePage = () => {
                 autoComplete="new-password"
                 value={passwordForm.newPassword}
                 onChange={setPasswordField('newPassword')}
+                placeholder={t('register.passwordPlaceholder')}
               />
             </Field>
 
@@ -167,11 +172,12 @@ const ProfilePage = () => {
                 autoComplete="new-password"
                 value={passwordForm.confirm}
                 onChange={setPasswordField('confirm')}
+                placeholder={t('register.confirmPlaceholder')}
               />
             </Field>
 
             {passwordError.form && (
-              <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              <p className="rounded-lg border border-danger/40 bg-danger-bg px-3 py-2 text-body-2 text-danger">
                 {passwordError.form}
               </p>
             )}

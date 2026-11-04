@@ -15,7 +15,7 @@ const SiteLayout = () => {
       <main className="flex-1">
         <Outlet />
       </main>
-      <footer className="border-t border-line bg-surface px-4 py-6 text-center text-sm text-muted print:hidden">
+      <footer className="border-t border-line bg-surface px-4 py-6 text-center text-body-2 text-muted print:hidden">
         <p>
           © {new Date().getFullYear()} {t('common.appName')}. {t('common.allRightsReserved')}
         </p>

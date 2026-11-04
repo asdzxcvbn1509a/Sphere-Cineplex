@@ -1,23 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TicketX } from 'lucide-react';
-import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { cancelBooking, listMyBookings, updateRefundAccount } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { EMPTY_REFUND_FORM, readRefundAccountForm, refundFormFromAccount } from '../utils/banks.js';
+import { BOOKING_TABS, defaultBookingTab, groupBookingsByTab } from '../utils/bookingTabs.js';
 import BookingCard from '../components/booking/BookingCard.jsx';
 import RefundAccountFields from '../components/booking/RefundAccountFields.jsx';
 import RefundSlipModal from '../components/booking/RefundSlipModal.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import ConfirmModal from '../components/ui/ConfirmModal.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
+import Tabs from '../components/ui/Tabs.jsx';
 import useApi from '../hooks/useApi.js';
-
-const TABS = ['upcoming', 'history'];
 
 /** ใบที่จ่ายเงินไปแล้วเท่านั้นที่ต้องบอกบัญชีรับเงินคืน ใบที่ยังไม่จ่ายไม่ต้องถาม */
 const needsRefundAccount = (booking) => booking?.payment?.status === 'APPROVED';
@@ -25,9 +25,7 @@ const needsRefundAccount = (booking) => booking?.payment?.status === 'APPROVED';
 const MyBookingsPage = () => {
   const { t } = useI18n();
   const toast = useToast();
-  // แท็บอยู่ใน URL (?tab=history) — หน้าการจองที่ยกเลิกพามาที่แท็บประวัติได้ตรง ๆ และรีเฟรชแล้วไม่เด้งกลับ
   const [searchParams, setSearchParams] = useSearchParams();
-  const scope = searchParams.get('tab') === 'history' ? 'history' : 'upcoming';
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [refundForm, setRefundForm] = useState(EMPTY_REFUND_FORM);
@@ -40,10 +38,23 @@ const MyBookingsPage = () => {
   const [accountErrors, setAccountErrors] = useState({});
   const [savingAccount, setSavingAccount] = useState(false);
 
-  const { data: bookings = [], loading, error, reload } = useApi(
-    () => listMyBookings(scope).then(({ data }) => data.bookings),
-    [scope],
+  // โหลดทุกใบครั้งเดียวแล้วแบ่งแท็บในเว็บ — bookings เป็น undefined จนกว่ารอบแรกจะเสร็จ
+  const { data: bookings, loading, error, reload } = useApi(
+    () => listMyBookings('all').then(({ data }) => data.bookings),
+    [],
   );
+  const groups = useMemo(() => groupBookingsByTab(bookings ?? []), [bookings]);
+
+  // แท็บอยู่ใน URL (?tab=cancelled) — หน้าอื่นพามาที่แท็บของใบนั้นได้ตรง ๆ และรีเฟรชแล้วไม่เด้งกลับ
+  // ไม่ได้ระบุ (กดเมนูด้านบน) → เลือกจากรายการที่โหลดมาแล้วจดลง URL
+  // แท็บจะได้ไม่กระโดดเองตอนยกเลิกใบสุดท้ายของแท็บแล้วโหลดใหม่
+  const tabParam = BOOKING_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : null;
+  const tab = tabParam ?? (bookings ? defaultBookingTab(groups) : null);
+  const visible = tab ? groups[tab] : [];
+
+  useEffect(() => {
+    if (tab && !tabParam) setSearchParams({ tab }, { replace: true });
+  }, [tab, tabParam, setSearchParams]);
 
   const openCancel = (booking) => {
     setRefundForm(EMPTY_REFUND_FORM);
@@ -64,7 +75,9 @@ const MyBookingsPage = () => {
    * บันทึกแล้ว server ใช้บัญชีนี้กับทุกรายการที่รอโอนคืนของการจองนี้
    */
   const openAccount = (booking, payment = booking.payment) => {
-    setAccountForm(refundFormFromAccount(payment?.refundBankName, payment?.refundAccountNo));
+    setAccountForm(
+      refundFormFromAccount(payment?.refundBankName, payment?.refundAccountNo, payment?.refundAccountName),
+    );
     setAccountErrors({});
     setAccountTarget(booking);
   };
@@ -106,31 +119,33 @@ const MyBookingsPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="mb-5 text-2xl font-bold sm:text-3xl">{t('bookings.title')}</h1>
+      <Breadcrumb
+        className="mb-4"
+        items={[
+          { label: t('nav.home'), to: '/' },
+          { label: t('nav.myBookings'), to: '/my-bookings' },
+          // ระหว่างโหลดรอบแรกยังไม่รู้แท็บ — "การจองของฉัน" เป็นชั้นสุดท้ายไปก่อน
+          ...(tab ? [{ label: t(`bookings.tabs.${tab}`) }] : []),
+        ]}
+      />
+      <h1 className="mb-5 text-h1 font-bold">{t('bookings.title')}</h1>
 
-      <div className="mb-5 inline-flex rounded-xl border border-line bg-surface p-1">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setSearchParams(tab === 'history' ? { tab } : {}, { replace: true })}
-            className={clsx(
-              'rounded-lg px-4 py-1.5 text-sm font-medium transition',
-              scope === tab ? 'bg-accent text-ink' : 'text-muted hover:text-fg',
-            )}
-          >
-            {t(`bookings.${tab}`)}
-          </button>
-        ))}
+      {/* มือถือห้าแท็บไม่พอความกว้าง — เลื่อนแนวนอนแบบเดียวกับแถบเลือกวันในหน้าภาพยนตร์ */}
+      <div className="-mx-4 mb-3 overflow-x-auto px-4 pb-2">
+        <Tabs
+          items={BOOKING_TABS.map((item) => ({ value: item, label: t(`bookings.tabs.${item}`) }))}
+          value={tab}
+          onChange={(next) => setSearchParams({ tab: next }, { replace: true })}
+        />
       </div>
 
       {loading && <LoadingBlock label={t('common.loading')} />}
       {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
 
-      {!loading && !error && bookings.length === 0 && (
+      {!loading && !error && tab && visible.length === 0 && (
         <EmptyState
           icon={TicketX}
-          title={t('bookings.empty')}
+          title={t(`bookings.tabEmpty.${tab}`)}
           action={
             <Button as={Link} to="/" size="sm" variant="secondary">
               {t('errors.goHome')}
@@ -140,7 +155,7 @@ const MyBookingsPage = () => {
       )}
 
       <div className="flex flex-col gap-4">
-        {bookings.map((booking) => (
+        {visible.map((booking) => (
           <BookingCard
             key={booking.id}
             booking={booking}
@@ -161,12 +176,12 @@ const MyBookingsPage = () => {
         loading={cancelling}
         onConfirm={confirmCancel}
       >
-        <p className="text-sm text-muted">{t('bookings.cancelBody', { code: cancelTarget?.code })}</p>
+        <p className="text-body-2 text-muted">{t('bookings.cancelBody', { code: cancelTarget?.code })}</p>
 
         {/* จ่ายเงินไปแล้วต้องบอกบัญชีปลายทาง เพราะระบบไม่ได้ตัดเงินเอง จึงคืนอัตโนมัติไม่ได้ */}
         {needsRefundAccount(cancelTarget) && (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/60 p-3">
-            <p className="text-xs text-muted">{t('bookings.refundAccountIntro')}</p>
+            <p className="text-caption text-muted">{t('bookings.refundAccountIntro')}</p>
             <RefundAccountFields form={refundForm} onChange={setRefundForm} errors={formError} />
           </div>
         )}
@@ -182,7 +197,7 @@ const MyBookingsPage = () => {
         onConfirm={saveAccount}
       >
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted">
+          <p className="text-body-2 text-muted">
             {t('bookings.refundAccountLater', { code: accountTarget?.code })}
           </p>
           <RefundAccountFields form={accountForm} onChange={setAccountForm} errors={accountErrors} />

@@ -1,24 +1,145 @@
 @import 'tailwindcss';
 
 /*
-  Dark Mode เป็นธีมหลักตายตัว — ผลสำรวจ 27 จาก 30 คนเลือก Dark Mode
-  โดยให้อารมณ์เหมือนอยู่ในโรงหนัง และทำให้โปสเตอร์เด่นขึ้น
-  ข้อยกเว้นเดียวคือการ์ด E-Ticket ที่ต้องเป็นพื้นสว่างเพื่อให้สแกน QR ได้ง่าย
+  Design System ของ Sphere Cineplex — รายละเอียดทั้งหมดอยู่ใน docs/design-system.md
+
+  Dark Mode เป็นธีมหลักตายตัว — ผลสำรวจ 27 จาก 30 คนเลือก Dark Mode ให้อารมณ์เหมือนอยู่ในโรงหนัง และทำให้โปสเตอร์เด่นขึ้น
+  สัดส่วนสี 60 · 30 · 10
+    60% Cocoa 90  — พื้นหลังหน้า (page)
+    30% Cocoa 100 — header · sidebar · การ์ด (surface) และ Cream — ช่องกรอก · แถบแท็บ · checkbox (field)
+    10% Gold      — ปุ่มหลัก · ขอบการ์ด · ชิป · ไอคอน (accent) และ Blue — Modal · ปุ่มผู้ใช้ · รายการที่เลือก (selected)
+  ข้อยกเว้นคือ E-Ticket และใบเสร็จที่เป็นพื้นสว่าง (.theme-paper) เพื่อให้สแกน QR ได้ง่ายและพิมพ์ออกมาได้หน้าตาเดียวกับที่เห็น
+*/
+
+/*
+  ปิดสีและขนาดตัวอักษรตั้งต้นของ Tailwind ให้เหลือแต่ของ Design System — กันการหยิบ bg-red-500 / text-lg มาใช้จนหลุดระบบ
+  (blue-50 / blue-100 ของ Tailwind ยังชนชื่อกับ Blue 10–100 ของ DS ด้วย)
+  ไม่ล้าง --font-* เพราะจะลบ --font-weight-* (font-bold ฯลฯ) ไปด้วย
 */
 @theme {
-  --color-ink: #0b0b0f;
-  --color-surface: #16161d;
-  --color-surface-2: #1e1e28;
-  --color-line: #2a2a36;
-  --color-fg: #f5f5f7;
-  --color-muted: #9a9aa8;
-  --color-accent: #f5b301;
-  --color-accent-dark: #c98f00;
-  --color-danger: #e05260;
-  --color-success: #3fbf7f;
-  --color-info: #5b9dff;
+  --color-*: initial;
+  --text-*: initial;
+}
 
-  --font-sans: 'IBM Plex Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif;
+/*
+  static = ส่งตัวแปรทุกตัวออกไปเสมอ แม้ไม่มี utility ไหนใช้ — .theme-blue / .theme-paper อ้างสีบางขั้นผ่าน var() ตรง ๆ
+  ห้ามเปลี่ยนเป็น inline: utility ต้องอ้าง var(--color-…) ไว้ ขอบเขตที่สลับธีมจึงเปลี่ยนค่าให้ทุกอย่างข้างในได้
+*/
+@theme static {
+  /* ---------- Palette — ค่าตรงกับ Figma ---------- */
+  --color-cocoa-10: #e8e8e7;
+  --color-cocoa-20: #d1d1d0;
+  --color-cocoa-30: #babab9;
+  --color-cocoa-40: #a4a3a2;
+  --color-cocoa-50: #8d8c8b;
+  --color-cocoa-60: #767573;
+  --color-cocoa-70: #605e5c;
+  --color-cocoa-80: #494745;
+  --color-cocoa-90: #32302e;
+  --color-cocoa-100: #1c1a17;
+
+  --color-blue-10: #e8ebef;
+  --color-blue-20: #d1d7df;
+  --color-blue-30: #a3afc0;
+  --color-blue-40: #7587a1;
+  --color-blue-50: #465e82;
+  --color-blue-60: #2f4b72;
+  --color-blue-70: #193763;
+  --color-blue-80: #163159;
+  --color-blue-90: #142c4f;
+  --color-blue-100: #112645;
+
+  --color-gold-10: #fffaf2;
+  --color-gold-20: #ffeccc;
+  --color-gold-30: #ffdda6;
+  --color-gold-40: #ffcf80;
+  --color-gold-50: #e5b76b;
+  --color-gold-60: #c89d56;
+  --color-gold-70: #ab8443;
+  --color-gold-80: #8e6b33;
+  --color-gold-90: #715424;
+  --color-gold-100: #533d18;
+
+  --color-cream-10: #fffefc;
+  --color-cream-20: #fff6e8;
+  --color-cream-30: #e8dfcf;
+  --color-cream-40: #d1c8b7;
+  --color-cream-50: #bbb1a0;
+  /* ป้ายใน Figma เขียน #A49A88 แต่สีที่ใช้จริงในไฟล์คือ #A49A8A — ยึดสีจริง */
+  --color-cream-60: #a49a8a;
+  --color-cream-70: #8d8474;
+  --color-cream-80: #776e5f;
+  --color-cream-90: #60594b;
+  --color-cream-100: #494338;
+
+  /* สีสถานะ — ตัวอักษร (ชื่อสี) คู่กับพื้น (-bg) */
+  --color-success: #86d7a8;
+  --color-success-bg: #16301f;
+  --color-warning: #ff9b5c;
+  --color-warning-bg: #3a2111;
+  --color-danger: #ff9d92;
+  --color-danger-bg: #3d1915;
+  --color-info: #9cc4ff;
+  --color-info-bg: #112645;
+
+  /* ---------- Semantic — คอมโพเนนต์ใช้ชื่อเหล่านี้ ไม่ใช้ palette ตรง ๆ ---------- */
+  --color-page: var(--color-cocoa-90);
+  --color-surface: var(--color-cocoa-100);
+  /* ของที่ซ้อนอยู่ในการ์ด — ตัวอักษร muted บนพื้นนี้ยังผ่าน 4.5:1 (Cocoa 80 จะเหลือ 3.3:1) */
+  --color-surface-2: var(--color-cocoa-90);
+  /* ตัวอักษรบนปุ่มทอง/พื้นสีสถานะ และพื้น overlay */
+  --color-ink: var(--color-cocoa-100);
+  --color-line: var(--color-cocoa-80);
+  /* ขอบของ control (ปุ่มรอง ชิปวันที่ ที่นั่งโซนปกติ) — Cocoa 80 จางจนแทบไม่เห็นบนพื้น page */
+  --color-line-strong: var(--color-cocoa-70);
+  /* ขอบการ์ดตอนปกติเป็นทองหม่น ชี้/โฟกัสแล้วค่อยเป็นทองเต็ม (accent) — สีทองจะได้ไม่เกินสัดส่วน 10% */
+  --color-card-line: var(--color-gold-90);
+  --color-fg: var(--color-cream-20);
+  --color-muted: var(--color-cream-60);
+  --color-accent: var(--color-gold-60);
+  --color-accent-dark: var(--color-gold-70);
+  /* รายการที่เลือก — ขอบ Blue 30 ทำให้ตัดกับพื้นมืดได้เกิน 3:1 (พื้น Blue 70 เองต่างจากพื้นมืดแค่สีโทน) */
+  --color-selected: var(--color-blue-70);
+  --color-selected-line: var(--color-blue-30);
+  --color-on-selected: var(--color-cream-20);
+  /* ช่องกรอก แถบแท็บ checkbox — ตัวอักษรบนพื้นนี้ใช้ ink */
+  --color-field: var(--color-cream-30);
+  --color-field-line: var(--color-cream-40);
+  --color-field-muted: var(--color-cream-90);
+  /* พื้นเอกสารสว่าง (E-Ticket ใบเสร็จ กรอบ QR) */
+  --color-paper: var(--color-cream-10);
+
+  /* ---------- Font ---------- */
+  /*
+    เบราว์เซอร์เลือกฟอนต์ทีละตัวอักษร: ตัวละตินและตัวเลขได้ Inter ส่วนตัวไทย Inter ไม่มีจึงตกไปที่ Noto Sans Thai
+    ตรงกับ DS ที่ให้ Inter กับตัวเลข/รหัสการจอง/ข้อความอังกฤษ และ Noto Sans Thai กับข้อความไทยทั้งหมด
+  */
+  --font-sans: 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  /* ชื่อแบรนด์ — Cinzel ไม่มีตัวไทย ถ้ามีจะตกไปที่ Noto Sans Thai */
+  --font-brand: 'Cinzel', 'Noto Sans Thai', serif;
+  /* h1/h2 — สลับเป็น Cinzel เฉพาะตอนหน้าเว็บเป็นภาษาอังกฤษ (ดู :root:lang(en) ด้านล่าง) */
+  --font-heading: var(--font-sans);
+  /* เรื่องย่อ/รายละเอียดหนัง — ตัวไทยเป็น Sarabun ตาม DS */
+  --font-description: 'Inter', 'Sarabun', ui-sans-serif, system-ui, sans-serif;
+  /*
+    รหัสการจอง เลขอ้างอิง เลขใบเสร็จ เลขบัญชี — DS ให้ใช้ Inter (เดิมเป็น monospace)
+    tnum ให้ตัวเลขกว้างเท่ากัน เรียงตรงหลัก, zero ขีดเลขศูนย์ไม่ให้สับสนกับตัว O
+  */
+  --font-code: 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  --font-code--font-feature-settings: 'tnum', 'zero';
+
+  /* ---------- Type scale — 5 ระดับเท่านั้น ---------- */
+  --text-h1: 2rem;
+  --text-h1--line-height: 2.5rem;
+  --text-h2: 1.25rem;
+  --text-h2--line-height: 1.75rem;
+  --text-body-1: 1rem;
+  --text-body-1--line-height: 1.5rem;
+  --text-body-2: 0.875rem;
+  --text-body-2--line-height: 1.25rem;
+  /* caption: DS ให้แค่ Regular / Medium */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.125rem;
 
   --radius-card: 1rem;
 }
@@ -29,17 +150,29 @@
     color-scheme: dark;
   }
 
+  /* Cinzel ไม่มีตัวอักษรไทย DS จึงใช้กับหัวข้อเฉพาะภาษาอังกฤษ — I18nContext ตั้ง <html lang> ให้ทุกครั้งที่สลับภาษา */
+  :root:lang(en) {
+    --font-heading: var(--font-brand);
+  }
+
   body {
     margin: 0;
-    background-color: var(--color-ink);
+    background-color: var(--color-page);
     color: var(--color-fg);
     font-family: var(--font-sans);
+    font-size: var(--text-body-1);
+    line-height: var(--text-body-1--line-height);
     -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2 {
+    font-family: var(--font-heading);
   }
 
   ::selection {
     background: var(--color-accent);
-    color: #101014;
+    color: var(--color-ink);
   }
 
   :focus-visible {
@@ -57,43 +190,86 @@
   /* scrollbar ให้กลืนกับธีมมืด */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-line) transparent;
+    scrollbar-color: var(--color-line-strong) transparent;
   }
 }
 
 @layer components {
   .card {
     background-color: var(--color-surface);
-    border: 1px solid var(--color-line);
+    border: 1px solid var(--color-card-line);
     border-radius: var(--radius-card);
   }
 
   /*
+    ช่องกรอกพื้นครีมตาม DS
     font-size ตายตัว 16px — iOS ซูมหน้าเข้าเองเมื่อแตะช่องที่ตัวอักษรเล็กกว่านั้น
-    (ช่องที่อยู่ในกล่อง text-sm เช่นฟอร์มบัญชีรับเงินคืนจะได้ขนาดตามกล่องถ้าไม่ตั้งไว้)
+    (ช่องที่อยู่ในกล่อง text-body-2 เช่นฟอร์มบัญชีรับเงินคืนจะได้ขนาดตามกล่องถ้าไม่ตั้งไว้)
     min-height กัน input วันที่ที่ยังว่างบน iOS ยุบเตี้ยกว่าช่องอื่น
+    color-scheme: light — ไม่งั้นไอคอนปฏิทินกับลูกศรของ select จะเป็นสีอ่อนตามธีมมืดจนหายไปบนพื้นครีม
   */
   .input-base {
     width: 100%;
     min-height: 2.75rem;
-    background-color: var(--color-surface-2);
-    border: 1px solid var(--color-line);
+    background-color: var(--color-field);
+    border: 1px solid var(--color-field-line);
     border-radius: 0.625rem;
     padding: 0.625rem 0.875rem;
-    font-size: 1rem;
-    color: var(--color-fg);
-    transition: border-color 150ms ease;
+    font-size: var(--text-body-1);
+    line-height: var(--text-body-1--line-height);
+    color: var(--color-ink);
+    color-scheme: light;
+    transition:
+      border-color 150ms ease,
+      outline-color 150ms ease;
   }
   /* iOS จัดค่าวันที่ไว้กลางช่อง — ให้ชิดซ้ายเหมือนช่องอื่น */
   .input-base::-webkit-date-and-time-value {
     text-align: left;
   }
   .input-base::placeholder {
-    color: color-mix(in srgb, var(--color-muted) 75%, transparent);
+    color: var(--color-cream-80);
   }
+  /* ทองบนครีมตัดกันแค่ราว 1.9:1 — ขอบอย่างเดียวมองไม่ออก จึงเพิ่ม outline ที่ยื่นออกไปตกบนพื้นเข้ม */
   .input-base:focus {
     border-color: var(--color-accent);
-    outline: none;
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /*
+    หน้าต่าง (Modal) เป็นพื้นน้ำเงินตาม DS — สลับค่าตัวแปรในขอบเขตนี้ ปุ่ม กล่องย่อย เส้นคั่นข้างในจะเปลี่ยนตามเองทั้งหมด
+    ต้องประกาศทุกตัวที่เปลี่ยน: ตัวแปรที่อ้างกันเองถูกคำนวณค่าไว้ที่ :root แล้ว จะไม่ตามมาเอง
+    ของที่ถูกเลือกในหน้าต่างใช้ฟ้าอ่อนแทน — น้ำเงินเข้มบนพื้นน้ำเงินจะมองไม่เห็น
+  */
+  .theme-blue {
+    --color-surface: var(--color-blue-70);
+    --color-surface-2: var(--color-blue-80);
+    --color-line: var(--color-blue-50);
+    --color-line-strong: var(--color-blue-40);
+    --color-card-line: var(--color-blue-50);
+    --color-muted: var(--color-blue-30);
+    --color-selected: var(--color-blue-20);
+    --color-selected-line: var(--color-blue-10);
+    --color-on-selected: var(--color-blue-100);
+  }
+
+  /*
+    เอกสารพื้นสว่างบนธีมมืด (E-Ticket ใบเสร็จ) — เครื่องสแกนหน้าโรงต้องอ่าน QR ได้ และพิมพ์/บันทึก PDF ได้หน้าตาตรงกับที่เห็น
+    muted เป็น Cocoa 70 เพราะ Cocoa 60 บนกล่อง Cream 20 ได้ไม่ถึง 4.5:1
+    danger: สีแดงของ DS เป็นโทนอ่อนสำหรับพื้นเข้ม บนกระดาษจางจนอ่านไม่ออก — ใช้โทนเข้มของคู่เดียวกัน (ตราประทับคืนเงิน)
+  */
+  .theme-paper {
+    color-scheme: light;
+    --color-surface: var(--color-paper);
+    --color-surface-2: var(--color-cream-20);
+    --color-fg: var(--color-cocoa-100);
+    --color-muted: var(--color-cocoa-70);
+    --color-line: var(--color-cocoa-10);
+    --color-line-strong: var(--color-cocoa-20);
+    --color-danger: var(--color-danger-bg);
+    background-color: var(--color-surface);
+    color: var(--color-fg);
   }
 
   /* จอภาพยนตร์จำลองเหนือผังที่นั่ง ให้ผู้ใช้อ้างอิงทิศทางได้ */
@@ -151,12 +327,13 @@
     text-align: left;
   }
 
-  /* หน้าตาเดียวกับหัวคอลัมน์ของตารางจอใหญ่ (text-xs uppercase tracking-wide) */
+  /* หน้าตาเดียวกับหัวคอลัมน์ของตารางจอใหญ่ (text-caption uppercase tracking-wide) */
   .stack-table td[data-label]::before {
     content: attr(data-label);
     display: block;
     margin-bottom: 0.125rem;
-    font-size: 0.6875rem;
+    font-size: var(--text-caption);
+    line-height: var(--text-caption--line-height);
     font-weight: 500;
     letter-spacing: 0.025em;
     text-transform: uppercase;

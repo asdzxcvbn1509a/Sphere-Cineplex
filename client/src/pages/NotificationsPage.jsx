@@ -50,9 +50,9 @@ const NotificationsPage = () => {
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold sm:text-3xl">{t('notifications.title')}</h1>
+          <h1 className="text-h1 font-bold">{t('notifications.title')}</h1>
           {unreadCount > 0 && (
-            <p className="mt-1 text-sm text-muted sm:text-base">
+            <p className="mt-1 text-body-2 text-muted sm:text-body-1">
               {t('notifications.unreadCount', { count: unreadCount })}
             </p>
           )}
@@ -78,18 +78,18 @@ const NotificationsPage = () => {
           const content = (
             <>
               <div className="flex items-start justify-between gap-3">
-                <p className={clsx('font-semibold sm:text-lg', unread && 'text-accent')}>
+                <p className={clsx('text-body-1 font-semibold', unread && 'text-accent')}>
                   {pick(item, 'title')}
                 </p>
                 {unread && <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />}
               </div>
-              <p className="mt-1 text-sm text-muted sm:text-base">{pick(item, 'body')}</p>
-              <p className="mt-1.5 text-xs text-muted sm:text-sm">{formatDateTime(item.createdAt, lang)}</p>
+              <p className="mt-1 text-body-2 text-muted sm:text-body-1">{pick(item, 'body')}</p>
+              <p className="mt-1.5 text-caption text-muted sm:text-body-2">{formatDateTime(item.createdAt, lang)}</p>
             </>
           );
 
           const className = clsx(
-            'card block border-l-4 p-4 text-left transition hover:border-accent/40 sm:px-5',
+            'card block border-l-4 p-4 text-left transition hover:border-accent sm:px-5',
             typeTone[item.type] ?? 'border-l-line',
             unread && 'bg-surface-2/60',
           );

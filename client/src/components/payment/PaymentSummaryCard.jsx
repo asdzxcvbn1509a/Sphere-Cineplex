@@ -1,5 +1,6 @@
 import { useI18n } from '../../context/I18nContext.jsx';
 import { formatDate, formatTime } from '../../utils/format.js';
+import Chip from '../ui/Chip.jsx';
 
 /**
  * การ์ดสรุปการจองด้านบนหน้าชำระเงิน — ใช้ทั้งหน้าชำระค่าตั๋วและหน้าชำระส่วนต่างเปลี่ยนที่นั่ง
@@ -17,18 +18,20 @@ const PaymentSummaryCard = ({ booking, amountLabel, amount, children }) => {
         alt=""
         className="h-24 w-16 shrink-0 rounded-lg object-cover sm:h-45 sm:w-30"
       />
-      <div className="min-w-0 flex-1 text-sm sm:text-base">
+      <div className="min-w-0 flex-1 text-body-2 sm:text-body-1">
         <p className="truncate font-semibold">{pick(showtime.movie, 'title')}</p>
-        <p className="mt-0.5 text-muted">
-          {showtime.theatre.name} · {formatDate(showtime.startsAt, lang)}{' '}
-          {formatTime(showtime.startsAt, lang)}
-        </p>
+        {/* โรง วัน เวลาเป็นชิปทองแบบเดียวกับการ์ดในหน้าการจองของฉัน — ลูกค้าเห็นรอบที่จ่ายเป็นชุดเดียวกันทุกหน้า */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Chip tone="accent">{showtime.theatre.name}</Chip>
+          <Chip tone="accent">{formatDate(showtime.startsAt, lang)}</Chip>
+          <Chip tone="accent">{formatTime(showtime.startsAt, lang)}</Chip>
+        </div>
         {children}
       </div>
       <div className="flex basis-full items-center justify-between gap-2 border-t border-line pt-3 sm:block sm:shrink-0 sm:basis-auto sm:border-0 sm:pt-0 sm:text-right">
-        <p className="text-xs text-muted">{amountLabel}</p>
-        <p className="text-xl font-bold text-accent sm:text-2xl">
-          {amount} <span className="text-xs font-normal text-muted sm:block">{t('common.baht')}</span>
+        <p className="text-caption text-muted">{amountLabel}</p>
+        <p className="text-h2 font-bold text-accent sm:text-h1">
+          {amount} <span className="text-caption font-normal text-muted sm:block">{t('common.baht')}</span>
         </p>
       </div>
     </div>

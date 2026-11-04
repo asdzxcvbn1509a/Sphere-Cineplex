@@ -79,6 +79,7 @@ These are the parts where a mistake loses money or double-books a seat. For any 
 - Database fields that come in two languages (`titleTh` / `titleEn`) are shown with `pick(movie, 'title')`
 - Server error messages are Thai and are displayed as-is — keep the `code` stable when you reword a message
 - The layout is mobile-first (usable from 360px): check new screens at phone width and on desktop
+- Style with the design-system tokens only (`bg-surface`, `text-muted`, `text-body-2`, …). Tailwind's default colors and sizes are disabled and produce no CSS. See [Design system](docs/design-system.md)
 
 ## Code style
 

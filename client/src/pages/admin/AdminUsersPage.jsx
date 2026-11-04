@@ -16,10 +16,14 @@ import PasswordInput from '../../components/ui/PasswordInput.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
+import { FIT_BODY, FIT_CARD, FIT_PAGE, FIT_PAGER } from '../../components/admin/fitLayout.js';
 import { usePagedApi } from '../../hooks/useApi.js';
+import useFitPageSize from '../../hooks/useFitPageSize.js';
 import { formatDateTime } from '../../utils/format.js';
 
 const EMPTY_EDIT = { name: '', email: '', phone: '', role: 'USER' };
+/** ระยะต่อแถวบนจอ xl = xl:h-16 (64px) — เปลี่ยนคู่กับ class ของแถว · เส้นคั่นแถวรวมอยู่ในความสูงนี้แล้ว (border-collapse) */
+const ROW_HEIGHT = 64;
 
 const AdminUsersPage = () => {
   const { t, lang } = useI18n();
@@ -41,17 +45,24 @@ const AdminUsersPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // หน้าสุดท้ายว่างลงหลังลบบัญชี — usePagedApi พาไปหน้าสุดท้ายที่ยังมีรายการแทนโชว์ตารางว่าง
+  // จอใหญ่: หน้าละเท่าที่วางพอดีจอ ทั้งหน้าไม่ต้องเลื่อน · จอเล็ก: หน้าละ 50 เลื่อนหน้าได้ตามปกติ
+  const fit = useFitPageSize(ROW_HEIGHT);
+
+  // หน้าสุดท้ายว่างลงหลังลบบัญชี (หรือขยายจอจนหน้าละหลายแถวขึ้น) — usePagedApi พาไปหน้าสุดท้ายที่ยังมีรายการแทนโชว์ตารางว่าง
   const setPage = useCallback((page) => setFilters((current) => ({ ...current, page })), []);
   const { data, loading, error, reload } = usePagedApi(
     async () => {
-      const { data: body } = await listUsers(filters);
+      const { data: body } = await listUsers({ ...filters, pageSize: fit.pageSize });
       return { items: body.users, total: body.total, pageSize: body.pageSize };
     },
-    { page: filters.page, setPage },
-    [filters],
+    // รอวัดพื้นที่ให้เสร็จก่อน คำขอแรกจะได้จำนวนแถวที่พอดีจอเลย ไม่ต้องยิงซ้ำ
+    { page: filters.page, setPage, enabled: fit.ready },
+    [filters, fit.pageSize],
   );
-  const users = data?.items ?? [];
+  // ตัดไว้ที่ขนาดหน้าปัจจุบัน — ย่อจอแล้วระหว่างรอข้อมูลชุดใหม่ รายการชุดเดิมจะได้ไม่ล้นกล่อง
+  const users = (data?.items ?? []).slice(0, fit.pageSize);
+  // ยังไม่เคยได้ข้อมูล = ยังไม่มีอะไรให้ดู · เปลี่ยนหน้า/ตัวกรองคงตารางเดิมไว้แค่หรี่ลง
+  const showSpinner = loading && !data;
 
   // พิมพ์ไปค้นไป หน่วง 400ms หลังหยุดพิมพ์ ไม่ให้ยิง API ทุกตัวอักษร
   useEffect(() => {
@@ -132,9 +143,9 @@ const AdminUsersPage = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('admin.userPage.title')}</h1>
-      <p className="mb-5 text-sm text-muted">{t('admin.userPage.subtitle')}</p>
+    <div className={FIT_PAGE}>
+      <h1 className="mb-1 text-h1 font-bold">{t('admin.userPage.title')}</h1>
+      <p className="mb-5 text-body-2 text-muted">{t('admin.userPage.subtitle')}</p>
 
       <div className="mb-4 grid gap-3 sm:flex sm:flex-wrap sm:items-end">
         <Field label={t('admin.userPage.role')} className="sm:w-44">
@@ -153,7 +164,7 @@ const AdminUsersPage = () => {
         <Field label={t('common.search')} className="sm:min-w-56 sm:flex-1">
           <div className="relative">
             <Search
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-field-muted"
               size={15}
             />
             <Input
@@ -167,125 +178,156 @@ const AdminUsersPage = () => {
         </Field>
       </div>
 
-      {loading && <LoadingBlock label={t('common.loading')} />}
-      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
-
-      {!loading && !error && (
-        <div className="card overflow-x-auto">
-          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
-          <table className="stack-table w-full min-w-190 text-sm">
-            <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">{t('admin.userPage.user')}</th>
-                <th className="px-4 py-3 font-medium">{t('register.phoneLabel')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.userPage.role')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('admin.userPage.bookings')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.userPage.joined')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 && (
+      {error ? (
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
+      ) : (
+        // แบ่งหน้าอยู่ท้ายการ์ดเดียวกับตาราง — การ์ดกับหัวตารางแสดงตั้งแต่ยังโหลด เพราะต้องวัดพื้นที่ก่อนรู้ว่าจะขอหน้าละกี่แถว
+        <div className={FIT_CARD}>
+          <div ref={fit.ref} className={FIT_BODY}>
+            {/*
+              จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด
+              จอ xl ความกว้างคอลัมน์ตายตัว (table-fixed) ชื่อกับอีเมลที่ยาวตัดด้วย … ทุกแถวจึงสูงเท่ากัน
+            */}
+            <table className="stack-table w-full min-w-190 text-body-2 xl:table-fixed">
+              <thead className="border-b border-line bg-surface-2/60 text-left text-caption uppercase tracking-wide text-muted">
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted">
-                    {t('common.empty')}
-                  </td>
+                  <th className="px-4 py-3 font-medium">{t('admin.userPage.user')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-40">{t('register.phoneLabel')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-40">{t('admin.userPage.role')}</th>
+                  <th className="px-4 py-3 text-right font-medium xl:w-28">{t('admin.userPage.bookings')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-44">{t('admin.userPage.joined')}</th>
+                  <th className="px-4 py-3 text-right font-medium xl:w-40">{t('common.actions')}</th>
                 </tr>
-              )}
-              {users.map((user) => {
-                const isMe = user.id === me?.id;
-                return (
-                  <tr key={user.id} className="border-b border-line/60 last:border-0">
-                    <td className="px-4 py-3">
-                      <span className="font-medium">{user.name}</span>
-                      {isMe && (
-                        <span className="ml-1.5 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">
-                          {t('admin.userPage.you')}
-                        </span>
-                      )}
-                      <p className="text-[11px] text-muted">{user.email}</p>
-                    </td>
-                    <td className="px-4 py-3 text-muted" data-label={t('register.phoneLabel')}>
-                      {user.phone}
-                    </td>
-                    <td className="px-4 py-3" data-label={t('admin.userPage.role')}>
-                      <span
-                        className={clsx(
-                          'rounded-md border px-2 py-1 text-[11px]',
-                          user.role === 'ADMIN'
-                            ? 'border-accent/40 bg-accent/10 text-accent'
-                            : 'border-line text-muted',
-                        )}
-                      >
-                        {t(`admin.userPage.role${user.role}`)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right" data-label={t('admin.userPage.bookings')}>
-                      {user.bookingCount > 0 ? (
-                        // ลิงก์ไปหน้าการจองพร้อมคำค้น จะได้ไม่ต้องพิมพ์เบอร์ซ้ำตอนลูกค้าโทรมาถาม
-                        <Link
-                          to={`/admin/bookings?q=${encodeURIComponent(user.phone)}`}
-                          className="font-semibold text-accent transition hover:underline"
-                        >
-                          {user.bookingCount}
-                        </Link>
-                      ) : (
-                        <span className="text-muted">0</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[11px] text-muted" data-label={t('admin.userPage.joined')}>
-                      {formatDateTime(user.createdAt, lang)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title={t('common.edit')}
-                          onClick={() => openEdit(user)}
-                        >
-                          <Pencil size={14} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isMe}
-                          title={isMe ? t('admin.userPage.selfPasswordHint') : t('admin.userPage.resetTitle')}
-                          onClick={() => {
-                            setNewPassword('');
-                            setPasswordError(null);
-                            setPasswordTarget(user);
-                          }}
-                        >
-                          <KeyRound size={14} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isMe || user.bookingCount > 0}
-                          title={user.bookingCount > 0 ? t('admin.userPage.deleteBlocked') : undefined}
-                          onClick={() => setDeleteTarget(user)}
-                        >
-                          <Trash2 size={14} className={isMe || user.bookingCount > 0 ? '' : 'text-danger'} />
-                        </Button>
-                      </div>
+              </thead>
+              <tbody
+                aria-busy={loading || undefined}
+                className={clsx('transition', loading && !showSpinner && 'opacity-60')}
+              >
+                {showSpinner && (
+                  <tr>
+                    <td colSpan={6}>
+                      <LoadingBlock label={t('common.loading')} />
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                )}
+                {!showSpinner && users.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted">
+                      {t('common.empty')}
+                    </td>
+                  </tr>
+                )}
+                {!showSpinner &&
+                  users.map((user) => {
+                    const isMe = user.id === me?.id;
+                    return (
+                      <tr key={user.id} className="border-b border-line/60 last:border-0 xl:h-16">
+                        <td className="px-4 py-3">
+                          {/* ป้าย "คุณ" ไม่ถูกตัด — ชื่อยาวตัดเฉพาะตัวชื่อ · py-px ให้ป้ายไม่สูงกว่าบรรทัด แถวจะได้สูงเท่าแถวอื่น */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium xl:truncate" title={user.name}>
+                              {user.name}
+                            </span>
+                            {isMe && (
+                              <span className="shrink-0 rounded bg-surface-2 px-1.5 py-px text-caption text-muted">
+                                {t('admin.userPage.you')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-caption text-muted xl:truncate" title={user.email}>
+                            {user.email}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 text-muted xl:truncate" data-label={t('register.phoneLabel')}>
+                          {user.phone}
+                        </td>
+                        <td className="px-4 py-3" data-label={t('admin.userPage.role')}>
+                          <span
+                            className={clsx(
+                              'rounded-md border px-2 py-1 text-caption',
+                              user.role === 'ADMIN'
+                                ? 'border-accent/40 bg-accent/10 text-accent'
+                                : 'border-line text-muted',
+                            )}
+                          >
+                            {t(`admin.userPage.role${user.role}`)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right" data-label={t('admin.userPage.bookings')}>
+                          {user.bookingCount > 0 ? (
+                            // ลิงก์ไปหน้าการจองพร้อมคำค้น จะได้ไม่ต้องพิมพ์เบอร์ซ้ำตอนลูกค้าโทรมาถาม
+                            <Link
+                              to={`/admin/bookings?q=${encodeURIComponent(user.phone)}`}
+                              className="font-semibold text-accent transition hover:underline"
+                            >
+                              {user.bookingCount}
+                            </Link>
+                          ) : (
+                            <span className="text-muted">0</span>
+                          )}
+                        </td>
+                        <td
+                          className="px-4 py-3 text-caption text-muted xl:truncate"
+                          data-label={t('admin.userPage.joined')}
+                        >
+                          {formatDateTime(user.createdAt, lang)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {/* จอ xl ปุ่มอยู่บรรทัดเดียวเสมอ — ตัดลงบรรทัดใหม่แล้วแถวจะสูงกว่าแถวอื่น */}
+                          <div className="flex flex-wrap justify-end gap-1 xl:flex-nowrap">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title={t('common.edit')}
+                              onClick={() => openEdit(user)}
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isMe}
+                              title={isMe ? t('admin.userPage.selfPasswordHint') : t('admin.userPage.resetTitle')}
+                              onClick={() => {
+                                setNewPassword('');
+                                setPasswordError(null);
+                                setPasswordTarget(user);
+                              }}
+                            >
+                              <KeyRound size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isMe || user.bookingCount > 0}
+                              title={user.bookingCount > 0 ? t('admin.userPage.deleteBlocked') : undefined}
+                              onClick={() => setDeleteTarget(user)}
+                            >
+                              <Trash2 size={14} className={isMe || user.bookingCount > 0 ? '' : 'text-danger'} />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
 
-      {!loading && !error && (
-        <Pagination
-          className="mt-4"
-          page={filters.page}
-          pageSize={data.pageSize}
-          total={data.total}
-          onChange={setPage}
-        />
+          {/*
+            ปุ่มเลขหน้าท้ายการ์ดแบบเดียวกับหน้าการจอง — ซ่อนตัวเองเมื่อมีหน้าเดียว
+            จอ xl กันที่ไว้แม้ตอนซ่อน กล่องตารางจะได้ไม่ยืดหดจนจำนวนแถวต่อหน้าเปลี่ยนตาม
+          */}
+          <Pagination
+            numbered
+            reserveSpace={fit.active}
+            className={FIT_PAGER}
+            page={filters.page}
+            pageSize={data?.pageSize ?? fit.pageSize}
+            total={data?.total ?? 0}
+            onChange={setPage}
+          />
+        </div>
       )}
 
       <ConfirmModal
@@ -322,7 +364,7 @@ const AdminUsersPage = () => {
               <option value="ADMIN">{t('admin.userPage.roleADMIN')}</option>
             </Select>
           </Field>
-          {editError.form && <p className="text-sm text-danger">{editError.form}</p>}
+          {editError.form && <p className="text-body-2 text-danger">{editError.form}</p>}
         </div>
       </ConfirmModal>
 
@@ -336,7 +378,7 @@ const AdminUsersPage = () => {
         loading={busy}
         onConfirm={savePassword}
       >
-        <p className="mb-4 text-sm text-muted">
+        <p className="mb-4 text-body-2 text-muted">
           {t('admin.userPage.resetBody', { name: passwordTarget?.name })}
         </p>
         <Field
@@ -362,7 +404,7 @@ const AdminUsersPage = () => {
         loading={busy}
         onConfirm={confirmDelete}
       >
-        <p className="text-sm text-muted">
+        <p className="text-body-2 text-muted">
           {t('admin.userPage.deleteBody', { name: deleteTarget?.name, email: deleteTarget?.email })}
         </p>
       </ConfirmModal>

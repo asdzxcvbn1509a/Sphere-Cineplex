@@ -2,7 +2,12 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import prisma from '../../src/lib/prisma.js';
 import { cancelBooking } from '../../src/services/bookings.js';
-import { approvePayment, completeRefund, rejectPayment } from '../../src/services/payments.js';
+import {
+  approvePayment,
+  completeRefund,
+  listPayments,
+  rejectPayment,
+} from '../../src/services/payments.js';
 import { disconnectDb, resetDb, setupDatabase } from '../helpers/db.js';
 import {
   book,
@@ -13,6 +18,7 @@ import {
   createUser,
   fileExists,
   makeSlipFile,
+  minutesFromNow,
   paymentOf,
   submitSlip,
 } from '../helpers/fixtures.js';
@@ -102,6 +108,31 @@ describe('ตรวจสลิปพร้อมกัน', () => {
         assert.notEqual(finalPayment.status, 'APPROVED', 'ยกเลิกแล้วต้องไม่มีใบชำระเงินที่ถูกอนุมัติค้าง');
       }
     }
+  });
+});
+
+describe('ลำดับคิวตรวจสลิป', () => {
+  test('ค่าเริ่มต้นเก่าสุดก่อน · sort=newest ใบล่าสุดก่อน และแบ่งหน้าตามลำดับเดียวกัน', async () => {
+    const { showtime, seats } = await createShowtimeFixture();
+    const users = await Promise.all([createUser(), createUser(), createUser()]);
+    const paymentIds = [];
+    for (const [index, user] of users.entries()) {
+      const booking = await book({ user, showtime, seats: [seats[index]] });
+      await submitSlip(booking, user);
+      const payment = await paymentOf(booking.id);
+      // ตั้งเวลาส่งเองให้ห่างกันชัด ๆ ไม่พึ่งว่าสามคำสั่งข้างบนใช้เวลาต่างกันพอ
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { slipUploadedAt: minutesFromNow(-30 + index * 10) },
+      });
+      paymentIds.push(payment.id);
+    }
+
+    const ids = (queue) => queue.items.map((item) => item.id);
+    assert.deepEqual(ids(await listPayments()), paymentIds);
+    assert.deepEqual(ids(await listPayments({ sort: 'oldest' })), paymentIds);
+    assert.deepEqual(ids(await listPayments({ sort: 'newest' })), [...paymentIds].reverse());
+    assert.deepEqual(ids(await listPayments({ sort: 'newest', page: 2, pageSize: 2 })), [paymentIds[0]]);
   });
 });
 

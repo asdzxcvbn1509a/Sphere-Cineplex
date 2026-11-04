@@ -1,5 +1,5 @@
 import prisma from '../lib/prisma.js';
-import { bangkokDateKey, bangkokDayRange } from '../utils/datetime.js';
+import { addHours, bangkokDateKey, bangkokDayRange } from '../utils/datetime.js';
 import { PENDING_SLIP_WHERE } from './payments.js';
 import { SELLABLE_SEAT_COUNTS } from './showtimes.js';
 
@@ -29,9 +29,13 @@ export const getQueueCounts = async () => {
   };
 };
 
-/** แถวในแผงสลิป/คืนเงินของหน้าภาพรวม ต้องการแค่รหัส ชื่อผู้จอง ยอด และสถานะ */
+/** จำนวนแถวต่อแผงในหน้าภาพรวมตาม wireframe — เห็นงานค้างได้หลายใบโดยไม่ต้องเปิดหน้าคิว */
+const RECENT_ROWS = 7;
+
+/** แถวในแผงสลิป/คืนเงินของหน้าภาพรวม ต้องการแค่รหัส ชื่อผู้จอง ยอด สถานะ และชนิดรายการ */
 const QUEUE_ROW_SELECT = {
   id: true,
+  kind: true,
   status: true,
   amount: true,
   refundAmount: true,
@@ -46,14 +50,23 @@ const toQueueRow = (payment) => ({
   // แถวคืนเงินแสดงยอดที่ต้องโอนคืนจริง ส่วนแถวสลิปไม่มี refundAmount จึงเป็นยอดที่โอนเข้ามา
   amount: payment.refundAmount ?? payment.amount,
   status: payment.status,
+  // แผงคืนเงินใช้บอกว่าคืนเพราะยกเลิกการจอง หรือคืนส่วนต่างจากการเปลี่ยนที่นั่ง
+  kind: payment.kind,
 });
 
-/** สรุปภาพรวมหน้าแรกของ admin */
-export const getOverview = async () => {
-  const today = bangkokDayRange(bangkokDateKey(new Date()));
+/**
+ * สรุปภาพรวมหน้าแรกของ admin
+ * รับ now จากข้างนอกได้ เทสต์จะกำหนดเวลาเองได้และไม่พังเมื่อรันใกล้เที่ยงคืน
+ */
+export const getOverview = async (now = new Date()) => {
+  const today = bangkokDayRange(bangkokDateKey(now));
+  // รายได้เมื่อวานนับถึงเวลาเดียวกับตอนนี้ — ถ้าเทียบกับเมื่อวานทั้งวัน ช่วงเช้าจะติดลบทุกวันทั้งที่ขายดีกว่า
+  // ไทยไม่มี DST ถอยไป 24 ชั่วโมงจึงตรงกับเวลาเดียวกันของเมื่อวานเสมอ
+  const yesterday = { start: addHours(today.start, -24), end: addHours(now, -24) };
 
   const [
     paidToday,
+    paidYesterday,
     pendingSlips,
     showtimesToday,
     activeHolds,
@@ -64,6 +77,10 @@ export const getOverview = async () => {
     prisma.booking.findMany({
       where: { status: PAID, paidAt: { gte: today.start, lt: today.end } },
       select: { totalAmount: true, seatSnapshot: true },
+    }),
+    prisma.booking.aggregate({
+      where: { status: PAID, paidAt: { gte: yesterday.start, lt: yesterday.end } },
+      _sum: { totalAmount: true },
     }),
     prisma.payment.count({ where: PENDING_SLIP_WHERE }),
     prisma.showtime.count({
@@ -76,13 +93,13 @@ export const getOverview = async () => {
     prisma.payment.findMany({
       where: { OR: [PENDING_SLIP_WHERE, { status: { in: ['APPROVED', 'REJECTED'] } }] },
       orderBy: [{ status: 'asc' }, { slipUploadedAt: 'desc' }],
-      take: 5,
+      take: RECENT_ROWS,
       select: QUEUE_ROW_SELECT,
     }),
     prisma.payment.findMany({
       where: { status: { in: ['REFUND_PENDING', 'REFUNDED'] } },
       orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
-      take: 5,
+      take: RECENT_ROWS,
       select: QUEUE_ROW_SELECT,
     }),
   ]);
@@ -93,8 +110,11 @@ export const getOverview = async () => {
   );
 
   return {
-    date: bangkokDateKey(new Date()),
+    date: bangkokDateKey(now),
+    // เวลาที่นับตัวเลขชุดนี้ — หน้าเว็บโชว์เป็น "ข้อมูล ณ …" และเป็นเวลาตัดของรายได้เมื่อวาน
+    generatedAt: now,
     revenueToday: paidToday.reduce((sum, b) => sum + b.totalAmount, 0),
+    revenueYesterday: paidYesterday._sum.totalAmount ?? 0,
     bookingsToday: paidToday.length,
     ticketsToday,
     pendingSlips,

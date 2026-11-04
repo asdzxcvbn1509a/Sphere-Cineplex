@@ -58,7 +58,7 @@ after(async () => {
   await disconnectDb();
 });
 
-const REFUND_ACCOUNT = { bankName: 'ธนาคารกสิกรไทย', accountNo: '1234567890' };
+const REFUND_ACCOUNT = { bankName: 'ธนาคารกสิกรไทย', accountNo: '1234567890', accountName: 'สมหมาย ใจดี' };
 
 const change = (booking, user, seats, refundAccount) => {
   return requestSeatChange({
@@ -148,6 +148,7 @@ describe('ย้ายไปที่นั่งที่ถูกกว่า'
     assert.equal(refund.refundAmount, 80);
     assert.equal(refund.refundBankName, REFUND_ACCOUNT.bankName);
     assert.equal(refund.refundAccountNo, REFUND_ACCOUNT.accountNo);
+    assert.equal(refund.refundAccountName, REFUND_ACCOUNT.accountName);
     // ค่าตั๋วหลักไม่ถูกแตะ
     assert.equal((await paymentOf(paid.id)).status, 'APPROVED');
 

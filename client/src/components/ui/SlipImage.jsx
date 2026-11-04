@@ -41,7 +41,7 @@ const SlipImage = ({ bookingId, paymentId, kind = 'payment', className }) => {
     return (
       <div className={clsx('flex flex-col items-center justify-center gap-2 text-muted', className)}>
         <ImageOff size={22} />
-        <span className="text-xs">{t('common.noSlip')}</span>
+        <span className="text-caption">{t('common.noSlip')}</span>
       </div>
     );
   }

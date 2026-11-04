@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
 import { createMovie, deleteMovie, listMovies, updateMovie } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
@@ -13,8 +14,18 @@ import Textarea from '../../components/ui/Textarea.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import Pagination from '../../components/ui/Pagination.jsx';
+import { FIT_BODY, FIT_CARD, FIT_PAGE, FIT_PAGER } from '../../components/admin/fitLayout.js';
 import useApi from '../../hooks/useApi.js';
+import useFitPageSize from '../../hooks/useFitPageSize.js';
 import { formatDate } from '../../utils/format.js';
+import { slicePage } from '../../utils/pagination.js';
+
+/**
+ * ระยะต่อแถวบนจอ xl = xl:h-23 (92px — โปสเตอร์ 64px + ระยะบนล่าง) — เปลี่ยนคู่กับ class ของแถว
+ * เส้นคั่นแถวรวมอยู่ในความสูงนี้แล้ว (border-collapse)
+ */
+const ROW_HEIGHT = 92;
 
 const emptyMovie = {
   titleTh: '',
@@ -34,6 +45,7 @@ const AdminMoviesPage = () => {
   const { t, lang, pick } = useI18n();
   const toast = useToast();
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyMovie);
   const [saving, setSaving] = useState(false);
@@ -57,6 +69,12 @@ const AdminMoviesPage = () => {
         movie.titleEn.toLowerCase().includes(keyword),
     );
   }, [movies, query]);
+
+  // แบ่งหน้าฝั่งเว็บจากผลค้นหา — จอใหญ่หน้าละเท่าที่วางพอดีจอ ทั้งหน้าไม่ต้องเลื่อน
+  const fit = useFitPageSize(ROW_HEIGHT);
+  const paged = slicePage(filtered, page, fit.pageSize);
+  // โหลดครั้งแรก = ยังไม่มีอะไรให้ดู · โหลดซ้ำหลังบันทึก/ลบ คงตารางเดิมไว้แค่หรี่ลง
+  const showSpinner = loading && movies.length === 0;
 
   const openCreate = () => {
     setForm(emptyMovie);
@@ -141,96 +159,135 @@ const AdminMoviesPage = () => {
   const setField = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className={FIT_PAGE}>
       <div className="mb-5 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold sm:text-3xl">{t('admin.movies')}</h1>
+        <h1 className="text-h1 font-bold">{t('admin.movies')}</h1>
         <Button onClick={openCreate}>
           <Plus size={16} /> {t('common.create')}
         </Button>
       </div>
 
-      <Field label={t('common.search')} className="mb-4 max-w-md">
+      <Field label={t('common.search')} className="mb-4">
         <div className="relative">
           <Search
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-field-muted"
             size={15}
           />
           <Input
             type="search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
             placeholder={t('home.searchPlaceholder')}
             className="pl-9"
           />
         </div>
       </Field>
 
-      {loading && <LoadingBlock label={t('common.loading')} />}
-      {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
-
-      {!loading && !error && (
-        <div className="card overflow-x-auto">
-          {/* จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด */}
-          <table className="stack-table w-full min-w-180 text-sm sm:text-base">
-            <thead className="border-b border-line bg-surface-2/60 text-left text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">{t('admin.movieForm.titleTh')}</th>
-                <th className="px-4 py-3 font-medium">{t('movie.duration')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.movieForm.genres')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.movieForm.releaseDate')}</th>
-                <th className="px-4 py-3 font-medium">{t('common.status')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
+      {error ? (
+        <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />
+      ) : (
+        // แบ่งหน้าอยู่ท้ายการ์ดเดียวกับตาราง — overflow-hidden ตัดมุมแถบท้ายให้โค้งตามการ์ด
+        <div className={FIT_CARD}>
+          <div ref={fit.ref} className={FIT_BODY}>
+            {/*
+              จอแคบกว่า lg แต่ละแถวเป็นการ์ด (.stack-table) — data-label คือชื่อคอลัมน์ที่โชว์กำกับในการ์ด
+              จอ xl ความกว้างคอลัมน์ตายตัว (table-fixed) ชื่อเรื่องกับหมวดหมู่ที่ยาวตัดด้วย … ทุกแถวจึงสูงเท่ากัน
+            */}
+            <table className="stack-table w-full min-w-180 text-body-2 sm:text-body-1 xl:table-fixed">
+              <thead className="border-b border-line bg-surface-2/60 text-left text-caption uppercase tracking-wide text-muted">
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted">
-                    {query.trim() ? t('home.noResults') : t('common.empty')}
-                  </td>
+                  <th className="px-4 py-3 font-medium">{t('admin.movieForm.titleTh')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-28">{t('movie.duration')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-56">{t('admin.movieForm.genres')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-36">{t('admin.movieForm.releaseDate')}</th>
+                  <th className="px-4 py-3 font-medium xl:w-44">{t('common.status')}</th>
+                  <th className="px-4 py-3 text-right font-medium xl:w-28">{t('common.actions')}</th>
                 </tr>
-              )}
-              {filtered.map((movie) => (
-                <tr key={movie.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <img src={movie.posterUrl} alt="" className="h-16 w-11 rounded object-cover" />
-                      <div>
-                        <p className="font-medium">{movie.titleTh}</p>
-                        <p className="text-xs text-muted">{movie.titleEn}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted" data-label={t('movie.duration')}>
-                    {movie.durationMin} {t('movie.minutesUnit')}
-                  </td>
-                  <td className="px-4 py-3 text-muted" data-label={t('admin.movieForm.genres')}>
-                    {movie.genres.join(', ')}
-                  </td>
-                  <td className="px-4 py-3 text-muted" data-label={t('admin.movieForm.releaseDate')}>
-                    {formatDate(movie.releaseDate, lang)}
-                  </td>
-                  <td className="px-4 py-3" data-label={t('common.status')}>
-                    <StatusBadge status={movie.status} label={t(`admin.movieStatus.${movie.status}`)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap justify-end gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(movie)}>
-                        <Pencil size={14} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDeleteTarget({ movie, blocked: null })}
+              </thead>
+              <tbody
+                aria-busy={loading || undefined}
+                className={clsx('transition', loading && !showSpinner && 'opacity-60')}
+              >
+                {showSpinner && (
+                  <tr>
+                    <td colSpan={6}>
+                      <LoadingBlock label={t('common.loading')} />
+                    </td>
+                  </tr>
+                )}
+                {!showSpinner && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted">
+                      {query.trim() ? t('home.noResults') : t('common.empty')}
+                    </td>
+                  </tr>
+                )}
+                {!showSpinner &&
+                  paged.items.map((movie) => (
+                    <tr key={movie.id} className="border-b border-line/60 last:border-0 xl:h-23">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <img src={movie.posterUrl} alt="" className="h-16 w-11 shrink-0 rounded object-cover" />
+                          {/* min-w-0 ให้ชื่อหดลงจนตัดด้วย … ได้ ไม่ดันคอลัมน์ */}
+                          <div className="min-w-0">
+                            <p className="font-medium xl:truncate" title={movie.titleTh}>
+                              {movie.titleTh}
+                            </p>
+                            <p className="text-caption text-muted xl:truncate" title={movie.titleEn}>
+                              {movie.titleEn}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted xl:truncate" data-label={t('movie.duration')}>
+                        {movie.durationMin} {t('movie.minutesUnit')}
+                      </td>
+                      <td
+                        className="px-4 py-3 text-muted xl:truncate"
+                        data-label={t('admin.movieForm.genres')}
+                        title={movie.genres.join(', ')}
                       >
-                        <Trash2 size={14} className="text-danger" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {movie.genres.join(', ')}
+                      </td>
+                      <td className="px-4 py-3 text-muted xl:truncate" data-label={t('admin.movieForm.releaseDate')}>
+                        {formatDate(movie.releaseDate, lang)}
+                      </td>
+                      <td className="px-4 py-3" data-label={t('common.status')}>
+                        <StatusBadge status={movie.status} label={t(`admin.movieStatus.${movie.status}`)} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap justify-end gap-1 xl:flex-nowrap">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(movie)}>
+                            <Pencil size={14} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteTarget({ movie, blocked: null })}
+                          >
+                            <Trash2 size={14} className="text-danger" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ซ่อนตัวเองเมื่อมีหน้าเดียว — จอ xl กันที่ไว้แม้ตอนซ่อน กล่องตารางจะได้ไม่ยืดหดจนจำนวนแถวต่อหน้าเปลี่ยนตาม */}
+          <Pagination
+            numbered
+            reserveSpace={fit.active}
+            className={FIT_PAGER}
+            page={paged.page}
+            pageSize={fit.pageSize}
+            total={filtered.length}
+            onChange={setPage}
+          />
         </div>
       )}
 
@@ -352,7 +409,7 @@ const AdminMoviesPage = () => {
         }
       >
         {deleteTarget?.blocked ? (
-          <div className="flex flex-col gap-3 text-sm">
+          <div className="flex flex-col gap-3 text-body-2">
             <p className="text-muted">
               {t('admin.movieForm.deleteBlockedBody', {
                 title: pick(deleteTarget.movie, 'title'),
@@ -360,7 +417,7 @@ const AdminMoviesPage = () => {
                 showtimes: deleteTarget.blocked.showtimeCount,
               })}
             </p>
-            <div className="rounded-lg border border-line bg-surface-2 p-3 text-xs text-muted">
+            <div className="rounded-lg border border-line bg-surface-2 p-3 text-caption text-muted">
               <p className="mb-1">
                 <span className="font-semibold text-fg">
                   {t('admin.movieForm.archiveAction')}
@@ -376,7 +433,7 @@ const AdminMoviesPage = () => {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted">
+          <p className="text-body-2 text-muted">
             {t('admin.movieForm.deleteBody', { title: deleteTarget && pick(deleteTarget.movie, 'title') })}
           </p>
         )}

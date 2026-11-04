@@ -53,6 +53,7 @@ const shapeSeatChangePayment = (payment) => {
     rejectReason: payment.rejectReason,
     refundBankName: payment.refundBankName,
     refundAccountNo: payment.refundAccountNo,
+    refundAccountName: payment.refundAccountName,
     refundedAt: payment.refundedAt,
     refundNote: payment.refundNote,
     hasRefundSlip: Boolean(payment.refundSlipPath),

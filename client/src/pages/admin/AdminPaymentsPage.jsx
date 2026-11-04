@@ -1,23 +1,34 @@
 import { useState } from 'react';
-import { CheckCircle2, Inbox } from 'lucide-react';
+import { CircleCheck, CircleX, Inbox, RefreshCw, ScanSearch } from 'lucide-react';
+import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
 import { approvePayment, listPayments, rejectPayment } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
+import Chip from '../../components/ui/Chip.jsx';
 import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Textarea from '../../components/ui/Textarea.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
-import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import SlipImage from '../../components/ui/SlipImage.jsx';
-import Pagination from '../../components/ui/Pagination.jsx';
+import QueueList from '../../components/admin/QueueList.jsx';
+import {
+  DETAIL_BODY,
+  DETAIL_FOOTER,
+  DETAIL_LIST,
+  DETAIL_PANEL,
+  QUEUE_GRID,
+  QUEUE_PAGE,
+  SLIP_PANEL,
+} from '../../components/admin/queueLayout.js';
 import { usePagedApi } from '../../hooks/useApi.js';
 import usePolling from '../../hooks/usePolling.js';
-import { formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
+import useQueueSelection from '../../hooks/useQueueSelection.js';
+import { formatBaht, formatDate, formatDateTime, formatTime } from '../../utils/format.js';
 
 /** สลิปส่วนต่างเปลี่ยนที่นั่ง — อนุมัติแล้วย้ายที่นั่งจริงและออกใบเสร็จส่วนต่าง */
 const isTopUp = (payment) => payment.kind === 'SEAT_CHANGE_TOPUP';
@@ -32,10 +43,20 @@ const isLateSlip = (payment) => {
     : payment.booking.status === 'EXPIRED';
 };
 
+/** แถวในแผงรายการ — เวลาท้ายแถวคือสลิปรอมานานเท่าไหร่ */
+const rowOf = (payment) => ({
+  code: payment.booking.code,
+  at: payment.slipUploadedAt,
+  name: payment.booking.user.name,
+  amount: payment.amount,
+});
+
 const AdminPaymentsPage = () => {
   const { t, lang, pick } = useI18n();
   const toast = useToast();
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState('oldest');
+  const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
   const [reason, setReason] = useState('');
@@ -45,18 +66,36 @@ const AdminPaymentsPage = () => {
   // ตรวจใบสุดท้ายของหน้าหมดแล้ว usePagedApi พาไปหน้าสุดท้ายที่ยังมีคิวเหลืออยู่เอง
   const { data, loading, error, reload } = usePagedApi(
     async () => {
-      const { data: body } = await listPayments('PENDING_VERIFICATION', { page });
+      const { data: body } = await listPayments('PENDING_VERIFICATION', { page, sort });
       // ป้ายบนเมนูต้องลดลงทันทีที่อนุมัติ/ปฏิเสธ ไม่ต้องรอผู้ดูแลรีเฟรชหน้าเอง
       refreshCounts();
       return { items: body.payments, total: body.total, pageSize: body.pageSize };
     },
     { page, setPage },
-    [page, refreshCounts],
+    [page, sort, refreshCounts],
   );
   const payments = data?.items ?? [];
 
-  // คิวตรวจสลิปควรอัปเดตเองเมื่อมีลูกค้าส่งสลิปเข้ามาใหม่
+  // ใบที่เลือก (ตกไปใบแรกเองเมื่อใบเดิมหายจากคิว) และการไปใบถัดไปหลังตรวจเสร็จ
+  const { selected, select, moveOnFrom, panelRef } = useQueueSelection(payments);
+
+  // โหลดครั้งแรก หรือกำลังถอยไปหน้าที่ยังมีรายการ — ยังไม่มีอะไรให้ตรวจ
+  // ส่วนสลับลำดับ/เปลี่ยนหน้าตอนมีรายการอยู่แล้ว คงพื้นที่ทำงานไว้แค่หรี่รายการลง หน้าจะได้ไม่กระพริบทั้งหน้า
+  const showSpinner = loading && payments.length === 0;
+
+  // คิวตรวจสลิปควรอัปเดตเองเมื่อมีลูกค้าส่งสลิปเข้ามาใหม่ — ตัวเลขเวลาที่รอในรายการก็ขยับตามรอบนี้ไปด้วย
   usePolling(() => reload({ silent: true }), 15000, true);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await reload({ silent: true });
+    setRefreshing(false);
+  };
+
+  const toggleSort = () => {
+    setSort((current) => (current === 'oldest' ? 'newest' : 'oldest'));
+    setPage(1);
+  };
 
   const approve = async (payment) => {
     setBusyId(payment.id);
@@ -70,6 +109,7 @@ const AdminPaymentsPage = () => {
             ? t('admin.paymentQueue.topUpApproved', { code: payment.booking.code })
             : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
       );
+      moveOnFrom(payment);
       await reload({ silent: true });
     } catch (error) {
       toast.error(apiError(error).message);
@@ -80,12 +120,14 @@ const AdminPaymentsPage = () => {
   };
 
   const reject = async () => {
-    setBusyId(rejectTarget.id);
+    const target = rejectTarget;
+    setBusyId(target.id);
     try {
-      await rejectPayment(rejectTarget.id, reason.trim());
-      toast.success(`${rejectTarget.booking.code} → ${t('admin.paymentQueue.reject')}`);
+      await rejectPayment(target.id, reason.trim());
+      toast.success(`${target.booking.code} → ${t('admin.paymentQueue.reject')}`);
       setRejectTarget(null);
       setReason('');
+      moveOnFrom(target);
       await reload({ silent: true });
     } catch (error) {
       toast.error(apiError(error).message);
@@ -95,113 +137,152 @@ const AdminPaymentsPage = () => {
   };
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:py-8">
-      {/* จำนวนสลิปค้างอยู่บนป้ายเมนูแล้ว และคิวรีเฟรชเองทุก 15 วินาที หัวหน้าจึงเหลือไว้ให้ screen reader */}
-      <h1 className="sr-only">{t('admin.payments')}</h1>
+    <div className={QUEUE_PAGE}>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-h1 font-bold">{t('admin.payments')}</h1>
+        {/* คิวรีเฟรชเองทุก 15 วินาทีอยู่แล้ว ปุ่มนี้ไว้ดึงทันทีตอนลูกค้าแจ้งว่าเพิ่งส่งสลิป — Button ใส่ spinner แทนไอคอนให้ตอนโหลด */}
+        <Button variant="secondary" size="sm" loading={refreshing} onClick={refresh}>
+          {!refreshing && <RefreshCw size={14} />}
+          {t('common.refresh')}
+        </Button>
+      </div>
 
-      {loading && <LoadingBlock label={t('common.loading')} />}
       {error && <ErrorBlock message={error} onRetry={reload} retryLabel={t('common.retry')} />}
+      {showSpinner && <LoadingBlock label={t('common.loading')} />}
 
-      {!loading && !error && payments.length === 0 && (
-        <EmptyState compact icon={Inbox} title={t('admin.paymentQueue.empty')} />
-      )}
+      {data && !showSpinner && (
+        <div className={QUEUE_GRID}>
+          <QueueList
+            label={t('admin.paymentQueue.pending')}
+            sortLabel={t(sort === 'oldest' ? 'admin.paymentQueue.sortOldest' : 'admin.paymentQueue.sortNewest')}
+            onToggleSort={toggleSort}
+            items={payments}
+            rowOf={rowOf}
+            selectedId={selected?.id}
+            onSelect={select}
+            loading={loading}
+            page={page}
+            pageSize={data.pageSize}
+            total={data.total}
+            onPageChange={setPage}
+          />
 
-      <div className="flex max-w-200 flex-col gap-6">
-        {payments.map((payment) => (
-          <article key={payment.id} className="card flex flex-col gap-4 p-4 sm:flex-row sm:p-6">
-            <SlipImage
-              bookingId={payment.booking.id}
-              paymentId={isTopUp(payment) ? payment.id : undefined}
-              className="h-60 w-full shrink-0 rounded-lg border border-line bg-surface-2 sm:w-38"
-            />
+          {selected ? (
+            <>
+              {/*
+                key = เปลี่ยนใบแล้ว SlipImage เริ่มใหม่หมด ไม่งั้นจะค้างรูปของใบก่อน (URL ที่ revoke ไปแล้ว) หรือสถานะโหลดไม่ได้ของใบก่อน
+              */}
+              <section ref={panelRef} aria-label={t('common.slip')} className={SLIP_PANEL}>
+                <SlipImage
+                  key={selected.id}
+                  bookingId={selected.booking.id}
+                  paymentId={isTopUp(selected) ? selected.id : undefined}
+                  className="absolute inset-3"
+                />
+              </section>
 
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-mono text-base text-accent sm:text-lg">{payment.booking.code}</span>
-                <StatusBadge status={payment.status} label={t('bookings.statusPENDING_VERIFICATION')} />
-              </div>
+              <section className={DETAIL_PANEL}>
+                <div className={DETAIL_BODY}>
+                  <h2 className="font-code text-h2 font-semibold text-accent">{selected.booking.code}</h2>
+                  <p className="mt-1 text-body-1 font-bold">{pick(selected.booking.showtime.movie, 'title')}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Chip tone="accent" size="sm">
+                      {selected.booking.showtime.theatre.name}
+                    </Chip>
+                    <Chip tone="accent" size="sm">
+                      {formatDate(selected.booking.showtime.startsAt, lang)}
+                    </Chip>
+                    <Chip tone="accent" size="sm">
+                      {formatTime(selected.booking.showtime.startsAt, lang)}
+                    </Chip>
+                  </div>
 
-              <p className="mt-2 text-base font-bold">{pick(payment.booking.showtime.movie, 'title')}</p>
-              <p className="text-xs text-muted sm:text-sm">
-                {payment.booking.showtime.theatre.name} ·{' '}
-                {formatDateTime(payment.booking.showtime.startsAt, lang)}
-              </p>
+                  {isTopUp(selected) && (
+                    <p className="mt-3 rounded-lg border border-info/40 bg-info-bg px-3 py-2 text-caption text-info sm:text-body-2">
+                      {t('admin.paymentQueue.topUp')}
+                    </p>
+                  )}
+                  {isLateSlip(selected) && (
+                    <p className="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-caption text-warning sm:text-body-2">
+                      {isTopUp(selected) ? t('admin.paymentQueue.lateTopUp') : t('admin.paymentQueue.lateSlip')}
+                    </p>
+                  )}
 
-              {isTopUp(payment) && (
-                <p className="mt-3 rounded-lg border border-info/40 bg-info/10 px-3 py-2 text-xs text-info sm:text-sm">
-                  {t('admin.paymentQueue.topUp')}
-                </p>
-              )}
-              {isLateSlip(payment) && (
-                <p className="mt-3 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent sm:text-sm">
-                  {isTopUp(payment) ? t('admin.paymentQueue.lateTopUp') : t('admin.paymentQueue.lateSlip')}
-                </p>
-              )}
+                  {/* ยอดที่ต้องเทียบกับรูปสลิป แยกเป็นกล่องเด่น ตาเลื่อนจากรูปมาหาตัวเลขได้ทันที */}
+                  <div className="mt-4 rounded-lg border border-line bg-surface-2 px-4 py-3">
+                    <p className="flex items-center gap-1.5 text-body-2 font-medium">
+                      <ScanSearch size={16} className="shrink-0 text-accent" />
+                      {t('admin.paymentQueue.checkOnSlip')}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-body-2 text-muted">{t('admin.paymentQueue.amount')}</span>
+                      <span className="text-h1 font-bold text-accent">{formatBaht(selected.amount, lang)}</span>
+                    </div>
+                  </div>
 
-              <dl className="mt-3 grid grid-cols-2 gap-y-1.5 text-sm">
-                <dt className="text-muted">{t('admin.paymentQueue.customer')}</dt>
-                <dd className="text-right">
-                  {payment.booking.user.name}
-                  <span className="block text-muted">{payment.booking.user.phone}</span>
-                </dd>
+                  <p className="mt-4 text-caption font-medium text-muted">{t('admin.paymentQueue.systemInfo')}</p>
+                  <dl className={clsx(DETAIL_LIST, 'mt-1.5')}>
+                    <dt className="text-muted">{t('payment.reference')}</dt>
+                    <dd className="font-code">{selected.reference}</dd>
 
-                <dt className="text-muted">{t('ticket.seats')}</dt>
-                <dd className="text-right font-medium">
-                  {isTopUp(payment)
-                    ? `${payment.seatChange.fromSeats.join(', ')} → ${payment.seatChange.toSeats.join(', ')}`
-                    : payment.booking.seats.map((seat) => seat.label).join(', ')}
-                </dd>
+                    <dt className="text-muted">{t('admin.paymentQueue.waitingSince')}</dt>
+                    <dd>{formatDateTime(selected.slipUploadedAt, lang)}</dd>
+                  </dl>
 
-                <dt className="text-muted">{t('payment.reference')}</dt>
-                <dd className="text-right font-mono">{payment.reference}</dd>
+                  <dl className={clsx(DETAIL_LIST, 'mt-3 border-t border-line pt-3')}>
+                    <dt className="text-muted">{t('admin.queue.customer')}</dt>
+                    <dd>{selected.booking.user.name}</dd>
 
-                <dt className="text-muted">{t('admin.paymentQueue.waitingSince')}</dt>
-                <dd className="text-right">
-                  {formatTime(payment.slipUploadedAt, lang)} · {formatDateTime(payment.slipUploadedAt, lang).split(' · ')[0]}
-                </dd>
-              </dl>
+                    <dt className="text-muted">{t('admin.queue.phone')}</dt>
+                    <dd className="font-code">{selected.booking.user.phone}</dd>
 
-              {/* ยอดโอนกับปุ่มชิดล่างเสมอขอบล่างรูปสลิป ตาเลื่อนจากรูปมาหาตัวเลขได้ทันที */}
-              <div className="mt-auto pt-4">
-                <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-2 px-4 py-3">
-                  <span className="text-sm text-muted">{t('admin.paymentQueue.amount')}</span>
-                  <span className="text-xl font-bold text-accent sm:text-2xl">
-                    {formatMoney(payment.amount, lang)} {t('common.baht')}
-                  </span>
+                    <dt className="text-muted">{t('ticket.seats')}</dt>
+                    <dd className="font-medium">
+                      {isTopUp(selected)
+                        ? `${selected.seatChange.fromSeats.join(', ')} → ${selected.seatChange.toSeats.join(', ')}`
+                        : selected.booking.seats.map((seat) => seat.label).join(', ')}
+                    </dd>
+                  </dl>
                 </div>
 
-                <div className="mt-3 flex gap-2">
+                <div className={DETAIL_FOOTER}>
                   <Button
                     variant="success"
-                    size="sm"
-                    className="flex-1"
-                    loading={busyId === payment.id}
-                    onClick={() => approve(payment)}
+                    size="lg"
+                    className="w-full"
+                    loading={busyId === selected.id}
+                    onClick={() => approve(selected)}
                   >
-                    <CheckCircle2 size={15} /> {t('admin.paymentQueue.approve')}
+                    {busyId !== selected.id && <CircleCheck size={18} />}
+                    {t('admin.paymentQueue.approve')}
                   </Button>
                   <Button
                     variant="danger"
-                    size="sm"
-                    className="flex-1"
-                    disabled={busyId === payment.id}
+                    size="lg"
+                    className="w-full"
+                    disabled={busyId === selected.id}
                     onClick={() => {
-                      setRejectTarget(payment);
+                      setRejectTarget(selected);
                       setReason('');
                     }}
                   >
+                    <CircleX size={18} />
                     {t('admin.paymentQueue.reject')}
                   </Button>
                 </div>
-              </div>
-            </div>
-          </article>
-        ))}
-
-        {!loading && !error && (
-          <Pagination page={page} pageSize={data.pageSize} total={data.total} onChange={setPage} />
-        )}
-      </div>
+              </section>
+            </>
+          ) : (
+            // คิวว่าง: แผงสลิปกับรายละเอียดรวมเป็นแผงเดียว
+            <EmptyState
+              compact
+              icon={Inbox}
+              title={t('admin.paymentQueue.empty')}
+              className="justify-center md:col-span-2 xl:min-h-0"
+            />
+          )}
+        </div>
+      )}
 
       <ConfirmModal
         open={Boolean(rejectTarget)}

@@ -85,6 +85,7 @@ Authorization: Bearer {{token}}
 
 ### ── 11. ยกเลิกการจอง ─────────────────────────────────
 ### ใบที่จ่ายแล้วต้องส่ง refundBankName + refundAccountNo มาด้วย (ไม่งั้น 400 REFUND_ACCOUNT_REQUIRED)
+### refundAccountName (ชื่อเจ้าของบัญชี) ไม่บังคับ แต่ผู้ดูแลใช้เทียบก่อนโอนคืน — เว็บส่งมาเสมอ
 POST {{host}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -93,11 +94,12 @@ Content-Type: application/json
 
 ### ── 12. แจ้ง/แก้บัญชีรับเงินคืนภายหลัง ────────────────
 ### ใช้กับใบที่รอโอนคืนอยู่ (เช่น ผู้ดูแลยกเลิกรอบแทน) — ใบอื่นได้ 409 REFUND_NOT_PENDING
+### ไม่ส่ง refundAccountName = ล้างชื่อเดิมทิ้ง (ชื่อของบัญชีเก่าอาจไม่ตรงกับบัญชีใหม่)
 PATCH {{host}}/bookings/{{bookingId}}/refund-account
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
-{ "refundBankName": "กสิกรไทย", "refundAccountNo": "123-4-56789-0" }
+{ "refundBankName": "กสิกรไทย", "refundAccountNo": "123-4-56789-0", "refundAccountName": "สมหมาย ใจดี" }
 
 ### ── 13. เปลี่ยนที่นั่ง (ใบที่จ่ายแล้ว — ทำหลัง A4 อนุมัติสลิป และก่อนข้อ 11 ยกเลิก) ──
 ### seatIds = ชุดใหม่ทั้งชุด (รวมที่นั่งที่คงไว้) จำนวนต้องเท่าเดิม
@@ -157,8 +159,9 @@ Authorization: Bearer {{adminToken}}
 ### ── A3. คิวสลิปรอตรวจสอบ (แบ่งหน้า: page, pageSize ≤ 100) ──
 ### รวมสลิปที่ส่งหลังหมดเวลา (booking.status = EXPIRED) — อนุมัติแล้วเข้าคิวคืนเงินแทนการออกตั๋ว
 ### และสลิปส่วนต่างเปลี่ยนที่นั่ง (kind = SEAT_CHANGE_TOPUP) — อนุมัติแล้วย้ายที่นั่งจริงพร้อมออกใบเสร็จส่วนต่าง
+### sort=oldest (ค่าเริ่มต้น) ใบที่ส่งก่อนขึ้นก่อน · sort=newest ใบล่าสุดก่อน
 # @name queue
-GET {{host}}/admin/payments?status=PENDING_VERIFICATION&page=1
+GET {{host}}/admin/payments?status=PENDING_VERIFICATION&sort=oldest&page=1
 Authorization: Bearer {{adminToken}}
 
 ### ── A4. อนุมัติสลิปรายการแรกในคิว ────────────────────
@@ -193,8 +196,20 @@ Content-Type: application/json
 
 { "seatIds": ["{{seatmap.response.body.rows.0.seats.2.id}}"], "reason": "ที่นั่งเดิมชำรุด" }
 
+### ── A6.4 กรองตามป้ายสถานะในหน้าการจอง (displayStatus) ──
+### ละเอียดกว่า status: รวมเรื่องเงินที่ยังค้าง เช่น TOPUP_PENDING_PAYMENT · DIFF_REFUND_PENDING · REFUNDED
+### ส่งหลายป้ายคั่นด้วยจุลภาคได้ (ตรงป้ายใดป้ายหนึ่ง) — ตัวอย่างนี้คือกลุ่ม "ที่ต้องชำระ" ของตัวกรองหน้าเว็บ
+### ทุกแถวในคำตอบมี displayStatus ติดมาด้วย — มีค่าที่ไม่รู้จักแม้ตัวเดียวได้ 422
+GET {{host}}/admin/bookings?displayStatus=PENDING_PAYMENT,TOPUP_PENDING_PAYMENT
+Authorization: Bearer {{adminToken}}
+
 ### ── A7. คิวคืนเงิน ───────────────────────────────────
+### ไม่ส่ง sort = รอคืน: ค้างนานสุดก่อน · คืนแล้ว: โอนคืนล่าสุดก่อน
 GET {{host}}/admin/refunds?status=REFUND_PENDING&page=1
+Authorization: Bearer {{adminToken}}
+
+### ── A7.1 ประวัติการคืนเงิน เรียงจากที่โอนคืนนานที่สุด ──
+GET {{host}}/admin/refunds?status=REFUNDED&sort=oldest
 Authorization: Bearer {{adminToken}}
 
 ### ── A8. รายงานยอดขายรายวัน ───────────────────────────

@@ -44,26 +44,26 @@ const ForgotPasswordPage = () => {
             {sent ? <MailCheck size={20} /> : <KeyRound size={20} />}
           </span>
           <div>
-            <h1 className="text-2xl font-bold">{t(sent ? 'forgot.sentTitle' : 'forgot.title')}</h1>
-            <p className="text-sm text-muted">{t(sent ? 'forgot.sentSubtitle' : 'forgot.subtitle')}</p>
+            <h1 className="text-h1 font-bold">{t(sent ? 'forgot.sentTitle' : 'forgot.title')}</h1>
+            <p className="text-body-2 text-muted">{t(sent ? 'forgot.sentSubtitle' : 'forgot.subtitle')}</p>
           </div>
         </div>
 
         {sent ? (
           <div className="flex flex-col gap-4">
-            <p className="rounded-xl bg-surface-2 p-4 text-sm leading-relaxed">
+            <p className="rounded-xl bg-surface-2 p-4 text-body-2">
               {t('forgot.sentBody', { email: email.trim(), minutes: sent.ttlMinutes })}
             </p>
-            <p className="text-sm text-muted">{t('forgot.sentHint')}</p>
+            <p className="text-body-2 text-muted">{t('forgot.sentHint')}</p>
 
             {/* โหมดพัฒนาเท่านั้น: ยังไม่ได้ตั้งเซิร์ฟเวอร์อีเมล เลยเอาลิงก์มาวางให้กดต่อได้เลย
                 ฝั่ง server ผูกเงื่อนไขกับ NODE_ENV ไว้แล้ว ขึ้นจริงจะไม่มีค่านี้ส่งมา */}
             {sent.devResetUrl && (
-              <div className="rounded-xl border border-info/40 bg-info/10 p-3">
-                <p className="mb-1 text-xs font-semibold text-info">{t('forgot.devNotice')}</p>
+              <div className="rounded-xl border border-info/40 bg-info-bg p-3">
+                <p className="mb-1 text-caption font-medium text-info">{t('forgot.devNotice')}</p>
                 <a
                   href={sent.devResetUrl}
-                  className="block break-all text-xs text-info underline"
+                  className="block break-all text-caption text-info underline"
                 >
                   {sent.devResetUrl}
                 </a>
@@ -109,7 +109,7 @@ const ForgotPasswordPage = () => {
               </Button>
             </form>
 
-            <p className="mt-6 border-t border-line pt-4 text-center text-sm">
+            <p className="mt-6 border-t border-line pt-4 text-center text-body-2">
               <Link
                 to="/login"
                 className="inline-flex items-center gap-1.5 text-muted transition hover:text-fg"

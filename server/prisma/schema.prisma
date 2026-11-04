@@ -303,48 +303,51 @@ model BookingSeat {
 /// รายการเงินของการจอง — ใบหลัก (ค่าตั๋วตอนจอง) มีใบเดียวต่อการจอง
 /// ส่วนต่างจากการเปลี่ยนที่นั่งเป็นรายการแยก เพื่อให้ใช้คิวตรวจสลิป คิวคืนเงิน และเลขที่ใบเสร็จชุดเดียวกัน
 model Payment {
-  id              String        @id @default(cuid())
+  id                String        @id @default(cuid())
   /// การจองที่เป็นเจ้าของรายการนี้ — ทุกรายการเงินผูกกับการจองเสมอ (คิวของผู้ดูแลอ่านผ่านตัวนี้)
-  bookingId       String
+  bookingId         String
   /// ตั้งเฉพาะใบหลัก (kind = BOOKING) — booking.payment จึงยังชี้ใบหลักได้ตรง ๆ แบบหนึ่งต่อหนึ่ง
-  mainBookingId   String?       @unique
-  kind            PaymentKind   @default(BOOKING)
+  mainBookingId     String?       @unique
+  kind              PaymentKind   @default(BOOKING)
   /// คำขอเปลี่ยนที่นั่งที่ทำให้เกิดรายการนี้ — ตั้งเฉพาะรายการส่วนต่าง
-  seatChangeId    String?       @unique
-  method          String        @default("PROMPTPAY")
-  amount          Int
+  seatChangeId      String?       @unique
+  method            String        @default("PROMPTPAY")
+  amount            Int
   /// รายการคืนส่วนต่างไม่มีเงินขาเข้า จึงไม่มี QR
-  qrPayload       String?
-  reference       String
-  slipPath        String?
-  slipUploadedAt  DateTime?
-  status          PaymentStatus @default(AWAITING_SLIP)
-  verifiedById    String?
-  verifiedAt      DateTime?
-  rejectReason    String?
+  qrPayload         String?
+  reference         String
+  slipPath          String?
+  slipUploadedAt    DateTime?
+  status            PaymentStatus @default(AWAITING_SLIP)
+  verifiedById      String?
+  verifiedAt        DateTime?
+  rejectReason      String?
   /// ---------- ใบเสร็จรับเงิน ----------
   /// เลขที่ใบเสร็จ เช่น RC-2026-000123 — ออกตอนผู้ดูแลอนุมัติสลิปแล้วการจองเป็น PAID เท่านั้น
   /// สลิปที่ส่งหลังหมดเวลาแล้วเข้าคิวคืนเงินทันทีไม่มีเลขนี้ เพราะไม่ได้ขายตั๋วให้
-  receiptNo       String?       @unique
+  receiptNo         String?       @unique
   /// สำเนาชื่อผู้จ่าย ณ ตอนออกใบเสร็จ — ผู้ใช้แก้ชื่อทีหลังได้ แต่ใบเสร็จที่ออกไปแล้วต้องไม่เปลี่ยนตาม
-  receiptName     String?
+  receiptName       String?
   /// สำเนาที่นั่ง ณ ตอนออกใบเสร็จ (ใบหลัก) — เปลี่ยนที่นั่งทีหลังได้ แต่ใบเสร็จที่ออกไปแล้วต้องไม่เปลี่ยนตาม
-  receiptSeats    Json?
+  receiptSeats      Json?
   /// ---------- การคืนเงิน ----------
   /// ระบบไม่ได้ตัดเงินเอง ผู้ดูแลโอนคืนผ่านแอปธนาคารแล้วมาบันทึกหลักฐานที่นี่
-  refundDueAt     DateTime?
+  refundDueAt       DateTime?
   /// ยอดที่ต้องโอนคืน — ตั้งทุกครั้งที่เข้า REFUND_PENDING และอาจไม่เท่า amount
   /// (ยกเลิกการจองที่เคยเปลี่ยนที่นั่ง = ยอดสุทธิของการจอง ซึ่งรวมส่วนต่างที่จ่ายเพิ่มและหักส่วนที่คืนไปแล้ว)
-  refundAmount    Int?
+  refundAmount      Int?
   /// บัญชีที่ลูกค้าแจ้งไว้ตอนยกเลิก เพื่อให้ผู้ดูแลโอนคืนได้ถูกบัญชี
-  refundBankName  String?
-  refundAccountNo String?
-  refundedAt      DateTime?
-  refundedById    String?
-  refundSlipPath  String?
-  refundNote      String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  refundBankName    String?
+  refundAccountNo   String?
+  /// ชื่อเจ้าของบัญชี — ผู้ดูแลเทียบกับชื่อที่แอปธนาคารแสดงก่อนกดโอน (บัญชีอาจไม่ใช่ชื่อผู้จอง)
+  /// ไม่บังคับ: รายการก่อนมีช่องนี้ และ client รุ่นเก่าที่ยังไม่ส่งมา
+  refundAccountName String?
+  refundedAt        DateTime?
+  refundedById      String?
+  refundSlipPath    String?
+  refundNote        String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   booking    Booking     @relation("BookingPayments", fields: [bookingId], references: [id], onDelete: Cascade)
   mainOf     Booking?    @relation("BookingMainPayment", fields: [mainBookingId], references: [id], onDelete: Cascade)

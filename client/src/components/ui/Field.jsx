@@ -5,14 +5,14 @@ const Field = ({ label, hint, error, required, children, className }) => {
   return (
     <label className={clsx('block', className)}>
       {label && (
-        <span className="mb-1.5 block text-sm font-medium text-muted">
+        <span className="mb-1.5 block text-body-2 font-medium text-muted">
           {label}
           {required && <span className="text-danger"> *</span>}
         </span>
       )}
       {children}
-      {hint && !error && <span className="mt-1 block text-xs text-muted">{hint}</span>}
-      {error && <span className="mt-1 block text-xs text-danger">{error}</span>}
+      {hint && !error && <span className="mt-1 block text-caption text-muted">{hint}</span>}
+      {error && <span className="mt-1 block text-caption text-danger">{error}</span>}
     </label>
   );
 };

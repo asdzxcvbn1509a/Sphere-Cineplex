@@ -137,9 +137,21 @@ describe('ลูกค้าแจ้งบัญชีรับเงินค�
       userId: owner.id,
       bankName: ' กสิกรไทย ',
       accountNo: '1234567890',
+      accountName: '  วรรณกร จิตณา  ',
     });
     assert.equal(updated.payment.refundBankName, 'กสิกรไทย');
     assert.equal(updated.payment.refundAccountNo, '1234567890');
+    assert.equal(updated.payment.refundAccountName, 'วรรณกร จิตณา');
+
+    // client รุ่นก่อนไม่ส่งชื่อมา — เปลี่ยนบัญชีได้ตามเดิม และชื่อของบัญชีเก่าไม่ติดมากับบัญชีใหม่
+    const withoutName = await updateRefundAccount({
+      bookingId: paid.id,
+      userId: owner.id,
+      bankName: 'ไทยพาณิชย์',
+      accountNo: '9876543210',
+    });
+    assert.equal(withoutName.payment.refundBankName, 'ไทยพาณิชย์');
+    assert.equal(withoutName.payment.refundAccountName, null);
 
     await assert.rejects(
       updateRefundAccount({ bookingId: unpaid.id, userId: owner.id, bankName: 'กสิกรไทย', accountNo: '1234567890' }),

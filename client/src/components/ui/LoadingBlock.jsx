@@ -7,7 +7,7 @@ const LoadingBlock = ({ label = 'กำลังโหลด...', className }) =
       className={clsx('flex flex-col items-center justify-center gap-3 py-16 text-muted', className)}
     >
       <Spinner />
-      <p className="text-sm">{label}</p>
+      <p className="text-body-2">{label}</p>
     </div>
   );
 };

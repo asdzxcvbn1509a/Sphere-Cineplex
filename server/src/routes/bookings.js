@@ -43,17 +43,27 @@ const accountNoSchema = z
 
 const bankNameSchema = z.string().trim().min(2, 'กรุณาระบุธนาคาร').max(60);
 
+// ชื่อเจ้าของบัญชี — ไม่บังคับใน API เพื่อให้ client รุ่นก่อนที่ยังไม่มีช่องนี้ยกเลิก/แจ้งบัญชีได้ตามเดิม
+// (ฟอร์มของเว็บบังคับกรอกเอง) แต่ถ้าส่งมาต้องเป็นชื่อจริง ไม่ใช่ช่องว่าง
+const accountNameSchema = z
+  .string()
+  .trim()
+  .min(2, 'กรุณาระบุชื่อบัญชี')
+  .max(100, 'ชื่อบัญชียาวเกิน 100 ตัวอักษร');
+
 const cancelSchema = z.object({
   reason: z.string().trim().max(200).optional(),
   // บัญชีสำหรับรับเงินคืน — จำเป็นเฉพาะการจองที่ชำระเงินไปแล้ว (service เป็นคนบังคับ)
   refundBankName: bankNameSchema.optional(),
   refundAccountNo: accountNoSchema.optional(),
+  refundAccountName: accountNameSchema.optional(),
 });
 
-// แจ้งบัญชีภายหลัง (ใบที่ผู้ดูแลยกเลิกแทน) — มาทีหลังจึงต้องส่งครบทั้งคู่
+// แจ้งบัญชีภายหลัง (ใบที่ผู้ดูแลยกเลิกแทน) — มาทีหลังจึงต้องส่งธนาคารและเลขบัญชีครบทั้งคู่
 const refundAccountSchema = z.object({
   refundBankName: bankNameSchema,
   refundAccountNo: accountNoSchema,
+  refundAccountName: accountNameSchema.optional(),
 });
 
 // เปลี่ยนที่นั่ง — ส่งชุดที่นั่งใหม่ทั้งชุด (รวมที่นั่งที่คงไว้) จำนวนต้องเท่าเดิม (service เป็นคนบังคับ)
@@ -62,6 +72,7 @@ const seatChangeSchema = z.object({
   seatIds: z.array(z.string().min(1)).min(1, 'กรุณาเลือกที่นั่ง'),
   refundBankName: bankNameSchema.optional(),
   refundAccountNo: accountNoSchema.optional(),
+  refundAccountName: accountNameSchema.optional(),
 });
 
 /**

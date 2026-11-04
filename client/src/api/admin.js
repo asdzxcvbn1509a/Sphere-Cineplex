@@ -127,14 +127,20 @@ export const deleteShowtime = async (showtimeId) => {
 
 // ---------- การจอง ----------
 
-/** แบ่งหน้าละ 50 รายการ (ค่าเริ่มต้นของ server) — คืน { bookings, total, page, pageSize } */
-export const listAllBookings = async ({ status, date, q, page = 1 } = {}) => {
+/**
+ * แบ่งหน้า — คืน { bookings, total, page, pageSize }
+ * pageSize ไม่ส่ง = 50 (ค่าเริ่มต้นของ server) · หน้าการจองบนจอใหญ่ส่งจำนวนแถวที่วางพอดีจอมา
+ * displayStatuses = ป้ายสถานะของหน้าการจองที่ต้องการ (กลุ่มในตัวกรอง) ส่งเป็นค่าคั่นด้วยจุลภาค ตรงป้ายใดป้ายหนึ่งก็ได้
+ * ทุกแถวที่ได้กลับมามี displayStatus ติดมาด้วย
+ */
+export const listAllBookings = async ({ displayStatuses, date, q, page = 1, pageSize } = {}) => {
   return await api.get('/admin/bookings', {
     params: {
-      ...(status && { status }),
+      ...(displayStatuses?.length && { displayStatus: displayStatuses.join(',') }),
       ...(date && { date }),
       ...(q && { q }),
       page,
+      ...(pageSize && { pageSize }),
     },
   });
 };
@@ -161,10 +167,11 @@ export const changeSeats = async (bookingId, { seatIds, reason }) => {
 
 /**
  * คิวสลิป — status: 'PENDING_VERIFICATION' | 'APPROVED' | 'REJECTED' | 'AWAITING_SLIP' | 'ALL'
+ * sort: 'oldest' (ค่าเริ่มต้นของ server) | 'newest' — เรียงตามเวลาที่ส่งสลิป
  * คืน { payments, total, page, pageSize }
  */
-export const listPayments = async (status = 'PENDING_VERIFICATION', { page = 1 } = {}) => {
-  return await api.get('/admin/payments', { params: { status, page } });
+export const listPayments = async (status = 'PENDING_VERIFICATION', { page = 1, sort } = {}) => {
+  return await api.get('/admin/payments', { params: { status, page, ...(sort && { sort }) } });
 };
 
 /** อนุมัติ → การจองเป็น PAID และออก E-Ticket ให้ผู้ใช้ทันที */
@@ -181,10 +188,11 @@ export const rejectPayment = async (paymentId, reason) => {
 
 /**
  * คิวการจองที่จ่ายเงินแล้วแต่ถูกยกเลิก จึงต้องโอนเงินคืน — status: 'REFUND_PENDING' | 'REFUNDED' | 'ALL'
+ * sort: 'oldest' | 'newest' — ไม่ส่ง = ค่าเริ่มต้นของ server (รอคืน: ค้างนานสุดก่อน · คืนแล้ว: ล่าสุดก่อน)
  * คืน { refunds, total, page, pageSize }
  */
-export const listRefunds = async (status = 'REFUND_PENDING', { page = 1 } = {}) => {
-  return await api.get('/admin/refunds', { params: { status, page } });
+export const listRefunds = async (status = 'REFUND_PENDING', { page = 1, sort } = {}) => {
+  return await api.get('/admin/refunds', { params: { status, page, ...(sort && { sort }) } });
 };
 
 /** บันทึกว่าโอนเงินคืนแล้ว ต้องแนบสลิปคืนเงิน (server ปฏิเสธถ้าไม่มี) */
@@ -234,10 +242,13 @@ export const downloadSalesCsv = async ({ from, to, groupBy = 'day' } = {}) => {
 
 // ---------- ผู้ใช้ ----------
 
-/** ค้นได้ทั้งชื่อ อีเมล และเบอร์โทรด้วยคำเดียว — คืน { users, total, page, pageSize } */
-export const listUsers = async ({ q, role, page = 1 } = {}) => {
+/**
+ * ค้นได้ทั้งชื่อ อีเมล และเบอร์โทรด้วยคำเดียว — คืน { users, total, page, pageSize }
+ * pageSize ไม่ส่ง = 50 (ค่าเริ่มต้นของ server) · หน้าจัดการผู้ใช้บนจอใหญ่ส่งจำนวนแถวที่วางพอดีจอมา
+ */
+export const listUsers = async ({ q, role, page = 1, pageSize } = {}) => {
   return await api.get('/admin/users', {
-    params: { ...(q && { q }), ...(role && { role }), page },
+    params: { ...(q && { q }), ...(role && { role }), page, ...(pageSize && { pageSize }) },
   });
 };
 

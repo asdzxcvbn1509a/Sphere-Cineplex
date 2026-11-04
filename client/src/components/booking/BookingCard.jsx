@@ -7,8 +7,13 @@ import Chip from '../ui/Chip.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import { formatDate, formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
 
-/** ข้อความมุมขวาล่างของการ์ด — บอกว่าตอนนี้ยกเลิกได้ไหม และเพราะอะไร */
+/**
+ * ข้อความมุมขวาล่างของการ์ด — บอกว่าตอนนี้ยกเลิกได้ไหม และเพราะอะไร
+ * ใบที่ปิดไปแล้วหรือถึงรอบฉายแล้วไม่ต้องบอก (แท็บยกเลิก/ประวัติจะขึ้น "ยกเลิกฟรีได้…" ทั้งที่ไม่จริง)
+ */
 const cancelHint = (booking, t) => {
+  if (booking.status === 'CANCELLED' || booking.status === 'EXPIRED') return null;
+  if (new Date(booking.showtime.startsAt) <= new Date()) return null;
   if (booking.status === 'PENDING_VERIFICATION') return t('bookings.cancelAwaitingReview');
   if (booking.seatChange?.open?.status === 'PENDING_VERIFICATION') {
     return t('bookings.cancelAwaitingTopUp');
@@ -21,7 +26,7 @@ const cancelHint = (booking, t) => {
 
 /**
  * บอกว่ายังเปลี่ยนที่นั่งได้อีกกี่ครั้ง หรือทำไมเปลี่ยนไม่ได้แล้ว — เฉพาะใบที่จ่ายแล้ว ยังไม่ถึงรอบ และไม่มีคำขอค้าง
- * (คำขอที่ค้างอยู่มีป้าย/ปุ่มของตัวเองในแถบด้านล่างแล้ว)
+ * (คำขอที่ค้างอยู่มีป้ายสถานะด้านบนและปุ่มของตัวเองในแถบด้านล่างแล้ว)
  */
 const seatChangeHint = (booking, t) => {
   const info = booking.seatChange;
@@ -38,6 +43,31 @@ const seatChangeHint = (booking, t) => {
 };
 
 /**
+ * ป้ายสถานะของการ์ด — คำขอเปลี่ยนที่นั่งที่ค้างอยู่สำคัญกว่า "ชำระเงินแล้ว" ของใบหลัก
+ * การ์ดไปอยู่แท็บที่ต้องชำระ/รอดำเนินการก็เพราะคำขอนั้น ป้ายจึงต้องบอกเรื่องเดียวกัน (โทนสีตามสถานะของคำขอ)
+ */
+const statusBadge = (booking, t) => {
+  const open = booking.seatChange?.open;
+  if (open?.status === 'PENDING_PAYMENT') {
+    return { status: 'PENDING_PAYMENT', label: t('seatChange.awaitingPayment') };
+  }
+  if (open?.status === 'PENDING_VERIFICATION') {
+    return { status: 'PENDING_VERIFICATION', label: t('seatChange.pendingReview') };
+  }
+  return { status: booking.status, label: t(`bookings.status${booking.status}`) };
+};
+
+/** หนึ่งบรรทัดของรายละเอียดการจอง — "หัวข้อ: ค่า" */
+const Detail = ({ label, children }) => {
+  return (
+    <div className="flex min-w-0 gap-1">
+      <dt className="shrink-0 text-muted">{label}:</dt>
+      <dd className="min-w-0">{children}</dd>
+    </div>
+  );
+};
+
+/**
  * การ์ดหนึ่งการจองในหน้าการจองของฉัน — รายละเอียดด้านบน แถบปุ่มและสถานะเงินด้านล่าง
  * การกระทำทั้งหมด (ยกเลิก แจ้งบัญชี ดูสลิปคืนเงิน) ส่งกลับไปให้หน้าเปิดหน้าต่างเอง
  * onEditRefundAccount(booking, payment) — payment = รายการที่กดแจ้งบัญชี (ใบหลัก หรือส่วนต่างเปลี่ยนที่นั่ง)
@@ -45,6 +75,9 @@ const seatChangeHint = (booking, t) => {
  */
 const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip }) => {
   const { t, lang, pick } = useI18n();
+  const { startsAt } = booking.showtime;
+  const badge = statusBadge(booking, t);
+  const cancelNote = cancelHint(booking, t);
   const seatChangeNote = seatChangeHint(booking, t);
 
   return (
@@ -60,33 +93,41 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
         <div className="min-w-0">
           {/* มือถือป้ายสถานะขึ้นบรรทัดของตัวเองเหนือชื่อเรื่อง */}
           <div className="flex flex-col-reverse items-start gap-1 sm:flex-row sm:justify-between sm:gap-2">
-            <h2 className="min-w-0 max-w-full truncate font-semibold sm:text-lg">
+            <h2 className="min-w-0 max-w-full truncate text-h2 font-semibold">
               {pick(booking.showtime.movie, 'title')}
             </h2>
-            <StatusBadge status={booking.status} label={t(`bookings.status${booking.status}`)} />
+            <StatusBadge status={badge.status} label={badge.label} />
           </div>
 
-          <p className="mt-1 text-sm text-muted sm:text-base">
-            {booking.showtime.theatre.name} · {formatDate(booking.showtime.startsAt, lang)}{' '}
-            {formatTime(booking.showtime.startsAt, lang)}
-          </p>
-          <p className="mt-1 text-sm sm:text-base">
-            <span className="text-muted">{t('ticket.seats')}: </span>
-            <span className="font-medium">{booking.seats.map((seat) => seat.label).join(', ')}</span>
-          </p>
-          <p className="mt-1 text-xs text-muted sm:text-sm">
-            {t('bookings.bookedAt')} {formatDateTime(booking.createdAt, lang)} ·{' '}
-            <span className="font-mono">{booking.code}</span>
-          </p>
+          {/* โรง วัน เวลาของรอบเป็นชิปทอง (ข้อมูลประกอบตาม DS) — เห็นก่อนรายละเอียดการจองด้านล่าง */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Chip tone="accent">{booking.showtime.theatre.name}</Chip>
+            <Chip tone="accent">{formatDate(startsAt, lang)}</Chip>
+            <Chip tone="accent">{formatTime(startsAt, lang)}</Chip>
+          </div>
+
+          <dl className="mt-2 flex flex-col gap-0.5 text-body-2">
+            <Detail label={t('ticket.seats')}>
+              <span className="font-medium">{booking.seats.map((seat) => seat.label).join(', ')}</span>
+            </Detail>
+            <Detail label={t('bookings.bookedAt')}>{formatDate(booking.createdAt, lang)}</Detail>
+            <Detail label={t('bookings.bookedTime')}>{formatTime(booking.createdAt, lang)}</Detail>
+            <Detail label={t('payment.bookingCode')}>
+              <span className="font-code">{booking.code}</span>
+            </Detail>
+          </dl>
         </div>
 
         <div className="flex items-baseline gap-2 self-end sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:block sm:self-start sm:text-right">
-          <p className="text-xs text-muted sm:text-sm">{t('bookings.total')}</p>
-          <p className="font-bold text-accent sm:text-xl">{formatMoney(booking.totalAmount, lang)}</p>
+          <p className="text-caption text-muted sm:text-body-2">{t('bookings.total')}</p>
+          <p className="font-bold text-accent sm:text-h2">
+            {formatMoney(booking.totalAmount, lang)} <span className="text-body-2">{t('common.baht')}</span>
+          </p>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2/50 px-4 py-3 sm:px-6">
+      {/* ใบที่ปิดไปแล้วและไม่มีอะไรให้กด/บอก (เช่น หมดเวลาโดยยังไม่จ่าย) ซ่อนแถบไปเลย ไม่ปล่อยแถบเทาว่าง */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2/50 px-4 py-3 empty:hidden sm:px-6">
         {booking.status === 'PAID' && (
           <Button as={Link} to={`/booking/${booking.id}/ticket`} size="sm">
             <Ticket size={14} /> {t('bookings.viewTicket')}
@@ -126,9 +167,6 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
             })}
           </Button>
         )}
-        {booking.seatChange?.open?.status === 'PENDING_VERIFICATION' && (
-          <Chip tone="info">{t('seatChange.pendingReview')}</Chip>
-        )}
         {booking.canCancel && (
           <Button variant="danger" size="sm" onClick={() => onCancel(booking)}>
             {t('bookings.cancel')}
@@ -137,18 +175,20 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
 
         {/* ยกเลิกหลังจ่ายเงินแล้วต้องรอผู้ดูแลโอนคืน จึงต้องบอกสถานะให้ผู้ใช้เห็น */}
         {booking.payment?.status === 'REFUND_PENDING' && (
-          <Chip tone="accent">{t('bookings.refundPending')}</Chip>
+          <Chip tone="warning">{t('bookings.refundPending')}</Chip>
         )}
         {booking.payment?.refundAccountNo && (
-          <span className="text-xs text-muted sm:text-sm">
-            {t('bookings.refundTo', {
+          <span className="text-caption text-muted sm:text-body-2">
+            {/* บัญชีที่แจ้งไว้ก่อนมีช่องชื่อบัญชีไม่มีชื่อติดมา — ใช้ข้อความแบบเดิม ไม่โชว์วงเล็บว่าง */}
+            {t(booking.payment.refundAccountName ? 'bookings.refundToNamed' : 'bookings.refundTo', {
               bank: booking.payment.refundBankName,
               account: booking.payment.refundAccountNo,
+              name: booking.payment.refundAccountName,
             })}
           </span>
         )}
         {booking.payment?.status === 'REFUND_PENDING' && !booking.payment.refundAccountNo && (
-          <span className="text-xs text-danger sm:text-sm">{t('bookings.refundAccountMissing')}</span>
+          <span className="text-caption text-danger sm:text-body-2">{t('bookings.refundAccountMissing')}</span>
         )}
         {/* แก้บัญชีได้ตลอดที่ยังรอโอนคืน — พิมพ์เลขผิดไว้ตอนยกเลิกก็แก้เองได้ ไม่ต้องโทรหาผู้ดูแล */}
         {booking.payment?.status === 'REFUND_PENDING' && (
@@ -222,10 +262,12 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
         })}
 
         {/* มือถือขึ้นบรรทัดใหม่ชิดซ้ายเต็มความกว้าง อ่านต่อจากปุ่มได้ง่ายกว่าตัวหนังสือชิดขวา */}
-        <span className="flex w-full flex-col text-xs text-muted sm:ml-auto sm:w-auto sm:items-end sm:text-right sm:text-sm">
-          <span>{cancelHint(booking, t)}</span>
-          {seatChangeNote && <span>{seatChangeNote}</span>}
-        </span>
+        {(cancelNote || seatChangeNote) && (
+          <span className="flex w-full flex-col text-caption text-muted sm:ml-auto sm:w-auto sm:items-end sm:text-right sm:text-body-2">
+            {cancelNote && <span>{cancelNote}</span>}
+            {seatChangeNote && <span>{seatChangeNote}</span>}
+          </span>
+        )}
       </div>
     </article>
   );

@@ -202,17 +202,17 @@ const ChangeSeatsPage = ({ admin = false }) => {
       />
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold sm:text-3xl">
+          <h1 className="text-h1 font-bold">
             {admin ? t('seatChange.adminTitle') : t('seatChange.title')}
           </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted sm:text-base">
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body-2 text-muted sm:text-body-1">
             <span className="font-semibold text-fg">{pick(showtime.movie, 'title')}</span>
             <span>{showtime.theatre.name}</span>
             <span className="inline-flex items-center gap-1">
               <Clock3 size={13} />
               {formatDate(showtime.startsAt, lang)} · {formatTime(showtime.startsAt, lang)}
             </span>
-            <span className="font-mono text-accent">{booking.code}</span>
+            <span className="font-code text-accent">{booking.code}</span>
           </p>
         </div>
         {!blockedReason && (
@@ -230,7 +230,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
         {header}
         <div className="card flex flex-col items-center gap-4 p-8 text-center">
           <Info size={36} className="text-muted" />
-          <p className="text-base sm:text-lg">
+          <p className="text-body-1">
             {t(`seatChange.blocked${blockedReason}`, {
               max: booking.seatChange.maxChanges,
               minutes: booking.seatChange.cutoffMinutes,
@@ -248,7 +248,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
     <div className="mx-auto max-w-6xl px-4 pb-10 pt-6">
       {header}
 
-      <p className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-sm text-muted">
+      <p className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-body-2 text-muted">
         <Info size={16} className="mt-0.5 shrink-0" />
         {admin
           ? t('seatChange.adminIntro')
@@ -259,7 +259,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
       </p>
 
       {closedOwn.length > 0 && (
-        <p className="mb-4 flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent">
+        <p className="mb-4 flex items-start gap-2 rounded-xl border border-warning/30 bg-warning-bg px-4 py-3 text-body-2 text-warning">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           {t('seatChange.ownSeatClosed', { seats: seatLabels(closedOwn) })}
         </p>
@@ -281,29 +281,29 @@ const ChangeSeatsPage = ({ admin = false }) => {
       {/* ฝั่งผู้ดูแลเริ่มหลังแถบเมนูซ้าย (lg:w-48 ใน AdminLayout) จะได้ไม่บังเมนู */}
       <BottomBar className={clsx(admin && 'lg:left-48')}>
         <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-x-2 text-sm">
+          <p className="flex flex-wrap items-center gap-x-2 text-body-2">
             <span className="text-muted">{t('seatChange.from')}</span>
             <span className="font-semibold">{booking.seats.map((seat) => seat.label).join(', ')}</span>
             <ArrowRight size={14} className="text-muted" />
             <span className="text-muted">{t('seatChange.to')}</span>
             <span className="font-semibold text-accent">
               {selectedSeats.length > 0 ? seatLabels(selectedSeats) : '—'}{' '}
-              <span className="text-xs font-normal text-muted">
+              <span className="text-caption font-normal text-muted">
                 ({selected.length}/{required})
               </span>
             </span>
           </p>
           {admin && !zonesOk && selected.length === required && (
-            <p className="mt-1 text-xs text-danger">{t('seatChange.zoneMismatch')}</p>
+            <p className="mt-1 text-caption text-danger">{t('seatChange.zoneMismatch')}</p>
           )}
         </div>
 
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <p className="text-xs text-muted">{t('seatChange.amount')}</p>
+            <p className="text-caption text-muted">{t('seatChange.amount')}</p>
             <p
               className={clsx(
-                'text-lg font-bold',
+                'text-h2 font-bold',
                 preview.diffAmount > 0 && 'text-accent',
                 preview.diffAmount < 0 && 'text-success',
               )}
@@ -326,7 +326,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
         loading={submitting}
         onConfirm={submit}
       >
-        <div className="flex flex-col gap-3 text-sm">
+        <div className="flex flex-col gap-3 text-body-2">
           <p className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 font-semibold">
             {booking.seats.map((seat) => seat.label).join(', ')}
             <ArrowRight size={14} className="text-muted" />

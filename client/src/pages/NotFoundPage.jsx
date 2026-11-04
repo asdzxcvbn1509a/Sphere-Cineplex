@@ -9,8 +9,8 @@ const NotFoundPage = () => {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center px-4 py-24 text-center">
       <Clapperboard size={40} className="mb-4 text-muted" />
-      <h1 className="text-2xl font-bold">{t('errors.notFound')}</h1>
-      <p className="mt-2 text-sm text-muted">{t('errors.notFoundBody')}</p>
+      <h1 className="text-h1 font-bold">{t('errors.notFound')}</h1>
+      <p className="mt-2 text-body-2 text-muted">{t('errors.notFoundBody')}</p>
       <Button as={Link} to="/" className="mt-6">
         {t('errors.goHome')}
       </Button>

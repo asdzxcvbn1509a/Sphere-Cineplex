@@ -3,6 +3,7 @@ import prisma from '../lib/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import { env } from '../config/env.js';
 import { addMinutes, bangkokDayRange, formatBangkokShort } from '../utils/datetime.js';
+import { anyDisplayStatusWhere, displayStatusOf } from '../utils/bookingDisplayStatus.js';
 import { findPage } from '../utils/pagination.js';
 import { generateBookingCode, generatePaymentReference } from '../utils/codes.js';
 import { priceSeats, toPriceMap } from '../utils/pricing.js';
@@ -35,6 +36,8 @@ export const readRefundAccount = (refundAccount) => {
   return {
     bankName: refundAccount?.bankName?.trim(),
     accountNo: refundAccount?.accountNo?.trim(),
+    // ไม่บังคับ — client รุ่นก่อนไม่ได้ส่งมา จึงไม่อยู่ในเงื่อนไข REFUND_ACCOUNT_REQUIRED
+    accountName: refundAccount?.accountName?.trim(),
   };
 };
 
@@ -99,6 +102,7 @@ export const shapeBooking = (booking) => {
           slipUploadedAt: booking.payment.slipUploadedAt,
           refundBankName: booking.payment.refundBankName,
           refundAccountNo: booking.payment.refundAccountNo,
+          refundAccountName: booking.payment.refundAccountName,
           hasSlip: Boolean(booking.payment.slipPath),
           rejectReason: booking.payment.rejectReason,
           refundedAt: booking.payment.refundedAt,
@@ -340,7 +344,7 @@ export const cancelBooking = async ({
 
   // ใบที่จ่ายเงินมาแล้วต้องรู้ปลายทางก่อน ไม่งั้นผู้ดูแลได้แต่คิวคืนเงินที่โอนคืนไม่ได้
   const willRefund = booking.payment?.status === 'APPROVED';
-  const { bankName, accountNo } = readRefundAccount(refundAccount);
+  const { bankName, accountNo, accountName } = readRefundAccount(refundAccount);
   if (willRefund && !byAdmin && !(bankName && accountNo)) {
     throw ApiError.badRequest(
       'REFUND_ACCOUNT_REQUIRED',
@@ -406,6 +410,7 @@ export const cancelBooking = async ({
         refundAmount: booking.totalAmount,
         ...(bankName && { refundBankName: bankName }),
         ...(accountNo && { refundAccountNo: accountNo }),
+        ...(accountName && { refundAccountName: accountName }),
       },
     });
     await notify(
@@ -428,7 +433,7 @@ export const cancelBooking = async ({
  * ใบที่ผู้ดูแลยกเลิกแทน — ยกเลิกทั้งรอบ หรือลูกค้าโทรมาให้ยกเลิก — ไม่มีบัญชีติดมาด้วย
  * ถ้าไม่มีช่องให้ลูกค้ากรอกเอง ผู้ดูแลต้องไล่โทรถามทีละคน ซึ่งยกเลิกทั้งรอบทีอาจเป็นร้อยสาย
  */
-export const updateRefundAccount = async ({ bookingId, userId, bankName, accountNo }) => {
+export const updateRefundAccount = async ({ bookingId, userId, bankName, accountNo, accountName }) => {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { userId: true },
@@ -437,9 +442,14 @@ export const updateRefundAccount = async ({ bookingId, userId, bankName, account
   if (booking.userId !== userId) throw notBookingOwner('ไม่มีสิทธิ์แก้ไขรายการจองนี้');
 
   // เงื่อนไขสถานะอยู่ใน where เลย — ถ้าผู้ดูแลเพิ่งกดว่าโอนคืนแล้ว บัญชีที่ใช้โอนไปต้องไม่ถูกเขียนทับ
+  // ชื่อบัญชีเขียนทับเสมอ (ไม่ส่งมา = null) — เปลี่ยนบัญชีแล้วชื่อของบัญชีเดิมอาจไม่ตรงกับบัญชีใหม่
   const { count } = await prisma.payment.updateMany({
     where: { bookingId, status: 'REFUND_PENDING' },
-    data: { refundBankName: bankName.trim(), refundAccountNo: accountNo },
+    data: {
+      refundBankName: bankName.trim(),
+      refundAccountNo: accountNo,
+      refundAccountName: accountName?.trim() || null,
+    },
   });
   if (count === 0) {
     throw ApiError.conflict(
@@ -648,32 +658,42 @@ export const cancelShowtime = async ({ showtimeId, reason }) => {
   return { showtime: await getShowtimeById(showtimeId), ...result };
 };
 
-export const listAllBookings = async ({ status, date, q, page, pageSize } = {}) => {
-  const where = {};
-  if (status) where.status = status;
+/**
+ * รายการการจองทั้งหมดของผู้ดูแล — status กรองตามสถานะการจอง (แบบเดิม)
+ * displayStatus กรองตามป้ายในหน้าการจอง: ป้ายเดียว หรืออาร์เรย์ของป้าย (กลุ่มในตัวกรอง) ที่ตรงป้ายใดป้ายหนึ่งก็ผ่าน
+ * เงื่อนไขทุกตัวต่อกันด้วย AND — OR ของคำค้นจะได้ไม่ไปทับ OR/NOT ที่อยู่ในเงื่อนไขของ displayStatus
+ */
+export const listAllBookings = async ({ status, displayStatus, date, q, page, pageSize } = {}) => {
+  const conditions = [];
+  if (status) conditions.push({ status });
+  if (displayStatus?.length) conditions.push(anyDisplayStatusWhere([displayStatus].flat()));
   if (date) {
     const range = bangkokDayRange(date);
-    if (range) where.showtime = { startsAt: { gte: range.start, lt: range.end } };
+    if (range) conditions.push({ showtime: { startsAt: { gte: range.start, lt: range.end } } });
   }
   if (q) {
-    where.OR = [
-      { code: { contains: q, mode: 'insensitive' } },
-      // ลูกค้าที่ติดต่อมาเรื่องเงินมักอ้างเลขบนใบเสร็จ ไม่ใช่รหัสการจอง (รวมใบเสร็จส่วนต่างเปลี่ยนที่นั่ง)
-      { payments: { some: { receiptNo: { contains: q, mode: 'insensitive' } } } },
-      { user: { phone: { contains: q } } },
-      { user: { name: { contains: q, mode: 'insensitive' } } },
-    ];
+    conditions.push({
+      OR: [
+        { code: { contains: q, mode: 'insensitive' } },
+        // ลูกค้าที่ติดต่อมาเรื่องเงินมักอ้างเลขบนใบเสร็จ ไม่ใช่รหัสการจอง (รวมใบเสร็จส่วนต่างเปลี่ยนที่นั่ง)
+        { payments: { some: { receiptNo: { contains: q, mode: 'insensitive' } } } },
+        { user: { phone: { contains: q } } },
+        { user: { name: { contains: q, mode: 'insensitive' } } },
+      ],
+    });
   }
 
   const { rows, ...pageInfo } = await findPage(
     prisma.booking,
     {
-      where,
+      where: conditions.length > 0 ? { AND: conditions } : {},
       include: { ...bookingInclude, user: USER_CONTACT_SELECT },
       // id ต่อท้ายให้ลำดับคงที่ — แถวที่สร้างพร้อมกันจะไม่สลับไปมาจนโผล่ซ้ำ/หายระหว่างหน้า
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     },
     { page, pageSize },
   );
-  return { items: rows.map(shapeBooking), ...pageInfo };
+  // ป้ายคิดจากแถวที่โหลดมาแล้ว (bookingInclude มีรายการเงินและคำขอเปลี่ยนที่นั่งครบ) ไม่ต้อง query เพิ่ม
+  const items = rows.map((row) => ({ ...shapeBooking(row), displayStatus: displayStatusOf(row) }));
+  return { items, ...pageInfo };
 };

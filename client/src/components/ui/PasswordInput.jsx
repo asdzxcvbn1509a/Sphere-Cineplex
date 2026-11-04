@@ -26,7 +26,8 @@ const PasswordInput = ({ className, ...props }) => {
         onClick={() => setVisible((value) => !value)}
         // กัน input เสียโฟกัสตอนกดปุ่ม ผู้ใช้จะได้พิมพ์ต่อได้เลย
         onMouseDown={(event) => event.preventDefault()}
-        className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2 text-muted transition hover:text-fg"
+        // ปุ่มอยู่บนช่องกรอกพื้นครีม — ใช้สีเข้มของชุด field ไม่งั้นไอคอนจางจนมองไม่เห็น
+        className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2 text-field-muted transition hover:text-ink"
         aria-label={visible ? t('login.hidePassword') : t('login.showPassword')}
         title={visible ? t('login.hidePassword') : t('login.showPassword')}
       >

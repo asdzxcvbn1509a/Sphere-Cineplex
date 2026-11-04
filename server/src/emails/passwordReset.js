@@ -49,25 +49,26 @@ export const passwordResetEmail = ({ name, resetUrl, ttlMinutes, lang = 'th' }) 
   ].join('\n');
 
   // อีเมลต้องอ่านได้ทั้งบนพื้นสว่างและมืด จึงกำหนดสีพื้น/สีตัวอักษรเองทั้งหมด ไม่พึ่ง default ของโปรแกรมอ่านเมล
+  // สีและฟอนต์ตาม Design System (docs/design-system.md) — ชื่อแบรนด์ Cinzel ถ้าเครื่องไม่มีจะเป็น Georgia แทน
   const html = `
-<div style="margin:0;padding:24px;background:#f4f4f6;font-family:'Segoe UI',Tahoma,sans-serif;color:#1a1a20">
+<div style="margin:0;padding:24px;background:#fff6e8;font-family:Inter,'Noto Sans Thai','Segoe UI',Tahoma,sans-serif;color:#1c1a17">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
-    <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1a1a20">${APP_NAME}</p>
+    <p style="margin:0 0 4px;font-size:18px;font-weight:700;font-family:Cinzel,Georgia,serif;color:#1c1a17">${APP_NAME}</p>
     <p style="margin:0 0 16px;font-size:15px">${escapeHtml(copy.greeting(name))}</p>
     <p style="margin:0 0 24px;font-size:15px;line-height:1.6">${escapeHtml(copy.intro)}</p>
     <p style="margin:0 0 24px">
       <a href="${escapeHtml(resetUrl)}"
-         style="display:inline-block;background:#f5b301;color:#1a1a20;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:10px">
+         style="display:inline-block;background:#c89d56;color:#1c1a17;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:10px">
         ${escapeHtml(copy.button)}
       </a>
     </p>
-    <p style="margin:0 0 8px;font-size:13px;color:#6b6b78">${escapeHtml(copy.fallback)}</p>
+    <p style="margin:0 0 8px;font-size:13px;color:#605e5c">${escapeHtml(copy.fallback)}</p>
     <p style="margin:0 0 24px;font-size:13px;word-break:break-all">
-      <a href="${escapeHtml(resetUrl)}" style="color:#9a7400">${escapeHtml(resetUrl)}</a>
+      <a href="${escapeHtml(resetUrl)}" style="color:#8e6b33">${escapeHtml(resetUrl)}</a>
     </p>
-    <p style="margin:0 0 4px;font-size:13px;color:#6b6b78">${escapeHtml(copy.expiry(ttlMinutes))}</p>
-    <p style="margin:0 0 24px;font-size:13px;color:#6b6b78">${escapeHtml(copy.ignore)}</p>
-    <p style="margin:0;font-size:13px;color:#6b6b78">${escapeHtml(copy.signature)}</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#605e5c">${escapeHtml(copy.expiry(ttlMinutes))}</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#605e5c">${escapeHtml(copy.ignore)}</p>
+    <p style="margin:0;font-size:13px;color:#605e5c">${escapeHtml(copy.signature)}</p>
   </div>
 </div>`.trim();
 

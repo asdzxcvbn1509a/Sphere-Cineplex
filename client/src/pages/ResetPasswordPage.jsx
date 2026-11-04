@@ -99,7 +99,7 @@ const ResetPasswordPage = () => {
     <div className="mx-auto flex max-w-xl flex-col justify-center px-4 py-12">
       <div className="card p-6 sm:p-8">
         {status === 'checking' && (
-          <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted">
+          <p className="flex items-center justify-center gap-2 py-8 text-body-2 text-muted">
             <Loader2 size={18} className="animate-spin" /> {t('reset.checking')}
           </p>
         )}
@@ -107,12 +107,12 @@ const ResetPasswordPage = () => {
         {status === 'invalid' && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
-              <span className="rounded-xl bg-danger/15 p-2.5 text-danger">
+              <span className="rounded-xl bg-danger-bg p-2.5 text-danger">
                 <ShieldAlert size={20} />
               </span>
               <div>
-                <h1 className="text-2xl font-bold">{t('reset.invalidTitle')}</h1>
-                <p className="text-sm text-muted">{linkError ?? t('reset.missingToken')}</p>
+                <h1 className="text-h1 font-bold">{t('reset.invalidTitle')}</h1>
+                <p className="text-body-2 text-muted">{linkError ?? t('reset.missingToken')}</p>
               </div>
             </div>
             <Button as={Link} to="/forgot-password" size="lg" className="w-full">
@@ -131,14 +131,14 @@ const ResetPasswordPage = () => {
                 <KeyRound size={20} />
               </span>
               <div>
-                <h1 className="text-2xl font-bold">{t('reset.title')}</h1>
-                <p className="text-sm text-muted">
+                <h1 className="text-h1 font-bold">{t('reset.title')}</h1>
+                <p className="text-body-2 text-muted">
                   {t('reset.forAccount', { email: account?.email ?? '' })}
                 </p>
               </div>
             </div>
 
-            <p className="mb-4 flex items-start gap-1.5 text-sm text-muted">
+            <p className="mb-4 flex items-start gap-1.5 text-body-2 text-muted">
               <ShieldCheck size={14} className="mt-0.5 shrink-0" /> {t('reset.signedOutNotice')}
             </p>
 
@@ -166,7 +166,7 @@ const ResetPasswordPage = () => {
               </Field>
 
               {fieldError.form && (
-                <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+                <p className="rounded-lg border border-danger/40 bg-danger-bg px-3 py-2 text-body-2 text-danger">
                   {fieldError.form}
                 </p>
               )}

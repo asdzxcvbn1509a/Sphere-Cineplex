@@ -43,6 +43,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { uploadRefundSlip } from '../middleware/upload.js';
 import { queryBoolean, validate } from '../middleware/validate.js';
+import { DISPLAY_STATUSES } from '../utils/bookingDisplayStatus.js';
 import { passwordSchema } from '../utils/password.js';
 import { paginationQuery } from '../utils/pagination.js';
 
@@ -127,6 +128,13 @@ const bookingListQuery = z.object({
   status: z
     .enum(['PENDING_PAYMENT', 'PENDING_VERIFICATION', 'PAID', 'CANCELLED', 'EXPIRED'])
     .optional(),
+  // ป้ายสถานะของหน้าการจองผู้ดูแล (ละเอียดกว่า status) — ค่าและลำดับกฎอยู่ที่ utils/bookingDisplayStatus.js
+  // หนึ่งป้ายหรือหลายป้ายคั่นด้วยจุลภาค (ตัวกรองแบบกลุ่ม) ตรงป้ายใดป้ายหนึ่งก็ผ่าน · มีค่าที่ไม่รู้จักแม้ตัวเดียวได้ 422
+  displayStatus: z
+    .string()
+    .transform((value) => value.split(','))
+    .pipe(z.array(z.enum(DISPLAY_STATUSES)).min(1))
+    .optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   q: z.string().trim().min(1).max(60).optional(),
   ...paginationQuery,
@@ -146,6 +154,8 @@ const paymentListQuery = z.object({
   status: z
     .enum(['AWAITING_SLIP', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'ALL'])
     .optional(),
+  // เรียงตามเวลาที่ส่งสลิป — ไม่ส่งมา = เก่าสุดก่อน (ใครส่งก่อนได้ตรวจก่อน)
+  sort: z.enum(['oldest', 'newest']).optional(),
   ...paginationQuery,
 });
 
@@ -155,6 +165,8 @@ const rejectSchema = z.object({
 
 const refundListQuery = z.object({
   status: z.enum(['REFUND_PENDING', 'REFUNDED', 'ALL']).optional(),
+  // ไม่ส่งมา = ลำดับเดิมของแต่ละสถานะ (รอคืน: ค้างนานสุดก่อน · คืนแล้ว: ล่าสุดก่อน)
+  sort: z.enum(['oldest', 'newest']).optional(),
   ...paginationQuery,
 });
 

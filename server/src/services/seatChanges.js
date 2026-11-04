@@ -202,6 +202,7 @@ const completeNow = async (tx, { booking, plan, now, refundAccount, admin }) => 
         refundDueAt: now,
         refundBankName: refundAccount.bankName,
         refundAccountNo: refundAccount.accountNo,
+        refundAccountName: refundAccount.accountName || null,
       },
     });
   }
@@ -304,7 +305,7 @@ export const requestSeatChange = async ({ bookingId, userId, seatIds, refundAcco
   const plan = await planFor(booking, seatIds);
 
   // ย้ายไปที่นั่งที่ถูกกว่า — ส่วนต่างต้องโอนคืนด้วยมือ จึงต้องรู้บัญชีปลายทางก่อน (แบบเดียวกับยกเลิกหลังจ่ายเงิน)
-  const { bankName, accountNo } = readRefundAccount(refundAccount);
+  const { bankName, accountNo, accountName } = readRefundAccount(refundAccount);
   if (plan.diffAmount < 0 && !(bankName && accountNo)) {
     throw ApiError.badRequest(
       'REFUND_ACCOUNT_REQUIRED',
@@ -313,7 +314,7 @@ export const requestSeatChange = async ({ bookingId, userId, seatIds, refundAcco
     );
   }
 
-  return applySeatChange({ booking, plan, refundAccount: { bankName, accountNo } });
+  return applySeatChange({ booking, plan, refundAccount: { bankName, accountNo, accountName } });
 };
 
 /**

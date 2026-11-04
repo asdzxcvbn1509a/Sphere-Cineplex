@@ -9,6 +9,20 @@ export const formatMoney = (amount, lang = 'th', options) => {
   return new Intl.NumberFormat(localeOf(lang), options).format(Number(amount ?? 0));
 };
 
+/** ยอดเงินแบบ "1,240 ฿" — สั้นกว่าต่อท้ายด้วย "บาท" ใช้ในที่แคบอย่างแถวรายการและแผงรายละเอียดของคิวผู้ดูแล */
+export const formatBaht = (amount, lang = 'th') => {
+  return `${formatMoney(amount, lang)} ฿`;
+};
+
+/** สัดส่วน → เปอร์เซ็นต์จำนวนเต็มพร้อมเครื่องหมาย เช่น 0.7 → "+70%" · -0.25 → "-25%" · 0 → "0%" */
+export const formatPercent = (ratio, lang = 'th') => {
+  return new Intl.NumberFormat(localeOf(lang), {
+    style: 'percent',
+    maximumFractionDigits: 0,
+    signDisplay: 'exceptZero',
+  }).format(ratio);
+};
+
 export const formatDate = (value, lang = 'th', options) => {
   if (!value) return '';
   return new Intl.DateTimeFormat(localeOf(lang), {

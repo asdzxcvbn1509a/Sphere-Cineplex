@@ -6,6 +6,7 @@ import { getMovie } from '../api/movies.js';
 import { listShowtimes } from '../api/showtimes.js';
 import { useI18n } from '../context/I18nContext.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
+import Chip from '../components/ui/Chip.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useApi from '../hooks/useApi.js';
@@ -65,7 +66,7 @@ const MovieDetailPage = () => {
         {movie.backdropUrl && (
           <div className="absolute inset-0 h-64 overflow-hidden sm:h-80">
             <img src={movie.backdropUrl} alt="" className="h-full w-full object-cover opacity-25" />
-            <div className="absolute inset-0 bg-linear-to-b from-ink/40 to-ink" />
+            <div className="absolute inset-0 bg-linear-to-b from-page/40 to-page" />
           </div>
         )}
 
@@ -86,29 +87,31 @@ const MovieDetailPage = () => {
               className="w-full self-start rounded-xl border border-line object-cover shadow-2xl sm:row-span-2 sm:rounded-2xl"
             />
             <div className="min-w-0 self-center sm:self-start">
-              <h1 className="text-xl font-bold sm:text-4xl">{pick(movie, 'title')}</h1>
-              <p className="mt-1 text-sm text-muted sm:text-base">
+              <h1 className="text-h2 font-bold sm:text-h1">{pick(movie, 'title')}</h1>
+              <p className="mt-1 text-body-2 text-muted sm:text-body-1">
                 {lang === 'th' ? movie.titleEn : movie.titleTh}
               </p>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:mt-4">
-                <span className="rounded-md border border-accent/40 px-2 py-1 font-bold text-accent">
+              {/* ข้อมูลประกอบเป็นชิปทองตาม DS */}
+              <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
+                <Chip tone="accent" size="sm" className="font-medium">
                   {movie.rating}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-muted">
+                </Chip>
+                <Chip tone="accent" size="sm">
                   <Clock size={12} /> {movie.durationMin} {t('movie.minutesUnit')}
-                </span>
+                </Chip>
                 {movie.genres?.map((genre) => (
-                  <span key={genre} className="rounded-md bg-surface-2 px-2 py-1 text-muted">
+                  <Chip key={genre} tone="accent" size="sm">
                     {genre}
-                  </span>
+                  </Chip>
                 ))}
               </div>
             </div>
 
             <div className="col-span-2 sm:col-span-1 sm:col-start-2">
-              <h2 className="text-sm font-semibold text-muted">{t('movie.synopsis')}</h2>
-              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-fg/90">
+              <h2 className="text-h2 font-semibold">{t('movie.synopsis')}</h2>
+              {/* เรื่องย่อใช้ font-description ตาม DS — ตัวไทยเป็น Sarabun ตัวละติน/ตัวเลขเป็น Inter */}
+              <p className="mt-1.5 max-w-2xl font-description text-body-1 text-fg/90">
                 {pick(movie, 'synopsis')}
               </p>
             </div>
@@ -118,12 +121,12 @@ const MovieDetailPage = () => {
 
       <div className="mx-auto max-w-6xl px-4 pb-14">
         {movie.status === 'COMING_SOON' ? (
-          <div className="card mt-4 px-6 py-8 text-center text-sm text-muted">
+          <div className="card mt-4 px-6 py-8 text-center text-body-2 text-muted">
             {t('movie.comingSoonNotice')}
           </div>
         ) : (
           <>
-            <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <h2 className="mb-3 flex items-center gap-2 text-h2 font-semibold">
               <CalendarDays size={18} className="text-accent" /> {t('movie.selectDate')}
             </h2>
 
@@ -138,17 +141,18 @@ const MovieDetailPage = () => {
                     type="button"
                     disabled={!hasShowtimes}
                     onClick={() => setSelectedDate(key)}
+                    // วันที่เลือก = รายการที่เลือก (DS) — py ลดลงจากเดิมเพราะ line-height ของ DS สูงขึ้น
                     className={clsx(
-                      'flex min-w-18 shrink-0 flex-col items-center rounded-xl border px-3 py-2.5 transition',
+                      'flex min-w-18 shrink-0 flex-col items-center rounded-xl border px-3 py-2 transition',
                       active
-                        ? 'border-accent bg-accent text-ink'
-                        : 'border-line bg-surface text-fg hover:border-accent/50',
-                      !hasShowtimes && 'cursor-not-allowed opacity-35 hover:border-line',
+                        ? 'border-selected-line bg-selected text-on-selected'
+                        : 'border-line-strong bg-surface text-fg hover:border-accent/60',
+                      !hasShowtimes && 'cursor-not-allowed opacity-35 hover:border-line-strong',
                     )}
                   >
-                    <span className="text-[11px] font-medium">{dateLabel(key, offset)}</span>
-                    <span className="text-lg font-bold leading-tight">{Number(key.slice(8, 10))}</span>
-                    <span className="text-[10px] opacity-80">
+                    <span className="text-caption font-medium">{dateLabel(key, offset)}</span>
+                    <span className="text-h2 font-bold">{Number(key.slice(8, 10))}</span>
+                    <span className="text-caption opacity-80">
                       {formatDate(`${key}T12:00:00+07:00`, lang, { day: undefined, year: undefined, month: 'short' })}
                     </span>
                   </button>
@@ -156,10 +160,10 @@ const MovieDetailPage = () => {
               })}
             </div>
 
-            <h2 className="mb-3 text-lg font-semibold">{t('movie.showtimes')}</h2>
+            <h2 className="mb-3 text-h2 font-semibold">{t('movie.showtimes')}</h2>
 
             {showtimesOfDay.length === 0 && (
-              <div className="card px-6 py-10 text-center text-sm text-muted">
+              <div className="card px-6 py-10 text-center text-body-2 text-muted">
                 {t('movie.noShowtimes')}
               </div>
             )}
@@ -169,9 +173,9 @@ const MovieDetailPage = () => {
                 <div key={theatre.id} className="card p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <h3 className="font-semibold">{theatre.name}</h3>
-                    <span className="rounded-md bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                    <Chip tone="accent" size="sm">
                       {theatre.screenType}
-                    </span>
+                    </Chip>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -186,18 +190,18 @@ const MovieDetailPage = () => {
                             'flex min-w-24 flex-col items-center rounded-xl border px-3 py-2 transition',
                             soldOut
                               ? 'cursor-not-allowed border-line bg-surface-2/50 opacity-45'
-                              : 'border-line bg-surface-2 hover:border-accent hover:text-accent',
+                              : 'border-line-strong bg-surface-2 hover:border-accent hover:text-accent',
                           )}
                         >
-                          <span className="text-base font-bold">
+                          <span className="text-body-1 font-bold">
                             {formatTime(showtime.startsAt, lang)}
                           </span>
-                          <span className="text-[11px] text-muted">
+                          <span className="text-caption text-muted">
                             {soldOut
                               ? t('movie.soldOut')
                               : t('movie.seatsLeft', { count: showtime.availableSeats })}
                           </span>
-                          <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-accent">
+                          <span className="mt-0.5 inline-flex items-center gap-1 text-caption text-accent">
                             <Sofa size={10} /> {t('movie.from')} {formatMoney(showtime.prices.NORMAL, lang)}
                           </span>
                         </Link>

@@ -9,10 +9,11 @@ const icons = {
   info: Info,
 };
 
+/* พื้นเข้มของสีสถานะตาม DS — พื้น surface-2 แบบเดิมเป็นสีเดียวกับพื้นหน้า (page) toast จะกลืนหายไป */
 const tones = {
-  success: 'border-success/40 text-success',
-  error: 'border-danger/40 text-danger',
-  info: 'border-line text-info',
+  success: 'border-success/40 bg-success-bg/95 text-success',
+  error: 'border-danger/40 bg-danger-bg/95 text-danger',
+  info: 'border-info/40 bg-info-bg/95 text-info',
 };
 
 export const ToastProvider = ({ children }) => {
@@ -61,10 +62,10 @@ export const ToastProvider = ({ children }) => {
             <div
               key={toast.id}
               role="status"
-              className={`animate-fade-up pointer-events-auto flex w-full max-w-lg items-start gap-3 rounded-xl border bg-surface-2/95 px-4 py-3.5 shadow-xl backdrop-blur ${tones[toast.type] ?? tones.info}`}
+              className={`animate-fade-up pointer-events-auto flex w-full max-w-lg items-start gap-3 rounded-xl border px-4 py-3.5 shadow-xl backdrop-blur ${tones[toast.type] ?? tones.info}`}
             >
               <Icon size={20} className="mt-0.5 shrink-0" />
-              <p className="flex-1 text-center text-sm text-fg sm:text-base">{toast.message}</p>
+              <p className="flex-1 text-center text-body-2 text-fg sm:text-body-1">{toast.message}</p>
               <button
                 type="button"
                 onClick={() => dismiss(toast.id)}

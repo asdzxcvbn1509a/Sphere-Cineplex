@@ -3,18 +3,13 @@ import clsx from 'clsx';
 import { MoveHorizontal, X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { formatMoney } from '../../utils/format.js';
-
-/** ขอบสีบอกโซนของที่นั่งที่ยังว่าง */
-const zoneRing = {
-  NORMAL: 'border-line',
-  PREMIUM: 'border-info/50',
-  SOFA: 'border-accent/50',
-};
+import { zoneRing } from './zoneRing.js';
 
 /**
  * ผังที่นั่ง
  * ผลสำรวจ (13/30 คน) ให้ "การแยกสีที่นั่งว่าง/จองแล้วให้ชัดเจน" เป็นเรื่องสำคัญที่สุด
  * จึงใช้สามสถานะที่ต่างกันทั้งสี รูปร่าง และไอคอน ไม่พึ่งสีอย่างเดียว (เผื่อผู้ใช้ตาบอดสี)
+ * ที่นั่งที่เลือกเป็นสีน้ำเงิน (รายการที่เลือกตาม DS) ไม่ใช่สีทอง — ปุ่มยืนยันสีทองในแถบล่างจะได้ไม่ถูกแย่งความเด่น
  *
  * ownIds = ที่นั่งเดิมของการจองที่กำลังเปลี่ยนที่นั่ง — ในผังเป็น "จองแล้ว" (ของลูกค้าเอง) แต่ต้องกดเอาออก/เลือกคืนได้
  * ตอนไม่ได้เลือกไว้จึงแสดงขอบเส้นประ ให้รู้ว่าเป็นที่นั่งเดิมที่จะถูกปล่อย
@@ -63,7 +58,7 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
         <div className="mx-auto w-fit">
           <div className="mb-6 sm:mb-8">
             <div className="screen-curve" />
-            <p className="mt-1 text-center text-xs font-semibold uppercase tracking-[0.3em] text-muted sm:text-sm">
+            <p className="mt-1 text-center text-caption font-medium uppercase tracking-[0.3em] text-muted sm:text-body-2">
               {t('seats.screen')}
             </p>
           </div>
@@ -75,7 +70,7 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
                   ติดขอบซ้ายตอนเลื่อนผัง ยังรู้ว่าอยู่แถวไหน — พื้นทึบสูงเต็มแถว (self-stretch) และเว้นด้วย pr แทน gap
                   ที่นั่งที่เลื่อนผ่านใต้ตัวอักษรจะถูกบังทั้งหมด ไม่โผล่ขอบบน-ล่างออกมา
                 */}
-                <span className="sticky left-0 z-10 flex w-6 shrink-0 items-center justify-center self-stretch bg-surface pr-2 text-[11px] font-semibold text-muted sm:text-xs">
+                <span className="sticky left-0 z-10 flex w-6 shrink-0 items-center justify-center self-stretch bg-surface pr-2 text-caption font-medium text-muted">
                   {row.rowLabel}
                 </span>
 
@@ -98,16 +93,18 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
                         aria-pressed={isSelected}
                         title={`${label} · ${formatMoney(seat.price)} ${t('common.baht')}`}
                         className={clsx(
-                          'flex h-7 items-center justify-center rounded-md border text-[10px] font-semibold transition sm:h-8 sm:text-xs',
+                          'flex h-7 items-center justify-center rounded-md border text-caption font-medium transition sm:h-8',
                           seat.zone === 'SOFA' ? 'w-11 sm:w-12' : 'w-7 sm:w-8',
+                          // พื้นน้ำเงินต่างจากพื้นการ์ดแค่สีโทน — ขอบฟ้าอ่อน ขยายขนาด และเงา ทำให้เห็นชัดจากระยะไกล
                           isSelected &&
-                            'scale-105 border-accent bg-accent text-ink shadow-lg shadow-accent/20',
+                            'scale-105 border-selected-line bg-selected text-on-selected shadow-lg shadow-selected-line/20',
                           !isSelected &&
                             isTaken &&
-                            'cursor-not-allowed border-danger/25 bg-danger/10 text-danger/60',
+                            'cursor-not-allowed border-danger/30 bg-danger-bg text-danger/70',
+                          // ที่นั่งเดิมที่ยังไม่ได้เลือกคืน — เส้นประโทนเดียวกับที่นั่งที่เลือก บอกว่าเคยเป็นของเราและจะถูกปล่อย
                           !isSelected &&
                             isOwn &&
-                            'border-dashed border-accent bg-accent/10 text-accent hover:bg-accent/20',
+                            'border-dashed border-selected-line bg-selected/30 text-selected-line hover:bg-selected/60',
                           !isSelected &&
                             !isTaken &&
                             !isOwn &&
@@ -121,7 +118,7 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
                 </div>
 
                 {/* มือถือซ่อนอักษรแถวฝั่งขวา (ฝั่งซ้ายติดจออยู่แล้ว) ให้ผังกินที่น้อยลง */}
-                <span className="hidden w-6 shrink-0 pl-2 text-center text-xs font-semibold text-muted sm:block">
+                <span className="hidden w-6 shrink-0 pl-2 text-center text-caption font-medium text-muted sm:block">
                   {row.rowLabel}
                 </span>
               </div>
@@ -131,7 +128,7 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
       </div>
 
       {overflowing && (
-        <p className="mt-2 flex items-center justify-center gap-1.5 text-xs text-muted">
+        <p className="mt-2 flex items-center justify-center gap-1.5 text-caption text-muted">
           <MoveHorizontal size={14} className="shrink-0" /> {t('seats.scrollHint')}
         </p>
       )}

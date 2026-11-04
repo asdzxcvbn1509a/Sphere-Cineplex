@@ -7,8 +7,9 @@ import { apiError } from '../api/client.js';
  * fetcher({ silent }) คืน "ข้อมูล" ที่หน้าใช้ (แปลง axios response เอง) · deps เปลี่ยนเมื่อไหร่โหลดใหม่
  * reload({ silent: true }) โหลดซ้ำโดยไม่โชว์ loading (polling, หลังกดปุ่ม) แต่ถ้าพังก็ยังขึ้น error เหมือนรอบปกติ
  * คำตอบของคำขอเก่าที่มาถึงหลังคำขอใหม่ถูกทิ้ง — สลับแท็บหรือวันเร็ว ๆ แล้วข้อมูลเก่าจะไม่มาทับข้อมูลใหม่
+ * enabled = false: ยังไม่โหลดเอง (เช่นรอวัดว่าหน้าวางได้กี่แถวก่อน) ระหว่างนั้นนับเป็น loading — เป็น true เมื่อไหร่ค่อยโหลด
  */
-export const useApi = (fetcher, deps) => {
+export const useApi = (fetcher, deps, { enabled = true } = {}) => {
   const [data, setData] = useState(undefined);
   const [status, setStatus] = useState({ loading: true, error: null });
   const latestRequest = useRef(0);
@@ -34,8 +35,8 @@ export const useApi = (fetcher, deps) => {
   }, deps);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (enabled) reload();
+  }, [reload, enabled]);
 
   return { data, setData, loading: status.loading, error: status.error, reload };
 };
@@ -47,9 +48,10 @@ export const useApi = (fetcher, deps) => {
  * คิดจาก total ในคำตอบ ไม่ลบหนึ่งจากหน้าปัจจุบัน — ?page=500 ไปถึงในรอบเดียว
  * และคำตอบซ้ำ (StrictMode โหลดสองรอบ) ไม่ถอยเลยไปถึงหน้า 0 ซึ่ง server ตอบ 422
  * ระหว่างรอไปหน้าใหม่ยังนับเป็น loading — รายการว่างกับปุ่มเปลี่ยนหน้าจะไม่กระพริบขึ้นมา
+ * enabled ส่งต่อให้ useApi — หน้าพอดีจอรอ useFitPageSize วัดเสร็จก่อน คำขอแรกจะได้ขนาดหน้าที่ถูกต้องเลย
  */
-export const usePagedApi = (fetchPage, { page, setPage }, deps) => {
-  const result = useApi(fetchPage, deps);
+export const usePagedApi = (fetchPage, { page, setPage, enabled = true }, deps) => {
+  const result = useApi(fetchPage, deps, { enabled });
   const { data } = result;
   const lastPage = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const outOfRange = Boolean(data) && data.items.length === 0 && page > lastPage;

@@ -5,8 +5,8 @@ import Input from '../ui/Input.jsx';
 import Select from '../ui/Select.jsx';
 
 /**
- * ช่องเลือกธนาคาร + เลขที่บัญชีสำหรับรับเงินคืน
- * ใช้ทั้งตอนยกเลิกใบที่จ่ายแล้ว และตอนแจ้ง/แก้บัญชีภายหลัง (เช่น ผู้ดูแลยกเลิกรอบแทน)
+ * ช่องเลือกธนาคาร + เลขที่บัญชี + ชื่อบัญชีสำหรับรับเงินคืน
+ * ใช้ทั้งตอนยกเลิกใบที่จ่ายแล้ว ตอนเปลี่ยนไปที่นั่งที่ถูกกว่า และตอนแจ้ง/แก้บัญชีภายหลัง (เช่น ผู้ดูแลยกเลิกรอบแทน)
  * ตรวจค่าด้วย readRefundAccountForm ใน utils/banks.js
  */
 const RefundAccountFields = ({ form, onChange, errors = {} }) => {
@@ -45,6 +45,21 @@ const RefundAccountFields = ({ form, onChange, errors = {} }) => {
           maxLength={20}
           placeholder="1234567890"
           onChange={setField('accountNo')}
+        />
+      </Field>
+
+      {/* บัญชีอาจไม่ใช่ชื่อผู้จอง (เช่น โอนคืนเข้าบัญชีคนในบ้าน) ผู้ดูแลใช้ชื่อนี้เทียบกับที่แอปธนาคารแสดงก่อนกดโอน */}
+      <Field
+        label={t('bookings.accountName')}
+        required
+        hint={t('bookings.accountNameHint')}
+        error={errors.accountName}
+      >
+        <Input
+          value={form.accountName}
+          maxLength={100}
+          autoComplete="name"
+          onChange={setField('accountName')}
         />
       </Field>
     </>

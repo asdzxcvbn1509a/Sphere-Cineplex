@@ -71,40 +71,42 @@ export const receiptEmail = ({ receipt, receiptUrl, ticketUrl }) => {
   ].join('\n');
 
   // พื้นสว่างและกำหนดสีเองทั้งหมดเหมือนอีเมลตั้งรหัสผ่าน — อ่านได้ทั้งในโปรแกรมอ่านเมลที่เป็นธีมมืดและสว่าง
+  // สีมาจาก palette ของ Design System (docs/design-system.md): ปุ่ม Gold 60 ตัวอักษร Cocoa 100/70 ลิงก์ Gold 80
+  // ฟอนต์เว็บโหลดในอีเมลไม่ได้แน่นอน — ใส่ Inter / Noto Sans Thai ไว้หน้า เครื่องที่มีจะได้ใช้ ที่ไม่มีก็ตกไปที่ฟอนต์ระบบเดิม
   const rowHtml = rows
     .map(
       ([label, value]) => `
       <tr>
-        <td style="padding:6px 12px 6px 0;color:#6b6b78;font-size:13px;vertical-align:top;white-space:nowrap">${escapeHtml(label)}</td>
-        <td style="padding:6px 0;font-size:14px;font-weight:600;color:#1a1a20">${escapeHtml(value)}</td>
+        <td style="padding:6px 12px 6px 0;color:#605e5c;font-size:13px;vertical-align:top;white-space:nowrap">${escapeHtml(label)}</td>
+        <td style="padding:6px 0;font-size:14px;font-weight:600;color:#1c1a17">${escapeHtml(value)}</td>
       </tr>`,
     )
     .join('');
 
   const html = `
-<div style="margin:0;padding:24px;background:#f4f4f6;font-family:'Segoe UI',Tahoma,sans-serif;color:#1a1a20">
+<div style="margin:0;padding:24px;background:#fff6e8;font-family:Inter,'Noto Sans Thai','Segoe UI',Tahoma,sans-serif;color:#1c1a17">
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
-    <p style="margin:0;font-size:18px;font-weight:700;color:#1a1a20">${escapeHtml(issuer.name)}</p>
-    ${issuer.address ? `<p style="margin:4px 0 0;font-size:12px;color:#6b6b78">${escapeHtml(issuer.address)}</p>` : ''}
-    <p style="margin:24px 0 4px;font-size:12px;letter-spacing:1px;color:#6b6b78">ใบเสร็จรับเงิน / RECEIPT</p>
-    <p style="margin:0 0 16px;font-size:22px;font-weight:700;font-family:Consolas,'Courier New',monospace;color:#1a1a20">${escapeHtml(receipt.receiptNo)}</p>
+    <p style="margin:0;font-size:18px;font-weight:700;color:#1c1a17">${escapeHtml(issuer.name)}</p>
+    ${issuer.address ? `<p style="margin:4px 0 0;font-size:12px;color:#605e5c">${escapeHtml(issuer.address)}</p>` : ''}
+    <p style="margin:24px 0 4px;font-size:12px;letter-spacing:1px;color:#605e5c">ใบเสร็จรับเงิน / RECEIPT</p>
+    <p style="margin:0 0 16px;font-size:22px;font-weight:700;font-family:Inter,'Segoe UI',Tahoma,sans-serif;font-variant-numeric:tabular-nums;color:#1c1a17">${escapeHtml(receipt.receiptNo)}</p>
     <table role="presentation" style="width:100%;border-collapse:collapse">${rowHtml}
     </table>
-    <div style="margin:20px 0 24px;padding:16px;border:1px solid #e4e4ea;border-radius:12px">
-      <p style="margin:0;font-size:13px;color:#6b6b78">รวมทั้งสิ้น / Total</p>
-      <p style="margin:4px 0;font-size:24px;font-weight:700;color:#1a1a20">${escapeHtml(total)}</p>
-      <p style="margin:0;font-size:13px;color:#6b6b78">${escapeHtml(amountInWords)}</p>
+    <div style="margin:20px 0 24px;padding:16px;border:1px solid #e8dfcf;border-radius:12px">
+      <p style="margin:0;font-size:13px;color:#605e5c">รวมทั้งสิ้น / Total</p>
+      <p style="margin:4px 0;font-size:24px;font-weight:700;color:#1c1a17">${escapeHtml(total)}</p>
+      <p style="margin:0;font-size:13px;color:#605e5c">${escapeHtml(amountInWords)}</p>
     </div>
     <p style="margin:0 0 12px">
       <a href="${escapeHtml(receiptUrl)}"
-         style="display:inline-block;background:#f5b301;color:#1a1a20;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:10px">
+         style="display:inline-block;background:#c89d56;color:#1c1a17;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:10px">
         เปิด / พิมพ์ใบเสร็จ · View receipt
       </a>
     </p>
     <p style="margin:0 0 24px;font-size:13px">
-      <a href="${escapeHtml(ticketUrl)}" style="color:#9a7400">E-Ticket</a>
+      <a href="${escapeHtml(ticketUrl)}" style="color:#8e6b33">E-Ticket</a>
     </p>
-    <p style="margin:0;font-size:12px;color:#6b6b78">${escapeHtml(electronicNote)}</p>
+    <p style="margin:0;font-size:12px;color:#605e5c">${escapeHtml(electronicNote)}</p>
   </div>
 </div>`.trim();
 

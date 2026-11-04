@@ -8,12 +8,14 @@ import { useToast } from '../context/ToastContext.jsx';
 import PaymentSummaryCard from '../components/payment/PaymentSummaryCard.jsx';
 import PromptPayPanel from '../components/payment/PromptPayPanel.jsx';
 import SlipUploadForm from '../components/payment/SlipUploadForm.jsx';
+import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useApi from '../hooks/useApi.js';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
+import { bookingTab } from '../utils/bookingTabs.js';
 import { formatDateTime, formatMoney, formatTime } from '../utils/format.js';
 
 const PaymentPage = () => {
@@ -91,9 +93,13 @@ const PaymentPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="mb-1 text-2xl font-bold sm:text-3xl">{t('payment.title')}</h1>
-      <p className="mb-6 text-sm text-muted">
-        {t('payment.bookingCode')}: <span className="font-mono text-accent">{booking.code}</span>
+      <Breadcrumb
+        className="mb-4"
+        items={[{ label: t('nav.home'), to: '/' }, { label: t('payment.title') }]}
+      />
+      <h1 className="mb-1 text-h1 font-bold">{t('payment.title')}</h1>
+      <p className="mb-6 text-body-2 text-muted">
+        {t('payment.bookingCode')}: <span className="font-code text-accent">{booking.code}</span>
       </p>
 
       <PaymentSummaryCard
@@ -101,7 +107,7 @@ const PaymentPage = () => {
         amountLabel={t('payment.amount')}
         amount={formatMoney(booking.totalAmount, lang)}
       >
-        <p className="mt-1.5 text-muted">
+        <p className="mt-2 text-muted">
           {t('ticket.seats')}:{' '}
           <span className="font-semibold text-fg">
             {booking.seats.map((seat) => seat.label).join(', ')}
@@ -112,7 +118,7 @@ const PaymentPage = () => {
       {status === 'PAID' && (
         <div className="card border-success/40 p-6 text-center sm:p-8">
           <CheckCircle2 className="mx-auto mb-3 text-success" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.approvedTitle')}</h2>
+          <h2 className="text-h2 font-bold">{t('payment.approvedTitle')}</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Button as={Link} to={`/booking/${booking.id}/ticket`}>
               <Ticket size={16} /> {t('payment.viewTicket')}
@@ -127,19 +133,19 @@ const PaymentPage = () => {
       {status === 'PENDING_VERIFICATION' && (
         <div className="card border-info/40 p-6 text-center sm:p-8">
           <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.waitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+          <h2 className="text-h2 font-bold">{t('payment.waitingTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
             {t('payment.waitingBody')}
           </p>
-          <p className="mt-3 text-xs text-muted">{t('payment.waitingHint')}</p>
+          <p className="mt-3 text-caption text-muted">{t('payment.waitingHint')}</p>
         </div>
       )}
 
       {lateWaiting && (
         <div className="card border-info/40 p-6 text-center sm:p-8">
           <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.lateWaitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+          <h2 className="text-h2 font-bold">{t('payment.lateWaitingTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
             {t('payment.lateWaitingBody')}
           </p>
         </div>
@@ -148,30 +154,31 @@ const PaymentPage = () => {
       {lateRefund && (
         <div className="card border-accent/40 p-6 text-center sm:p-8">
           <CheckCircle2 className="mx-auto mb-3 text-accent" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.lateRefundTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-muted sm:text-base">
+          <h2 className="text-h2 font-bold">{t('payment.lateRefundTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
             {t('payment.lateRefundBody')}
           </p>
-          <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
+          {/* ปุ่มแจ้งบัญชีรับเงินคืนอยู่ที่การ์ดของใบนี้ — พาไปแท็บที่ใบนี้อยู่ (รอคืน = รอดำเนินการ) */}
+          <Button as={Link} to={`/my-bookings?tab=${bookingTab(booking)}`} variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
           </Button>
         </div>
       )}
 
       {lateUpload && (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="flex flex-col gap-4">
           <div className="card border-accent/40 p-5 sm:p-6">
-            <h2 className="flex items-center gap-2 text-lg font-bold">
+            <h2 className="flex items-center gap-2 text-h2 font-bold">
               <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('payment.lateTitle')}
             </h2>
-            <p className="mt-2 text-sm text-muted sm:text-base">
+            <p className="mt-2 text-body-2 text-muted sm:text-body-1">
               {t('payment.lateBody', {
                 time: payment.lateSlipUntil ? formatTime(payment.lateSlipUntil, lang) : '—',
               })}
             </p>
-            <p className="mt-3 text-sm text-muted">
+            <p className="mt-3 text-body-2 text-muted">
               {t('payment.reference')}:{' '}
-              <span className="font-mono text-fg">{payment.reference}</span>
+              <span className="font-code text-fg">{payment.reference}</span>
             </p>
           </div>
           {uploadForm}
@@ -181,17 +188,17 @@ const PaymentPage = () => {
       {status === 'CANCELLED' && (
         <div className="card p-6 text-center sm:p-8">
           <TicketX className="mx-auto mb-3 text-muted" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.cancelledTitle')}</h2>
+          <h2 className="text-h2 font-bold">{t('payment.cancelledTitle')}</h2>
           {refundStatus === 'REFUND_PENDING' && (
-            <p className="mt-2 text-sm text-accent sm:text-base">{t('bookings.refundPending')}</p>
+            <p className="mt-2 text-body-2 text-accent sm:text-body-1">{t('bookings.refundPending')}</p>
           )}
           {refundStatus === 'REFUNDED' && (
-            <p className="mt-2 text-sm text-success sm:text-base">
+            <p className="mt-2 text-body-2 text-success sm:text-body-1">
               {t('bookings.refunded', { at: formatDateTime(booking.payment.refundedAt, lang) })}
             </p>
           )}
-          {/* บัญชีรับเงินคืนและสลิปคืนเงินอยู่ที่การ์ดของการจองนี้ในแท็บประวัติ */}
-          <Button as={Link} to="/my-bookings?tab=history" variant="secondary" className="mt-4">
+          {/* บัญชีรับเงินคืนและสลิปคืนเงินอยู่ที่การ์ดของการจองนี้ — รอคืนเงินอยู่แท็บรอดำเนินการ นอกนั้นแท็บยกเลิก */}
+          <Button as={Link} to={`/my-bookings?tab=${bookingTab(booking)}`} variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
           </Button>
         </div>
@@ -200,7 +207,7 @@ const PaymentPage = () => {
       {closed && (
         <div className="card border-danger/40 p-6 text-center sm:p-8">
           <AlertTriangle className="mx-auto mb-3 text-danger" size={40} />
-          <h2 className="text-xl font-bold sm:text-2xl">{t('payment.expired')}</h2>
+          <h2 className="text-h2 font-bold">{t('payment.expired')}</h2>
           <Button variant="secondary" className="mt-4" onClick={() => navigate('/')}>
             {t('errors.goHome')}
           </Button>
@@ -210,25 +217,26 @@ const PaymentPage = () => {
       {status === 'PENDING_PAYMENT' && !expired && (
         <>
           {wasRejected && (
-            <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
+            <div className="mb-4 rounded-xl border border-danger/40 bg-danger-bg p-4">
               <p className="flex items-center gap-2 font-semibold text-danger">
                 <AlertTriangle size={16} /> {t('payment.rejectedTitle')}
               </p>
-              <p className="mt-1 text-sm text-fg/90">
+              <p className="mt-1 text-body-2 text-fg/90">
                 {t('payment.rejectedReason')}: {payment.rejectReason}
               </p>
-              <p className="mt-1 text-xs text-muted">{t('payment.rejectedRetry')}</p>
+              <p className="mt-1 text-caption text-muted">{t('payment.rejectedRetry')}</p>
             </div>
           )}
 
-          {/* จอใหญ่วาง QR คู่กับช่องส่งสลิป เห็นทั้งสองขั้นตอนในจอเดียว */}
-          <div className="grid items-start gap-4 lg:grid-cols-2">
+          {/* เรียงตามขั้นตอน สแกนจ่าย → แจ้งชำระ จากบนลงล่างทุกขนาดจอ */}
+          <div className="flex flex-col gap-4">
             <PromptPayPanel
               qrPayload={payment.qrPayload}
               reference={payment.reference}
               promptPayId={payment.promptPayId}
               secondsLeft={secondsLeft}
               downloadName={`promptpay-${booking.code}`}
+              notice={t('payment.payNotice')}
             />
 
             {uploadForm}

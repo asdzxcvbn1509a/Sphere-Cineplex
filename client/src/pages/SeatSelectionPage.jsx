@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext.jsx';
 import BottomBar from '../components/layout/BottomBar.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
+import Chip from '../components/ui/Chip.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
@@ -168,12 +169,13 @@ const SeatSelectionPage = () => {
 
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold sm:text-3xl">{pick(showtime.movie, 'title')}</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted sm:text-base">
+          <h1 className="text-h2 font-bold sm:text-h1">{pick(showtime.movie, 'title')}</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body-2 text-muted sm:text-body-1">
             <span>{showtime.theatre.name}</span>
-            <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs">
+            {/* ชิปทองแบบเดียวกับหน้ารายละเอียดหนัง — พื้น surface-2 เท่ากับพื้นหน้า กรอบจะหายไป */}
+            <Chip tone="accent" size="sm">
               {showtime.theatre.screenType}
-            </span>
+            </Chip>
             <span className="inline-flex items-center gap-1">
               <Clock3 size={13} />
               {formatDate(showtime.startsAt, lang)} · {formatTime(showtime.startsAt, lang)}
@@ -197,14 +199,14 @@ const SeatSelectionPage = () => {
         <div className="min-w-0">
           {/* มือถือวางป้ายกับรายการที่นั่งบรรทัดเดียวกัน แถบจะเตี้ยลงและบังผังน้อยลง */}
           <div className="flex items-baseline gap-2 sm:block">
-            <p className="shrink-0 text-sm text-muted">
+            <p className="shrink-0 text-body-2 text-muted">
               {t('seats.selectedSeats')} ({selected.length}/{MAX_SEATS})
             </p>
             <p className="min-w-0 truncate font-semibold">
               {selectedSeats.length > 0 ? seatLabels(selectedSeats) : '—'}
             </p>
           </div>
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+          <p className="mt-1 flex items-center gap-1.5 text-caption text-muted">
             <TimerReset size={13} className="shrink-0" />
             {t('seats.holdNotice', { minutes: HOLD_MINUTES })}
           </p>
@@ -212,9 +214,9 @@ const SeatSelectionPage = () => {
 
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <p className="text-xs text-muted">{t('seats.totalPrice')}</p>
-            <p className="text-xl font-bold text-accent">
-              {formatMoney(total, lang)} <span className="text-sm">{t('common.baht')}</span>
+            <p className="text-caption text-muted">{t('seats.totalPrice')}</p>
+            <p className="text-h2 font-bold text-accent">
+              {formatMoney(total, lang)} <span className="text-body-2">{t('common.baht')}</span>
             </p>
           </div>
 
@@ -249,7 +251,7 @@ const SeatSelectionPage = () => {
           </>
         }
       >
-        <p className="text-sm text-muted">
+        <p className="text-body-2 text-muted">
           {t('seats.pendingBody', { seats: pendingBooking?.seats?.join(', ') ?? '' })}
         </p>
       </Modal>

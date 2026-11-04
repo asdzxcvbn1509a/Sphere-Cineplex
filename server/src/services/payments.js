@@ -242,18 +242,25 @@ const shapeQueueBooking = (booking) => {
   };
 };
 
-export const listPayments = async ({ status = 'PENDING_VERIFICATION', page, pageSize } = {}) => {
+export const listPayments = async ({
+  status = 'PENDING_VERIFICATION',
+  sort = 'oldest',
+  page,
+  pageSize,
+} = {}) => {
   // คิวที่กดอนุมัติ/ปฏิเสธได้ = PENDING_SLIP_WHERE (รวมสลิปที่ส่งหลังหมดเวลา)
   // กันสลิปค้างคิวกรณีการจองถูกยกเลิกไปแล้ว (ซึ่ง admin กดอะไรไม่ได้)
   const where =
     status === 'ALL' ? {} : status === 'PENDING_VERIFICATION' ? PENDING_SLIP_WHERE : { status };
+  // ค่าเริ่มต้นเก่าสุดขึ้นก่อน (ใครส่งก่อนได้ตรวจก่อน) · newest ให้ผู้ดูแลดูใบที่เพิ่งเข้ามา
+  const direction = sort === 'newest' ? 'desc' : 'asc';
 
   const { rows, ...pageInfo } = await findPage(
     prisma.payment,
     {
       where,
-      // คิวเก่าสุดขึ้นก่อน (ใครส่งก่อนได้ตรวจก่อน) — id ต่อท้ายให้ลำดับคงที่ระหว่างหน้า
-      orderBy: [{ slipUploadedAt: 'asc' }, { id: 'asc' }],
+      // id ต่อท้ายทิศเดียวกัน ให้ลำดับคงที่ระหว่างหน้าแม้ส่งสลิปเวลาเดียวกัน
+      orderBy: [{ slipUploadedAt: direction }, { id: direction }],
       include: {
         booking: QUEUE_BOOKING_INCLUDE,
         seatChange: SEAT_CHANGE_SUMMARY_SELECT,
@@ -470,19 +477,22 @@ const loadPendingPayment = async (paymentId) => {
  * ระบบนี้รับเงินด้วยการโอน + ตรวจสลิป การคืนเงินจึงเป็นการโอนคืนด้วยมือเช่นกัน
  * หน้าที่ของระบบคือเตือนว่ายังค้างอยู่ และเก็บหลักฐานว่าโอนคืนไปแล้วเมื่อไหร่ โดยใคร
  */
-export const listRefunds = async ({ status = 'REFUND_PENDING', page, pageSize } = {}) => {
+export const listRefunds = async ({ status = 'REFUND_PENDING', sort, page, pageSize } = {}) => {
   const where =
     status === 'ALL' ? { status: { in: ['REFUND_PENDING', 'REFUNDED'] } } : { status };
+
+  // คืนแล้วเรียงตามเวลาที่โอนคืน ที่เหลือเรียงตามเวลาที่เข้าคิว
+  // ไม่ระบุ sort = รอคืน: ค้างนานสุดขึ้นก่อน (ใครรอก่อนได้ก่อน) · คืนแล้ว: ล่าสุดขึ้นก่อน
+  const field = status === 'REFUNDED' ? 'refundedAt' : 'refundDueAt';
+  const order = sort ?? (status === 'REFUNDED' ? 'newest' : 'oldest');
+  const direction = order === 'newest' ? 'desc' : 'asc';
 
   const { rows, ...pageInfo } = await findPage(
     prisma.payment,
     {
       where,
-      // รอคืน: ค้างนานสุดขึ้นก่อน · คืนแล้ว: ล่าสุดขึ้นก่อน — id ต่อท้ายให้ลำดับคงที่ระหว่างหน้า
-      orderBy:
-        status === 'REFUNDED'
-          ? [{ refundedAt: 'desc' }, { id: 'desc' }]
-          : [{ refundDueAt: 'asc' }, { id: 'asc' }],
+      // id ต่อท้ายทิศเดียวกัน ให้ลำดับคงที่ระหว่างหน้าแม้เวลาเท่ากัน
+      orderBy: [{ [field]: direction }, { id: direction }],
       include: {
         booking: QUEUE_BOOKING_INCLUDE,
         seatChange: SEAT_CHANGE_SUMMARY_SELECT,
@@ -504,12 +514,15 @@ export const listRefunds = async ({ status = 'REFUND_PENDING', page, pageSize } 
     refundAmount: payment.refundAmount ?? payment.amount,
     reference: payment.reference,
     paidAt: payment.booking.paidAt,
+    // สลิปที่ส่งหลังหมดเวลา (ค่าตั๋วหรือส่วนต่าง) — เวลาที่ลูกค้าโอนจริง ส่วน refundDueAt เป็นเวลาที่ผู้ดูแลอนุมัติ
+    slipUploadedAt: payment.slipUploadedAt,
     refundDueAt: payment.refundDueAt,
     refundedAt: payment.refundedAt,
     refundedBy: payment.refundedBy,
     refundNote: payment.refundNote,
     refundBankName: payment.refundBankName,
     refundAccountNo: payment.refundAccountNo,
+    refundAccountName: payment.refundAccountName,
     hasRefundSlip: Boolean(payment.refundSlipPath),
     booking: {
       ...shapeQueueBooking(payment.booking),

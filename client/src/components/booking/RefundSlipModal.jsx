@@ -14,9 +14,9 @@ const RefundSlipModal = ({ target, onClose }) => {
     <Modal open={Boolean(target)} onClose={onClose} title={t('bookings.refundSlipTitle')} size="sm">
       <SlipImage bookingId={target?.bookingId} paymentId={target?.paymentId} kind="refund" className="h-80 w-full" />
       {target?.payment?.refundNote && (
-        <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">{target.payment.refundNote}</p>
+        <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-body-2 text-muted">{target.payment.refundNote}</p>
       )}
-      <p className="mt-3 text-xs text-muted">
+      <p className="mt-3 text-caption text-muted">
         {t('bookings.refundedAt', { at: formatDateTime(target?.payment?.refundedAt, lang) })}
       </p>
     </Modal>

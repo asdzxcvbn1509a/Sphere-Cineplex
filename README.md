@@ -16,7 +16,7 @@ UX/UI designed from a survey of 30 real users (details in [chat_history.md](chat
 **Customers**
 - Browse movies and showtimes by day; pick seats on a live seat map — logging in is only needed when confirming
 - Pay by PromptPay QR and upload the transfer slip; seats are held while the slip is reviewed, and a slip sent shortly after the deadline is still accepted
-- E-Ticket with an entry QR, and an E-Receipt (print / save as PDF, also emailed)
+- E-Ticket with an entry QR, one per seat, saveable as a PNG image, and an E-Receipt (print / save as PDF, also emailed)
 - Cancel up to 3 hours before the showtime with a refund to a bank account, and see the admin's refund slip
 - Change seats after paying — moving to pricier seats means paying the difference, cheaper seats get it back
 - In-app notifications; the whole UI switches between Thai and English
@@ -210,6 +210,7 @@ You can set `SEED_PASSWORD` when running the seed to use a password other than `
 | [docs/state-machines.md](docs/state-machines.md) | Status diagrams for bookings, payments, seat changes and showtimes, with what triggers each transition |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable, the seed script, the test environment and the go-live checklist |
 | [docs/testing.md](docs/testing.md) | Unit and integration tests, checking the web app in a browser, and the manual test checklist |
+| [docs/design-system.md](docs/design-system.md) | Colors, fonts, the type scale and how components use them |
 | [DEPLOY.md](DEPLOY.md) | Going live on Vercel + Render + Supabase |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Code conventions and checklists for common changes |
 | [chat_history.md](chat_history.md) | The user survey behind the UX decisions |

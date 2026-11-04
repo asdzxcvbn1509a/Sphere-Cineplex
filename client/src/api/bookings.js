@@ -42,11 +42,15 @@ export const getReceipt = async (bookingId, paymentId) => {
  * - 409 'SEAT_TAKEN' (details.seats) · 'SEAT_CHANGE_PENDING' (details.seatChangeId) · 'SEAT_CHANGE_LIMIT'
  *   และ 403 'SEAT_CHANGE_WINDOW_CLOSED'
  */
-export const requestSeatChange = async (bookingId, { seatIds, refundBankName, refundAccountNo }) => {
+export const requestSeatChange = async (
+  bookingId,
+  { seatIds, refundBankName, refundAccountNo, refundAccountName },
+) => {
   return await api.post(`/bookings/${bookingId}/seat-changes`, {
     seatIds,
     ...(refundBankName && { refundBankName }),
     ...(refundAccountNo && { refundAccountNo }),
+    ...(refundAccountName && { refundAccountName }),
   });
 };
 
@@ -59,22 +63,27 @@ export const requestSeatChange = async (bookingId, { seatIds, refundBankName, re
  */
 export const cancelBooking = async (
   bookingId,
-  { reason, refundBankName, refundAccountNo } = {},
+  { reason, refundBankName, refundAccountNo, refundAccountName } = {},
 ) => {
   return await api.post(`/bookings/${bookingId}/cancel`, {
     ...(reason && { reason }),
     ...(refundBankName && { refundBankName }),
     ...(refundAccountNo && { refundAccountNo }),
+    ...(refundAccountName && { refundAccountName }),
   });
 };
 
 /**
  * แจ้ง/แก้บัญชีรับเงินคืน — ใช้กับใบที่รอโอนคืนอยู่ (เช่น ผู้ดูแลยกเลิกรอบแทน)
- * ใบที่ไม่ได้รอคืนเงินแล้วจะได้ 409 REFUND_NOT_PENDING
+ * ใบที่ไม่ได้รอคืนเงินแล้วจะได้ 409 REFUND_NOT_PENDING · ไม่ส่งชื่อบัญชี = server ล้างชื่อเดิมทิ้ง
  */
-export const updateRefundAccount = async (bookingId, { refundBankName, refundAccountNo }) => {
+export const updateRefundAccount = async (
+  bookingId,
+  { refundBankName, refundAccountNo, refundAccountName },
+) => {
   return await api.patch(`/bookings/${bookingId}/refund-account`, {
     refundBankName,
     refundAccountNo,
+    ...(refundAccountName && { refundAccountName }),
   });
 };

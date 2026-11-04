@@ -119,12 +119,13 @@ Shapes shared by several endpoints. Fields marked † are only present in some r
 | `canCancel`, `cancelCutoffHours` | Whether the customer may cancel right now |
 | `seatChange` | `{ canChange, blockedReason, changesLeft, maxChanges, cutoffMinutes, open: SeatChange \| null, history: SeatChange[] }` — `blockedReason`: `NOT_PAID` · `SHOWTIME_CANCELLED` · `WINDOW_CLOSED` · `PENDING` · `LIMIT` · `null` |
 | `showtime` | `{ id, startsAt, endsAt, movie: { id, titleTh, titleEn, posterUrl, durationMin }, theatre: { id, name, screenType } }` |
-| `payment` | Main (ticket) payment or `null`: `{ id, status, amount, reference, receiptNo, slipUploadedAt, hasSlip, rejectReason, refundBankName, refundAccountNo, refundedAt, refundNote, hasRefundSlip }` |
+| `payment` | Main (ticket) payment or `null`: `{ id, status, amount, reference, receiptNo, slipUploadedAt, hasSlip, rejectReason, refundBankName, refundAccountNo, refundAccountName, refundedAt, refundNote, hasRefundSlip }` — `refundAccountName` is `null` for accounts given without a holder name |
 | `user`† | `{ id, name, phone }` — single-booking and admin responses |
+| `displayStatus`† | Admin booking list only — see [`GET /api/admin/bookings`](#get-apiadminbookings) |
 
 **SeatChange**
 `{ id, status, fromSeats[], toSeats[], fromAmount, toAmount, diffAmount, byAdmin, reason, closeReason, holdExpiresAt, holdSecondsLeft, createdAt, completedAt, payment }`
-Seats are labels (`"C5"`). `diffAmount` > 0 = the customer pays more, < 0 = refunded. `payment` (or `null`): `{ id, kind, status, amount, refundAmount, receiptNo, rejectReason, refundBankName, refundAccountNo, refundedAt, refundNote, hasRefundSlip }`. Status: `PENDING_PAYMENT` · `PENDING_VERIFICATION` · `COMPLETED` · `CANCELLED` · `EXPIRED`
+Seats are labels (`"C5"`). `diffAmount` > 0 = the customer pays more, < 0 = refunded. `payment` (or `null`): `{ id, kind, status, amount, refundAmount, receiptNo, rejectReason, refundBankName, refundAccountNo, refundAccountName, refundedAt, refundNote, hasRefundSlip }`. Status: `PENDING_PAYMENT` · `PENDING_VERIFICATION` · `COMPLETED` · `CANCELLED` · `EXPIRED`
 
 **SeatChangeDetail** — SeatChange plus `canUploadSlip`, `lateSlipUntil`, `lateSlipGraceMinutes`, `booking: { id, code, status, showtime }` and, in `payment`, `reference`, `qrPayload`, `promptPayId`, `merchantName`, `slipUploadedAt`, `hasSlip`
 
@@ -283,17 +284,17 @@ All booking routes require a signed-in user
 - Errors: 403 `RECEIPT_NOT_READY` (no receipt issued — unpaid, or a late payment being refunded), `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND`
 
 #### `POST /api/bookings/:id/cancel`
-- Body: `reason` (≤200), `refundBankName` (2–60) and `refundAccountNo` (10–15 digits; spaces and dashes are stripped) — both required when the booking is paid
+- Body: `reason` (≤200), `refundBankName` (2–60) and `refundAccountNo` (10–15 digits; spaces and dashes are stripped) — both required when the booking is paid; `refundAccountName` (2–100, the account holder) is optional so older clients keep working, but the web app always sends it
 - **200** `{ booking }` — seats released; a paid booking's payment becomes `REFUND_PENDING` for the net amount
 - Errors: 400 `REFUND_ACCOUNT_REQUIRED` · 403 `NOT_BOOKING_OWNER`, `CANCEL_WINDOW_CLOSED` (`details.cancelCutoffHours`, `details.hoursLeft`) · 404 `BOOKING_NOT_FOUND` · 409 `ALREADY_CLOSED`, `AWAITING_VERIFICATION` (slip under review), `SEAT_CHANGE_AWAITING_VERIFICATION`, `BOOKING_STATE_CHANGED`
 
 #### `PATCH /api/bookings/:id/refund-account`
-- Body: `refundBankName`, `refundAccountNo` (both required)
-- **200** `{ booking }` — applies to every payment of this booking that is awaiting a refund
+- Body: `refundBankName`, `refundAccountNo` (both required), `refundAccountName` (optional, 2–100)
+- **200** `{ booking }` — applies to every payment of this booking that is awaiting a refund. The holder name is always overwritten: leaving it out clears the old one, since it may not match the new account
 - Errors: 403 `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND` · 409 `REFUND_NOT_PENDING`
 
 #### `POST /api/bookings/:id/seat-changes`
-- Body: `seatIds[]` — the complete new set (kept seats included), same count as now; `refundBankName` + `refundAccountNo` when moving to cheaper seats
+- Body: `seatIds[]` — the complete new set (kept seats included), same count as now; `refundBankName` + `refundAccountNo` when moving to cheaper seats, plus the optional `refundAccountName`
 - **201** `{ booking, seatChange }` — same or lower price: `seatChange.status = COMPLETED`; higher price: `PENDING_PAYMENT`, then pay at [`/api/seat-changes/:id`](#seat-changes)
 - Errors: 400 `INVALID_SEATS`, `SEAT_COUNT_MISMATCH` (`details.required`), `NO_SEAT_CHANGE`, `SHOWTIME_CANCELLED`, `REFUND_ACCOUNT_REQUIRED` (`details.diffAmount`) · 403 `NOT_BOOKING_OWNER`, `SEAT_CHANGE_WINDOW_CLOSED` (`details.cutoffMinutes`) · 404 `BOOKING_NOT_FOUND` · 409 `SEAT_CHANGE_NOT_ALLOWED` (not paid), `SEAT_CHANGE_PENDING` (`details.seatChangeId`), `SEAT_CHANGE_LIMIT` (`details.max`), `SEAT_TAKEN`, `BOOKING_STATE_CHANGED` · 429 `SEAT_CHANGE_RATE_LIMITED`
 - See [Seat changes](architecture.md#seat-changes)
@@ -392,7 +393,7 @@ Every route below requires role `ADMIN`
 ### Overview
 
 #### `GET /api/admin/overview`
-- **200** `{ date, revenueToday, bookingsToday, ticketsToday, pendingSlips, showtimesToday, activeHolds, pendingRefunds, recentSlips[], recentRefunds[] }` — the recent lists hold up to 5 rows of `{ id, bookingId, code, customer, amount, status }`, items awaiting action first
+- **200** `{ date, generatedAt, revenueToday, revenueYesterday, bookingsToday, ticketsToday, pendingSlips, showtimesToday, activeHolds, pendingRefunds, recentSlips[], recentRefunds[] }` — `generatedAt` is when the figures were counted; `revenueYesterday` covers yesterday from midnight up to the same time of day (Bangkok time), so it compares like for like with `revenueToday`. The recent lists hold up to 7 rows of `{ id, bookingId, code, customer, amount, status, kind }`, items awaiting action first
 
 #### `GET /api/admin/queue-counts`
 - **200** `{ pendingSlips, pendingRefunds, pendingRefundAmount }` — two counts, cheap enough to poll; uses the same conditions as the overview and the queues
@@ -473,8 +474,23 @@ Every route below requires role `ADMIN`
 ### Bookings
 
 #### `GET /api/admin/bookings`
-- Query: `status`, `date` (showtime day), `q` (booking code, receipt number, customer phone or name), `page`, `pageSize`
-- **200** `{ bookings: Booking[], total, page, pageSize }`, newest first
+- Query: `status` (booking status), `displayStatus` (one or more badges on the admin bookings page, comma-separated; a booking matches any of them — see below), `date` (showtime day), `q` (booking code, receipt number, customer phone or name), `page`, `pageSize`. Filters combine with AND
+- **200** `{ bookings: Booking[], total, page, pageSize }`, newest first; every booking also carries `displayStatus`
+- `displayStatus` adds the money still in flight (seat-change differences, refunds) to the booking status. The first rule that matches wins, so filtering by a value returns exactly the bookings that show that badge:
+
+  | # | Value | When |
+  |---|---|---|
+  | 1 | `PENDING_PAYMENT` | The booking awaits payment |
+  | 2 | `PENDING_VERIFICATION` | The ticket slip is under review, including a late slip on an expired booking |
+  | 3 | `TOPUP_PENDING_PAYMENT` | Paid; a seat change waits for the customer to pay the difference |
+  | 4 | `TOPUP_PENDING_VERIFICATION` | A difference slip is under review, including a late one |
+  | 5 | `DIFF_REFUND_PENDING` | Paid; a seat-change difference waits to be refunded |
+  | 6 | `CANCELLED_REFUND_PENDING` | Cancelled; money waits to be refunded |
+  | 7 | `EXPIRED_REFUND_PENDING` | Expired; a late payment waits to be refunded |
+  | 8 | `REFUNDED` | A refund has been transferred — a closed booking's money, or a paid booking's seat-change difference |
+  | 9–11 | `PAID` · `CANCELLED` · `EXPIRED` | None of the above |
+
+  The rules live in `server/src/utils/bookingDisplayStatus.js`. The web app's status filter sends a group of badges in one request: to pay (`PENDING_PAYMENT`, `TOPUP_PENDING_PAYMENT`) · in progress (`PENDING_VERIFICATION`, `TOPUP_PENDING_VERIFICATION`, the three `*_REFUND_PENDING`) · completed (`PAID`, `REFUNDED`) · cancelled (`CANCELLED`, `EXPIRED`)
 
 #### `POST /api/admin/bookings/:id/cancel`
 - Body: `reason` (≤200)
@@ -489,8 +505,8 @@ Every route below requires role `ADMIN`
 ### Slip review
 
 #### `GET /api/admin/payments`
-- Query: `status` — `PENDING_VERIFICATION` (default: the review queue, late slips included) · `AWAITING_SLIP` · `APPROVED` · `REJECTED` · `ALL`; `page`, `pageSize`
-- **200** `{ payments, total, page, pageSize }`, oldest slip first. Each item: `{ id, kind, seatChange, status, amount, reference, slipUploadedAt, hasSlip, rejectReason, verifiedAt, verifiedBy, booking: { id, code, status, totalAmount, seats, createdAt, user, showtime } }` — `seatChange` is `{ id, status, fromSeats, toSeats, diffAmount, byAdmin }` for difference payments
+- Query: `status` — `PENDING_VERIFICATION` (default: the review queue, late slips included) · `AWAITING_SLIP` · `APPROVED` · `REJECTED` · `ALL`; `sort` — `oldest` (default) · `newest`, by slip upload time; `page`, `pageSize`
+- **200** `{ payments, total, page, pageSize }`, oldest slip first unless `sort=newest`. Each item: `{ id, kind, seatChange, status, amount, reference, slipUploadedAt, hasSlip, rejectReason, verifiedAt, verifiedBy, booking: { id, code, status, totalAmount, seats, createdAt, user, showtime } }` — `seatChange` is `{ id, status, fromSeats, toSeats, diffAmount, byAdmin }` for difference payments
 
 #### `POST /api/admin/payments/:id/approve`
 - **200** `{ booking }` — ticket payment: booking `PAID` + receipt (emailed); difference payment: seats move + difference receipt; late slip whose seats are gone: payment goes to the refund queue, no receipt
@@ -504,8 +520,10 @@ Every route below requires role `ADMIN`
 ### Refunds
 
 #### `GET /api/admin/refunds`
-- Query: `status` — `REFUND_PENDING` (default, longest waiting first) · `REFUNDED` (most recent first) · `ALL`; `page`, `pageSize`
-- **200** `{ refunds, total, page, pageSize }`. Each item: `{ id, kind, seatChange, status, amount, refundAmount, reference, paidAt, refundDueAt, refundedAt, refundedBy, refundNote, refundBankName, refundAccountNo, hasRefundSlip, booking: { id, code, status, totalAmount, seats, cancelledAt, cancelReason, user, showtime } }` — `refundAmount` is the amount to transfer
+- Query: `status` — `REFUND_PENDING` (default) · `REFUNDED` · `ALL`; `sort` — `oldest` · `newest`; `page`, `pageSize`. `REFUNDED` is ordered by `refundedAt`, the others by `refundDueAt`. Without `sort`, `REFUNDED` lists the most recent refund first and the others the longest waiting first
+- **200** `{ refunds, total, page, pageSize }`. Each item: `{ id, kind, seatChange, status, amount, refundAmount, reference, paidAt, slipUploadedAt, refundDueAt, refundedAt, refundedBy, refundNote, refundBankName, refundAccountNo, refundAccountName, hasRefundSlip, booking: { id, code, status, totalAmount, seats, cancelledAt, cancelReason, user, showtime } }`
+  - `refundAmount` is the amount to transfer
+  - `slipUploadedAt` is when the customer sent a late slip. For those items `refundDueAt` is the time the admin approved the slip
 
 #### `POST /api/admin/refunds/:id/complete`
 - Multipart: `slip` (required), `note`
