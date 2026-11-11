@@ -415,7 +415,7 @@ The web app shows the difference before confirming, using the same rules (`clien
 |---|---|
 | Paid bookings only | Unpaid bookings can already use "Cancel it" and book again right away |
 | At least `SEAT_CHANGE_CUTOFF_MINUTES` (30 minutes) before the showtime | Moving within a zone involves no money, so it's more lenient than cancelling (3 hours) |
-| At most `MAX_SEAT_CHANGES_PER_BOOKING` (2) per booking — expired or cancelled requests don't count | Stops switching back and forth until seats flicker and others can't book them (with another layer on top: 10 requests per 10 minutes per account) |
+| At most `MAX_SEAT_CHANGES_PER_BOOKING` (1) per booking — expired or cancelled requests don't count | Stops switching back and forth until seats flicker and others can't book them (with another layer on top: 10 requests per 10 minutes per account) |
 | One pending request per booking at a time | The difference is calculated from the current seat set; if requests could overlap, the amount would be wrong |
 | While a difference slip awaits review, neither the customer nor an admin can cancel the booking (409 `SEAT_CHANGE_AWAITING_VERIFICATION`), and the whole showtime can't be cancelled | Same reason as `AWAITING_VERIFICATION` — the difference may really have been paid already |
 | Cancelling a booking that changed seats → refunds the **net amount** (`Booking.totalAmount`) as a single item | This amount includes the extra differences paid and subtracts the differences already refunded, so the admin makes one transfer without adding things up (the amount to transfer is stored in `Payment.refundAmount`, which the refund queue, notifications and reports all share) |

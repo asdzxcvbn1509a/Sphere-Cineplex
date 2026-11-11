@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, CheckCircle2, Hourglass } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, CircleAlert, ClockFading } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { cancelSeatChange, getSeatChange, uploadSeatChangeSlip } from '../api/seatChanges.js';
 import { useI18n } from '../context/I18nContext.jsx';
@@ -141,31 +141,25 @@ const SeatChangePaymentPage = () => {
       )}
 
       {status === 'PENDING_VERIFICATION' && (
-        <div className="card border-info/40 p-6 text-center sm:p-8">
-          <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-h2 font-bold">{t('seatChange.waitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('seatChange.waitingBody')}</p>
+        <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 text-center sm:p-8">
+          <ClockFading className="mx-auto mb-3 text-accent" size={40} />
+          <h2 className="text-h2 font-bold">{t('payment.waitingTitle')}</h2>
+          {/* ใช้ข้อความเดียวกับหน้าชำระค่าตั๋ว — จอตั้งแต่ lg ให้ทั้งประโยคอยู่บรรทัดเดียว */}
+          <p className="mx-auto mt-2 text-body-2 text-muted sm:text-body-1 lg:whitespace-nowrap">
+            {t('payment.waitingBody')} <span className="whitespace-nowrap">{t('payment.waitingWait')}</span>
+          </p>
           <p className="mt-3 text-caption text-muted">{t('payment.waitingHint')}</p>
         </div>
       )}
 
       {(expired || status === 'CANCELLED') && (
-        <div className="card p-6 text-center sm:p-8">
-          <AlertTriangle className="mx-auto mb-3 text-muted" size={40} />
-          <h2 className="text-h2 font-bold">
-            {status === 'CANCELLED' ? t('seatChange.cancelledTitle') : t('seatChange.expiredTitle')}
+        <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 text-center sm:p-8">
+          <CircleAlert className="mx-auto mb-3 text-danger-solid" size={40} />
+          <h2 className="text-h1 font-bold">
+            {status === 'CANCELLED' ? t('seatChange.cancelledTitle') : t('payment.expired')}
           </h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('seatChange.expiredBody')}</p>
-          {/* หมดเวลาแล้วไม่รับสลิปส่วนต่างอีก — คนที่โอนแล้วแต่ส่งไม่ทันต้องรู้ว่าต้องติดต่อเจ้าหน้าที่ */}
-          {status !== 'CANCELLED' && (
-            <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-              {t('seatChange.expiredContact')}{' '}
-              {/* "พร้อมรหัสการจอง ..." ห้ามตัดกลางวลี — ถ้าไม่พอที่ให้ขึ้นบรรทัดใหม่ทั้งก้อน */}
-              <span className="whitespace-nowrap">{t('payment.expiredContactCode', { code: booking.code })}</span>
-            </p>
-          )}
-          <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
-            {t('payment.goMyBookings')}
+          <Button as={Link} to="/" variant="navy" size="sm" className="mt-4">
+            {t('errors.goHome')}
           </Button>
         </div>
       )}
@@ -183,10 +177,6 @@ const SeatChangePaymentPage = () => {
               <p className="mt-1 text-caption text-muted">{t('payment.rejectedRetry')}</p>
             </div>
           )}
-
-          <p className="mb-4 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-body-2 text-muted">
-            {t('seatChange.keepOriginal')}
-          </p>
 
           {/* เรียงตามขั้นตอน สแกนจ่าย → แจ้งชำระ จากบนลงล่างทุกขนาดจอ — โครงเดียวกับหน้าชำระค่าตั๋ว */}
           <div className="flex flex-col gap-4">

@@ -58,7 +58,7 @@ All configuration lives in the API's environment. The web app's code reads no en
 | `MAX_SEATS_PER_BOOKING` | `8` | Maximum seats per booking |
 | `MAX_PENDING_BOOKINGS_PER_USER` | `3` | Unfinished bookings (awaiting payment + awaiting slip review) one account can hold at once |
 | `SEAT_CHANGE_CUTOFF_MINUTES` | `30` | Customers can change seats themselves until this many minutes before the showtime |
-| `MAX_SEAT_CHANGES_PER_BOOKING` | `2` | Seat changes a customer can make per booking (expired/cancelled requests and admin moves don't count) |
+| `MAX_SEAT_CHANGES_PER_BOOKING` | `1` | Seat changes a customer can make per booking (expired/cancelled requests and admin moves don't count) |
 
 > The web app shows two of these as constants: `MAX_SEATS` and `HOLD_MINUTES` in `client/src/pages/SeatSelectionPage.jsx`, and `HOLD_MINUTES` in `client/src/pages/ChangeSeatsPage.jsx`. They only affect what the page displays — the server enforces the real limits — but update them together with the server values
 

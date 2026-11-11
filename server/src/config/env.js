@@ -67,7 +67,7 @@ const envSchema = z.object({
   SEAT_CHANGE_CUTOFF_MINUTES: z.coerce.number().int().nonnegative().default(30),
   // ลูกค้าเปลี่ยนที่นั่งเองได้กี่ครั้งต่อการจอง — กันการสลับไปมาจนที่นั่งกระพริบให้คนอื่นจองไม่ได้
   // (คำขอที่หมดเวลา/ยกเลิกไม่นับ และผู้ดูแลย้ายให้ไม่นับ)
-  MAX_SEAT_CHANGES_PER_BOOKING: z.coerce.number().int().positive().default(2),
+  MAX_SEAT_CHANGES_PER_BOOKING: z.coerce.number().int().positive().default(1),
 
   PROMPTPAY_ID: z.string().min(8).default(SAMPLE_PROMPTPAY_ID),
   PROMPTPAY_MERCHANT_NAME: z.string().default('THEATRE RESERVATION'),

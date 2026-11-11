@@ -133,16 +133,11 @@ const PaymentPage = () => {
         </div>
       )}
 
-      {/* หมดเวลาแล้วจบ ไม่มีการรับสลิปหลังหมดเวลา — บอกคนที่โอนวินาทีสุดท้ายแต่ส่งไม่ทันว่าต้องติดต่อเจ้าหน้าที่ */}
+      {/* หมดเวลาแล้วจบ ไม่มีการรับสลิปหลังหมดเวลา */}
       {expired && (
         <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 text-center sm:p-8">
-          <CircleAlert className="mx-auto mb-3 text-danger" size={40} />
+          <CircleAlert className="mx-auto mb-3 text-danger-solid" size={40} />
           <h2 className="text-h1 font-bold">{t('payment.expired')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-            {t('payment.expiredContact')}{' '}
-            {/* "พร้อมรหัสการจอง ..." ห้ามตัดกลางวลี — ถ้าไม่พอที่ให้ขึ้นบรรทัดใหม่ทั้งก้อน */}
-            <span className="whitespace-nowrap">{t('payment.expiredContactCode', { code: booking.code })}</span>
-          </p>
           <Button variant="navy" size="sm" className="mt-4" onClick={() => navigate('/')}>
             {t('errors.goHome')}
           </Button>
