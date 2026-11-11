@@ -1,10 +1,9 @@
 import { Link } from 'react-router-dom';
-import { Clock } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 
 const MovieCard = ({ movie }) => {
-  const { t, pick } = useI18n();
+  const { t, pick, genre } = useI18n();
 
   return (
     // ขอบการ์ดทองหม่น ชี้แล้วเป็นทองเต็มตาม DS
@@ -27,20 +26,17 @@ const MovieCard = ({ movie }) => {
             className="absolute left-2 top-2"
           />
         )}
-        <span className="absolute right-2 top-2 rounded-md bg-ink/80 px-1.5 py-0.5 text-caption font-medium text-accent">
-          {movie.rating}
-        </span>
       </div>
 
-      <div className="flex flex-1 flex-col gap-1.5 border-t border-line p-3">
-        <h3 className="line-clamp-2 font-semibold group-hover:text-accent">
+      {/* แถบข้อมูลพื้นทองเข้มให้การ์ดเด่นจากพื้นหน้า ตัวอักษรครีมอ่านออกบนพื้นนี้ */}
+      <div className="flex flex-1 flex-col gap-1 bg-gold-90 p-3">
+        <h3 className="line-clamp-2 text-body-1 font-semibold text-cream-10 group-hover:text-gold-30">
           {pick(movie, 'title')}
         </h3>
-        <p className="flex items-center gap-1 text-caption text-muted">
-          <Clock size={12} />
+        <p className="text-body-2 text-cream-30">
           {movie.durationMin} {t('movie.minutesUnit')}
         </p>
-        <p className="mt-auto line-clamp-1 text-caption text-muted">{movie.genres?.join(' · ')}</p>
+        <p className="mt-auto line-clamp-1 text-body-2 text-cream-30">{movie.genres?.map(genre).join(' · ')}</p>
       </div>
     </Link>
   );

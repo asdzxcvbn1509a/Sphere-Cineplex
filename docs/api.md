@@ -115,7 +115,7 @@ Shapes shared by several endpoints. Fields marked † are only present in some r
 | `holdExpiresAt`, `holdSecondsLeft` | Payment countdown, computed on the server; `null` when nothing is counting down |
 | `seats` | SeatSnapshot[] |
 | `createdAt`, `paidAt`, `cancelledAt`, `expiredAt`, `cancelReason` | |
-| `canUploadSlip`, `lateSlipUntil` | Whether a slip can be sent now, and until when a late slip is accepted |
+| `canUploadSlip` | Whether a slip can be sent now — only while `PENDING_PAYMENT`; never after expiry |
 | `canCancel`, `cancelCutoffHours` | Whether the customer may cancel right now |
 | `seatChange` | `{ canChange, blockedReason, changesLeft, maxChanges, cutoffMinutes, open: SeatChange \| null, history: SeatChange[] }` — `blockedReason`: `NOT_PAID` · `SHOWTIME_CANCELLED` · `WINDOW_CLOSED` · `PENDING` · `LIMIT` · `null` |
 | `showtime` | `{ id, startsAt, endsAt, movie: { id, titleTh, titleEn, posterUrl, durationMin }, theatre: { id, name, screenType } }` |
@@ -127,17 +127,17 @@ Shapes shared by several endpoints. Fields marked † are only present in some r
 `{ id, status, fromSeats[], toSeats[], fromAmount, toAmount, diffAmount, byAdmin, reason, closeReason, holdExpiresAt, holdSecondsLeft, createdAt, completedAt, payment }`
 Seats are labels (`"C5"`). `diffAmount` > 0 = the customer pays more, < 0 = refunded. `payment` (or `null`): `{ id, kind, status, amount, refundAmount, receiptNo, rejectReason, refundBankName, refundAccountNo, refundAccountName, refundedAt, refundNote, hasRefundSlip }`. Status: `PENDING_PAYMENT` · `PENDING_VERIFICATION` · `COMPLETED` · `CANCELLED` · `EXPIRED`
 
-**SeatChangeDetail** — SeatChange plus `canUploadSlip`, `lateSlipUntil`, `lateSlipGraceMinutes`, `booking: { id, code, status, showtime }` and, in `payment`, `reference`, `qrPayload`, `promptPayId`, `merchantName`, `slipUploadedAt`, `hasSlip`
+**SeatChangeDetail** — SeatChange plus `canUploadSlip` (only while `PENDING_PAYMENT`), `booking: { id, code, status, showtime }` and, in `payment`, `reference`, `qrPayload`, `promptPayId`, `merchantName`, `slipUploadedAt`, `hasSlip`
 
 **PaymentPage** — what the payment screen needs:
-`{ bookingId, bookingCode, bookingStatus, amount, reference, qrPayload, promptPayId, merchantName, status, slipUploadedAt, hasSlip, rejectReason, holdExpiresAt, holdSecondsLeft, canUploadSlip, lateSlipUntil, lateSlipGraceMinutes }`
+`{ bookingId, bookingCode, bookingStatus, amount, reference, qrPayload, promptPayId, merchantName, status, slipUploadedAt, hasSlip, rejectReason, holdExpiresAt, holdSecondsLeft, canUploadSlip }`
 `qrPayload` is a PromptPay (EMVCo) string for the amount; render it as a QR code
 
 **Receipt**
 `{ receiptNo, kind, issuedAt, issuer: { name, address }, customer: { name }, booking: { id, code, status, userId }, showtime: { startsAt, movie: { titleTh, titleEn }, theatre: { name } }, lines[], seatsChangedTo, totalAmount, amountTextTh, amountTextEn, payment: { method, reference }, refund }`
 `lines` are `{ kind: 'SEATS', zone, unitPrice, quantity, amount, seats[] }` (ticket receipts, one line per zone and price) or a single `{ kind: 'SEAT_CHANGE', fromSeats[], toSeats[], quantity, unitPrice, amount }` (difference receipts). `seatsChangedTo` lists the current seats when they differ from the receipt. `refund` is `{ status, refundedAt }` once the money is being or has been refunded, otherwise `null`
 
-**Notification** — `{ id, userId, type, titleTh, titleEn, bodyTh, bodyEn, data, readAt, createdAt }` · `data` usually holds `bookingId` (and `seatChangeId` / `showtimeId`) · types: `PAYMENT_APPROVED`, `PAYMENT_REJECTED`, `REFUND_COMPLETED`, `BOOKING_CANCELLED`, `BOOKING_EXPIRED`, `SHOWTIME_REMINDER`, `SHOWTIME_CANCELLED`, `LATE_PAYMENT_REFUND`, `SEATS_CHANGED`, `SEAT_CHANGE_REJECTED`, `SEAT_CHANGE_EXPIRED`, `SEAT_CHANGE_LATE_REFUND`
+**Notification** — `{ id, userId, type, titleTh, titleEn, bodyTh, bodyEn, data, readAt, createdAt }` · `data` usually holds `bookingId` (and `seatChangeId` / `showtimeId`) · types: `PAYMENT_APPROVED`, `PAYMENT_REJECTED`, `REFUND_COMPLETED`, `BOOKING_CANCELLED`, `BOOKING_EXPIRED`, `SHOWTIME_REMINDER`, `SHOWTIME_CANCELLED`, `SEATS_CHANGED`, `SEAT_CHANGE_REJECTED`, `SEAT_CHANGE_EXPIRED` (older rows may also carry `LATE_PAYMENT_REFUND` / `SEAT_CHANGE_LATE_REFUND`, which are no longer created)
 
 ---
 
@@ -281,7 +281,7 @@ All booking routes require a signed-in user
 #### `GET /api/bookings/:id/receipt`
 - Query: `payment` — a seat-change difference payment of this booking; omit for the ticket receipt
 - **200** `{ receipt }`
-- Errors: 403 `RECEIPT_NOT_READY` (no receipt issued — unpaid, or a late payment being refunded), `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND`
+- Errors: 403 `RECEIPT_NOT_READY` (no receipt issued — the payment hasn't been approved), `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND`
 
 #### `POST /api/bookings/:id/cancel`
 - Body: `reason` (≤200), `refundBankName` (2–60) and `refundAccountNo` (10–15 digits; spaces and dashes are stripped) — both required when the booking is paid; `refundAccountName` (2–100, the account holder) is optional so older clients keep working, but the web app always sends it
@@ -311,8 +311,8 @@ The next steps of a seat change that costs more. All routes require a signed-in 
 
 #### `POST /api/seat-changes/:id/slip` — Owner
 - Multipart field `slip`
-- **201** `{ seatChange }` — moves to `PENDING_VERIFICATION` (late slips within `LATE_SLIP_GRACE_MINUTES` included)
-- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `SEAT_CHANGE_NOT_FOUND` · 409 `SEAT_CHANGE_NOT_PAYABLE` (already sent, or the request is closed), `HOLD_EXPIRED` (grace period over) · 429 `SLIP_RATE_LIMITED`
+- **201** `{ seatChange }` — moves to `PENDING_VERIFICATION`. Same rules as ticket slips: only while `PENDING_PAYMENT`, nothing after expiry
+- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `SEAT_CHANGE_NOT_FOUND` · 409 `SEAT_CHANGE_NOT_PAYABLE` (already sent, or the request is closed), `HOLD_EXPIRED` (the request expired) · 429 `SLIP_RATE_LIMITED`
 
 #### `POST /api/seat-changes/:id/cancel` — Owner
 - **200** `{ seatChange }` — held new seats released; the current seats are untouched
@@ -330,8 +330,8 @@ All routes require a signed-in user
 
 #### `POST /api/payments/:bookingId/slip` — Owner
 - Multipart field `slip`
-- **201** `{ payment }` (PaymentPage) — the countdown stops and the seats stay held until an admin decides. Accepted past the deadline while the seats are still held, and for `LATE_SLIP_GRACE_MINUTES` after expiry (see [Late slip submission](architecture.md#late-slip-submission))
-- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND` · 409 `BOOKING_NOT_PAYABLE` (already sent, or the booking can't be paid), `HOLD_EXPIRED` · 429 `SLIP_RATE_LIMITED`
+- **201** `{ payment }` (PaymentPage) — the countdown stops and the seats stay held until an admin decides. Accepted only while the booking is `PENDING_PAYMENT`, including a few seconds past the deadline before the expiry job releases the seats (see [No transfer after the deadline](architecture.md#no-transfer-after-the-deadline))
+- Errors: 400 `NO_FILE`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_ERROR` · 403 `NOT_BOOKING_OWNER` · 404 `BOOKING_NOT_FOUND` · 409 `BOOKING_NOT_PAYABLE` (already sent, or the booking can't be paid), `HOLD_EXPIRED` (the booking expired) · 429 `SLIP_RATE_LIMITED`
 
 #### `GET /api/payments/:bookingId/slip` — Owner / admin
 - Query: `payment` — a seat-change difference payment of this booking (omit for the ticket payment)
@@ -357,6 +357,9 @@ All routes require a signed-in user and only touch that user's notifications
 
 #### `POST /api/notifications/:id/read`
 - **200** `{ ok: true }` (no-op if it's already read or isn't yours)
+
+#### `DELETE /api/notifications/:id`
+- **200** `{ ok: true }` (no-op if it doesn't exist or isn't yours)
 
 ---
 
@@ -481,16 +484,15 @@ Every route below requires role `ADMIN`
   | # | Value | When |
   |---|---|---|
   | 1 | `PENDING_PAYMENT` | The booking awaits payment |
-  | 2 | `PENDING_VERIFICATION` | The ticket slip is under review, including a late slip on an expired booking |
+  | 2 | `PENDING_VERIFICATION` | The ticket slip is under review |
   | 3 | `TOPUP_PENDING_PAYMENT` | Paid; a seat change waits for the customer to pay the difference |
-  | 4 | `TOPUP_PENDING_VERIFICATION` | A difference slip is under review, including a late one |
+  | 4 | `TOPUP_PENDING_VERIFICATION` | A difference slip is under review |
   | 5 | `DIFF_REFUND_PENDING` | Paid; a seat-change difference waits to be refunded |
   | 6 | `CANCELLED_REFUND_PENDING` | Cancelled; money waits to be refunded |
-  | 7 | `EXPIRED_REFUND_PENDING` | Expired; a late payment waits to be refunded |
-  | 8 | `REFUNDED` | A refund has been transferred — a closed booking's money, or a paid booking's seat-change difference |
-  | 9–11 | `PAID` · `CANCELLED` · `EXPIRED` | None of the above |
+  | 7 | `REFUNDED` | A refund has been transferred — a cancelled booking's money, or a paid booking's seat-change difference |
+  | 8–10 | `PAID` · `CANCELLED` · `EXPIRED` | None of the above |
 
-  The rules live in `server/src/utils/bookingDisplayStatus.js`. The web app's status filter sends a group of badges in one request: to pay (`PENDING_PAYMENT`, `TOPUP_PENDING_PAYMENT`) · in progress (`PENDING_VERIFICATION`, `TOPUP_PENDING_VERIFICATION`, the three `*_REFUND_PENDING`) · completed (`PAID`, `REFUNDED`) · cancelled (`CANCELLED`, `EXPIRED`)
+  The rules live in `server/src/utils/bookingDisplayStatus.js`. The web app's status filter sends a group of badges in one request: to pay (`PENDING_PAYMENT`, `TOPUP_PENDING_PAYMENT`) · in progress (`PENDING_VERIFICATION`, `TOPUP_PENDING_VERIFICATION`, the two `*_REFUND_PENDING`) · completed (`PAID`, `REFUNDED`) · cancelled (`CANCELLED`, `EXPIRED`)
 
 #### `POST /api/admin/bookings/:id/cancel`
 - Body: `reason` (≤200)
@@ -505,16 +507,16 @@ Every route below requires role `ADMIN`
 ### Slip review
 
 #### `GET /api/admin/payments`
-- Query: `status` — `PENDING_VERIFICATION` (default: the review queue, late slips included) · `AWAITING_SLIP` · `APPROVED` · `REJECTED` · `ALL`; `sort` — `oldest` (default) · `newest`, by slip upload time; `page`, `pageSize`
+- Query: `status` — `PENDING_VERIFICATION` (default: the review queue — slips whose booking or seat change is still under review) · `AWAITING_SLIP` · `APPROVED` · `REJECTED` · `ALL`; `sort` — `oldest` (default) · `newest`, by slip upload time; `page`, `pageSize`
 - **200** `{ payments, total, page, pageSize }`, oldest slip first unless `sort=newest`. Each item: `{ id, kind, seatChange, status, amount, reference, slipUploadedAt, hasSlip, rejectReason, verifiedAt, verifiedBy, booking: { id, code, status, totalAmount, seats, createdAt, user, showtime } }` — `seatChange` is `{ id, status, fromSeats, toSeats, diffAmount, byAdmin }` for difference payments
 
 #### `POST /api/admin/payments/:id/approve`
-- **200** `{ booking }` — ticket payment: booking `PAID` + receipt (emailed); difference payment: seats move + difference receipt; late slip whose seats are gone: payment goes to the refund queue, no receipt
+- **200** `{ booking }` — ticket payment: booking `PAID` + receipt (emailed); difference payment: seats move + difference receipt (emailed)
 - Errors: 404 `PAYMENT_NOT_FOUND` · 409 `PAYMENT_NOT_PENDING`, `BOOKING_NOT_PENDING`
 
 #### `POST /api/admin/payments/:id/reject`
 - Body: `reason` (1–200, required; shown to the customer)
-- **200** `{ booking }` — a new payment window of `REJECTED_RETRY_MINUTES`, or closed if the showtime has started or the slip was late
+- **200** `{ booking }` — a new payment window of `REJECTED_RETRY_MINUTES`, or closed (`EXPIRED`, no new slip accepted) if the showtime has started
 - Errors: 404 `PAYMENT_NOT_FOUND` · 409 `PAYMENT_NOT_PENDING`, `BOOKING_NOT_PENDING`
 
 ### Refunds
@@ -523,7 +525,7 @@ Every route below requires role `ADMIN`
 - Query: `status` — `REFUND_PENDING` (default) · `REFUNDED` · `ALL`; `sort` — `oldest` · `newest`; `page`, `pageSize`. `REFUNDED` is ordered by `refundedAt`, the others by `refundDueAt`. Without `sort`, `REFUNDED` lists the most recent refund first and the others the longest waiting first
 - **200** `{ refunds, total, page, pageSize }`. Each item: `{ id, kind, seatChange, status, amount, refundAmount, reference, paidAt, slipUploadedAt, refundDueAt, refundedAt, refundedBy, refundNote, refundBankName, refundAccountNo, refundAccountName, hasRefundSlip, booking: { id, code, status, totalAmount, seats, cancelledAt, cancelReason, user, showtime } }`
   - `refundAmount` is the amount to transfer
-  - `slipUploadedAt` is when the customer sent a late slip. For those items `refundDueAt` is the time the admin approved the slip
+  - `slipUploadedAt` is when the customer sent the slip for this money (`null` for a seat-change difference refund, which had no slip)
 
 #### `POST /api/admin/refunds/:id/complete`
 - Multipart: `slip` (required), `note`
@@ -636,7 +638,7 @@ Status, code and meaning. Codes are stable; messages may be reworded
 | 409 | `BOOKING_STATE_CHANGED` | The booking changed during the request — refresh and retry |
 | 409 | `DUPLICATE` | Unique value already used |
 | 409 | `EMAIL_TAKEN` | Email belongs to another account |
-| 409 | `HOLD_EXPIRED` | Late-slip grace period is over — contact staff with the booking code |
+| 409 | `HOLD_EXPIRED` | The payment window has closed, so no slip is accepted — contact staff with the booking code |
 | 409 | `MOVIE_HAS_BOOKINGS` | Movie has bookings; delete again with `force=true` or archive |
 | 409 | `MOVIE_HAS_OPEN_BOOKINGS` | Movie still has upcoming tickets, slips under review or pending refunds |
 | 409 | `MOVIE_HAS_RECEIPTS` | Movie has issued receipts and can only be archived |

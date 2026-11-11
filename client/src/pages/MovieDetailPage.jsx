@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { CalendarDays, Clock, Sofa } from 'lucide-react';
+import { CalendarDays, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import { getMovie } from '../api/movies.js';
 import { listShowtimes } from '../api/showtimes.js';
@@ -10,11 +10,11 @@ import Chip from '../components/ui/Chip.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useApi from '../hooks/useApi.js';
-import { bangkokDateKey, buildDateStrip, formatDate, formatMoney, formatTime, formatWeekday } from '../utils/format.js';
+import { bangkokDateKey, buildDateStrip, formatDate, formatTime, formatWeekday } from '../utils/format.js';
 
 const MovieDetailPage = () => {
   const { movieId } = useParams();
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName, genre } = useI18n();
   const [selectedDate, setSelectedDate] = useState(null);
 
   const dateStrip = buildDateStrip(7);
@@ -88,21 +88,15 @@ const MovieDetailPage = () => {
             />
             <div className="min-w-0 self-center sm:self-start">
               <h1 className="text-h2 font-bold sm:text-h1">{pick(movie, 'title')}</h1>
-              <p className="mt-1 text-body-2 text-muted sm:text-body-1">
-                {lang === 'th' ? movie.titleEn : movie.titleTh}
-              </p>
 
               {/* ข้อมูลประกอบเป็นชิปทองตาม DS */}
               <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
-                <Chip tone="accent" size="sm" className="font-medium">
-                  {movie.rating}
-                </Chip>
                 <Chip tone="accent" size="sm">
                   <Clock size={12} /> {movie.durationMin} {t('movie.minutesUnit')}
                 </Chip>
-                {movie.genres?.map((genre) => (
-                  <Chip key={genre} tone="accent" size="sm">
-                    {genre}
+                {movie.genres?.map((name) => (
+                  <Chip key={name} tone="accent" size="sm">
+                    {genre(name)}
                   </Chip>
                 ))}
               </div>
@@ -170,12 +164,13 @@ const MovieDetailPage = () => {
 
             <div className="flex flex-col gap-4">
               {Object.values(byTheatre).map(({ theatre, items }) => (
-                <div key={theatre.id} className="card p-4">
+                // การ์ดโรงพื้นครีมขอบทอง ปุ่มรอบฉายน้ำเงินเข้มให้ตัดกับพื้นครีมจนเห็นชัดว่ากดได้
+                <div key={theatre.id} className="rounded-xl border border-gold-40 bg-cream-30 p-4 text-cocoa-100 shadow-lg">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="font-semibold">{theatre.name}</h3>
-                    <Chip tone="accent" size="sm">
+                    <h3 className="font-semibold">{theatreName(theatre.name)}</h3>
+                    <span className="rounded-md border border-gold-60 bg-blue-90 px-2 py-0.5 text-caption text-cream-20">
                       {theatre.screenType}
-                    </Chip>
+                    </span>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -187,22 +182,15 @@ const MovieDetailPage = () => {
                           to={soldOut ? '#' : `/showtimes/${showtime.id}/seats`}
                           onClick={(event) => soldOut && event.preventDefault()}
                           className={clsx(
-                            'flex min-w-24 flex-col items-center rounded-xl border px-3 py-2 transition',
-                            soldOut
-                              ? 'cursor-not-allowed border-line bg-surface-2/50 opacity-45'
-                              : 'border-line-strong bg-surface-2 hover:border-accent hover:text-accent',
+                            'flex min-w-24 flex-col items-center rounded-xl border border-gold-50 bg-blue-90 px-3 py-2 text-cream-20 shadow-md transition',
+                            soldOut ? 'cursor-not-allowed opacity-45' : 'hover:border-gold-30 hover:bg-blue-70',
                           )}
                         >
-                          <span className="text-body-1 font-bold">
-                            {formatTime(showtime.startsAt, lang)}
-                          </span>
-                          <span className="text-caption text-muted">
+                          <span className="text-body-1">{formatTime(showtime.startsAt, lang)}</span>
+                          <span className="text-body-1">
                             {soldOut
                               ? t('movie.soldOut')
                               : t('movie.seatsLeft', { count: showtime.availableSeats })}
-                          </span>
-                          <span className="mt-0.5 inline-flex items-center gap-1 text-caption text-accent">
-                            <Sofa size={10} /> {t('movie.from')} {formatMoney(showtime.prices.NORMAL, lang)}
                           </span>
                         </Link>
                       );

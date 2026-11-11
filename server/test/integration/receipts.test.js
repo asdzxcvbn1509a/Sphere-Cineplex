@@ -5,7 +5,7 @@ import prisma from '../../src/lib/prisma.js';
 import { createApp } from '../../src/app.js';
 import { env } from '../../src/config/env.js';
 import { updateProfile } from '../../src/services/auth.js';
-import { cancelBooking, listAllBookings, releaseExpiredHolds } from '../../src/services/bookings.js';
+import { cancelBooking, listAllBookings } from '../../src/services/bookings.js';
 import { approvePayment, completeRefund, rejectPayment } from '../../src/services/payments.js';
 import { getReceipt, issueReceiptNo } from '../../src/services/receipts.js';
 import { bahtText } from '../../src/utils/bahtText.js';
@@ -21,7 +21,6 @@ import {
   createShowtimeFixture,
   createUser,
   makeSlipFile,
-  minutesFromNow,
   paymentOf,
   submitSlip,
 } from '../helpers/fixtures.js';
@@ -47,15 +46,6 @@ const receiptNoFor = (paidAt, sequence) => formatReceiptNo(receiptYear(paidAt), 
 const approve = async (booking, admin) => {
   const payment = await paymentOf(booking.id);
   return approvePayment({ paymentId: payment.id, adminId: admin.id });
-};
-
-/** ทำให้การจองหมดเวลาด้วย job จริง (แบบเดียวกับ late-slip.test.js) */
-const expireNow = async (booking) => {
-  await prisma.booking.update({
-    where: { id: booking.id },
-    data: { holdExpiresAt: minutesFromNow(-1) },
-  });
-  assert.equal(await releaseExpiredHolds(), 1);
 };
 
 describe('ออกเลขที่ใบเสร็จตอนอนุมัติสลิป', () => {
@@ -132,26 +122,6 @@ describe('ออกเลขที่ใบเสร็จตอนอนุม�
     const { paidAt } = await bookingOf(booking.id);
     assert.equal((await paymentOf(booking.id)).receiptNo, receiptNoFor(paidAt, 1));
     assert.equal((await prisma.receiptCounter.findFirst()).lastNo, 1);
-  });
-
-  test('สลิปที่ส่งหลังหมดเวลาและที่นั่งไม่ว่างแล้ว — อนุมัติแล้วเข้าคิวคืนเงิน ไม่มีใบเสร็จ', async () => {
-    const { showtime, seats } = await createShowtimeFixture();
-    const [admin, late, other] = await Promise.all([createAdmin(), createUser(), createUser()]);
-    const booking = await book({ user: late, showtime, seats: [seats[0]] });
-    await expireNow(booking);
-    await book({ user: other, showtime, seats: [seats[0]] });
-    await submitSlip(booking, late);
-
-    await approve(booking, admin);
-
-    const payment = await paymentOf(booking.id);
-    assert.equal(payment.status, 'REFUND_PENDING');
-    assert.equal(payment.receiptNo, null);
-    assert.equal(await prisma.receiptCounter.count(), 0);
-    await assert.rejects(
-      getReceipt({ bookingId: booking.id, requester: late }),
-      apiErrorWith('RECEIPT_NOT_READY', 403),
-    );
   });
 
   test('สลิปที่ถูกปฏิเสธไม่มีใบเสร็จ', async () => {

@@ -53,7 +53,7 @@ Content-Type: application/json
 @bookingId = {{booking.response.body.booking.id}}
 
 ### ── 7. ข้อมูลชำระเงิน + PromptPay payload ────────────
-### canUploadSlip / lateSlipUntil บอกว่ายังส่งสลิปได้ไหม (รวมช่วงผ่อนผันหลังหมดเวลา)
+### canUploadSlip บอกว่ายังส่งสลิปได้ไหม (เฉพาะตอนรอชำระ — หมดเวลาแล้วส่งไม่ได้)
 GET {{host}}/payments/{{bookingId}}
 Authorization: Bearer {{token}}
 
@@ -138,6 +138,19 @@ Authorization: Bearer {{token}}
 
 ### ── 13.4 ใบเสร็จส่วนต่าง (หลังผู้ดูแลอนุมัติสลิปส่วนต่างที่ A4) ──
 GET {{host}}/bookings/{{bookingId}}/receipt?payment={{seatChangeDetail.response.body.seatChange.payment.id}}
+Authorization: Bearer {{token}}
+
+### ── 14. แจ้งเตือน ────────────────────────────────────
+# @name notifications
+GET {{host}}/notifications
+Authorization: Bearer {{token}}
+
+### ── 14.1 อ่านทั้งหมด ────────────────────────────────
+POST {{host}}/notifications/read-all
+Authorization: Bearer {{token}}
+
+### ── 14.2 ลบแจ้งเตือนรายการแรก (ไม่ใช่ของตัวเอง/ลบไปแล้วก็ได้ 200) ──
+DELETE {{host}}/notifications/{{notifications.response.body.notifications.0.id}}
 Authorization: Bearer {{token}}
 
 

@@ -65,7 +65,12 @@ export const apiError = (error) => {
   const payload = error?.response?.data?.error;
   return {
     code: payload?.code ?? 'NETWORK_ERROR',
-    message: payload?.message ?? 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่',
+    // ไฟล์นี้ไม่ใช่ component เรียก useI18n ไม่ได้ — อ่านภาษาจาก <html lang> ที่ I18nProvider ตั้งไว้แทน
+    message:
+      payload?.message ??
+      (document.documentElement.lang === 'en'
+        ? 'Cannot reach the server. Please try again'
+        : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่'),
     details: payload?.details,
     status: error?.response?.status,
   };

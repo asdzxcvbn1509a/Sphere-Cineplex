@@ -19,6 +19,16 @@ export const markAllRead = async (req, res, next) => {
   }
 };
 
+// @ENDPOINT DELETE http://localhost:4000/api/notifications/:id
+export const deleteNotification = async (req, res, next) => {
+  try {
+    await notificationService.deleteNotification(req.user.id, req.params.id);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @ENDPOINT POST http://localhost:4000/api/notifications/:id/read
 export const markRead = async (req, res, next) => {
   try {

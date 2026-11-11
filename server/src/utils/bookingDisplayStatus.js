@@ -35,15 +35,7 @@ const refundPending = (status, bookingStatus) => ({
 
 const RULES = [
   byBookingStatus('PENDING_PAYMENT'),
-  {
-    // รวมสลิปค่าตั๋วที่ส่งหลังหมดเวลา — การจองยัง EXPIRED แต่สลิปอยู่ในคิวตรวจแล้ว
-    status: 'PENDING_VERIFICATION',
-    matches: (booking) =>
-      booking.status === 'PENDING_VERIFICATION' || booking.payment?.status === 'PENDING_VERIFICATION',
-    where: {
-      OR: [{ status: 'PENDING_VERIFICATION' }, { payment: { is: { status: 'PENDING_VERIFICATION' } } }],
-    },
-  },
+  byBookingStatus('PENDING_VERIFICATION'),
   {
     status: 'TOPUP_PENDING_PAYMENT',
     matches: (booking) =>
@@ -52,7 +44,7 @@ const RULES = [
     where: { status: 'PAID', seatChanges: { some: { status: 'PENDING_PAYMENT' } } },
   },
   {
-    // ทั้งคำขอที่ยังเปิดอยู่ และสลิปส่วนต่างที่ส่งหลังคำขอหมดเวลา (คำขอยัง EXPIRED แต่สลิปรอตรวจ)
+    // สลิปส่วนต่างเปลี่ยนที่นั่งรอผู้ดูแลตรวจ (การจองยัง PAID ระหว่างนั้น)
     status: 'TOPUP_PENDING_VERIFICATION',
     matches: (booking) =>
       hasPayment(
@@ -63,7 +55,6 @@ const RULES = [
   },
   refundPending('DIFF_REFUND_PENDING', 'PAID'),
   refundPending('CANCELLED_REFUND_PENDING', 'CANCELLED'),
-  refundPending('EXPIRED_REFUND_PENDING', 'EXPIRED'),
   {
     // โอนคืนครบแล้ว — ใบที่ปิดไปแล้ว หรือใบที่ยังใช้ได้แต่คืนส่วนต่างเปลี่ยนที่นั่งไปแล้ว (ใบนี้ยังยกเลิกได้ตามปกติ)
     status: 'REFUNDED',

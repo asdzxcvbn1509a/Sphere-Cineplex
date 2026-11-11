@@ -1,11 +1,11 @@
 import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeftRight, CreditCard, FileText, Landmark, ReceiptText, Ticket, Upload } from 'lucide-react';
+import { CreditCard, Landmark } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
 import Button from '../ui/Button.jsx';
 import Chip from '../ui/Chip.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
-import { formatDate, formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
+import { formatBaht, formatDate, formatDateTime, formatMoney, formatTime } from '../../utils/format.js';
 
 /**
  * ข้อความมุมขวาล่างของการ์ด — บอกว่าตอนนี้ยกเลิกได้ไหม และเพราะอะไร
@@ -14,7 +14,6 @@ import { formatDate, formatDateTime, formatMoney, formatTime } from '../../utils
 const cancelHint = (booking, t) => {
   if (booking.status === 'CANCELLED' || booking.status === 'EXPIRED') return null;
   if (new Date(booking.showtime.startsAt) <= new Date()) return null;
-  if (booking.status === 'PENDING_VERIFICATION') return t('bookings.cancelAwaitingReview');
   if (booking.seatChange?.open?.status === 'PENDING_VERIFICATION') {
     return t('bookings.cancelAwaitingTopUp');
   }
@@ -57,11 +56,22 @@ const statusBadge = (booking, t) => {
   return { status: booking.status, label: t(`bookings.status${booking.status}`) };
 };
 
+/**
+ * ป้ายทั้งหมดของการ์ด — ใบที่ยกเลิกแสดงป้ายแดง "ยกเลิกสำเร็จ"
+ * และถ้าโอนเงินคืนครบแล้ว มีป้ายเขียว "คืนเงินสำเร็จ" นำหน้า ลูกค้าเห็นทั้งสองเรื่องในแวบเดียว
+ */
+const statusBadges = (booking, t) => {
+  if (booking.status !== 'CANCELLED') return [statusBadge(booking, t)];
+  const cancelled = { status: 'CANCELLED', tone: 'danger', label: t('bookings.cancelledDone') };
+  if (booking.payment?.status !== 'REFUNDED') return [cancelled];
+  return [{ status: 'REFUNDED', label: t('admin.bookingPage.status.REFUNDED') }, cancelled];
+};
+
 /** หนึ่งบรรทัดของรายละเอียดการจอง — "หัวข้อ: ค่า" */
 const Detail = ({ label, children }) => {
   return (
     <div className="flex min-w-0 gap-1">
-      <dt className="shrink-0 text-muted">{label}:</dt>
+      <dt className="shrink-0">{label} :</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   );
@@ -74,14 +84,15 @@ const Detail = ({ label, children }) => {
  * onViewRefundSlip({ bookingId, payment, paymentId }) — paymentId ใส่เฉพาะสลิปคืนส่วนต่างเปลี่ยนที่นั่ง
  */
 const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip }) => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const { startsAt } = booking.showtime;
-  const badge = statusBadge(booking, t);
+  const badges = statusBadges(booking, t);
   const cancelNote = cancelHint(booking, t);
   const seatChangeNote = seatChangeHint(booking, t);
 
   return (
-    <article className="card overflow-hidden">
+    // การ์ดพื้นเข้มขอบทอง ตัวอักษรอ่อนทั้งใบ — แถบปุ่มด้านล่างแยกด้วยพื้นน้ำตาล
+    <article className="overflow-hidden rounded-xl border border-gold-40 bg-cocoa-100">
       {/* มือถือ: ยอดรวมอยู่ใต้รายละเอียดข้างโปสเตอร์ ไม่เป็นคอลัมน์ขวาที่บีบชื่อเรื่องจนเหลือไม่กี่ตัวอักษร */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-5 sm:p-6">
         <img
@@ -91,22 +102,20 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
         />
 
         <div className="min-w-0">
-          {/* มือถือป้ายสถานะขึ้นบรรทัดของตัวเองเหนือชื่อเรื่อง */}
-          <div className="flex flex-col-reverse items-start gap-1 sm:flex-row sm:justify-between sm:gap-2">
-            <h2 className="min-w-0 max-w-full truncate text-h2 font-semibold">
-              {pick(booking.showtime.movie, 'title')}
-            </h2>
-            <StatusBadge status={badge.status} label={badge.label} />
+          <h2 className="truncate text-h2 font-medium">{pick(booking.showtime.movie, 'title')}</h2>
+
+          {/* โรง วัน เวลาของรอบเป็นชิปขอบทองพื้นโปร่ง — เห็นก่อนรายละเอียดการจองด้านล่าง */}
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {[theatreName(booking.showtime.theatre.name), formatDate(startsAt, lang), formatTime(startsAt, lang)].map(
+              (text, index) => (
+                <span key={index} className="rounded-md border border-accent px-1.5 py-0.5 text-body-1 text-accent">
+                  {text}
+                </span>
+              ),
+            )}
           </div>
 
-          {/* โรง วัน เวลาของรอบเป็นชิปทอง (ข้อมูลประกอบตาม DS) — เห็นก่อนรายละเอียดการจองด้านล่าง */}
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Chip tone="accent">{booking.showtime.theatre.name}</Chip>
-            <Chip tone="accent">{formatDate(startsAt, lang)}</Chip>
-            <Chip tone="accent">{formatTime(startsAt, lang)}</Chip>
-          </div>
-
-          <dl className="mt-2 flex flex-col gap-0.5 text-body-2">
+          <dl className="mt-2 flex flex-col gap-0.5 text-body-1">
             <Detail label={t('ticket.seats')}>
               <span className="font-medium">{booking.seats.map((seat) => seat.label).join(', ')}</span>
             </Detail>
@@ -118,44 +127,46 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
           </dl>
         </div>
 
-        <div className="flex items-baseline gap-2 self-end sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:block sm:self-start sm:text-right">
-          <p className="text-caption text-muted sm:text-body-2">{t('bookings.total')}</p>
-          <p className="font-bold text-accent sm:text-h2">
-            {formatMoney(booking.totalAmount, lang)} <span className="text-body-2">{t('common.baht')}</span>
-          </p>
+        {/* ป้ายสถานะวางข้างยอดรวมมุมขวาบน — มองมุมเดียวรู้ทั้งสถานะและยอดเงิน */}
+        <div className="flex items-start gap-3 self-end sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:self-start">
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {badges.map((badge) => (
+              <StatusBadge key={badge.status} status={badge.status} tone={badge.tone} label={badge.label} />
+            ))}
+          </div>
+          <div className="sm:text-right">
+            <p className="text-body-1">{t('bookings.total')}</p>
+            <p className="text-body-1 font-semibold">{formatBaht(booking.totalAmount, lang)}</p>
+          </div>
         </div>
       </div>
 
       {/* ใบที่ปิดไปแล้วและไม่มีอะไรให้กด/บอก (เช่น หมดเวลาโดยยังไม่จ่าย) ซ่อนแถบไปเลย ไม่ปล่อยแถบเทาว่าง */}
-      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-2/50 px-4 py-3 empty:hidden sm:px-6">
+      {/* แถบปุ่มพื้นน้ำตาลขอบทอง ตัวอักษรครีม — ข้อความ text-muted ในแถบถูกยกเป็นครีมให้อ่านออกบนพื้นนี้ */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-gold-40 bg-cream-80 px-4 py-3 text-cream-20 empty:hidden sm:px-6 [&_.text-muted]:text-cream-20">
         {booking.status === 'PAID' && (
-          <Button as={Link} to={`/booking/${booking.id}/ticket`} size="sm">
-            <Ticket size={14} /> {t('bookings.viewTicket')}
+          <Button as={Link} to={`/booking/${booking.id}/ticket`} variant="cream" size="sm">
+            {t('bookings.viewTicket')}
           </Button>
         )}
         {/* ใบเสร็จยังเปิดได้หลังยกเลิก/คืนเงิน เพราะเป็นหลักฐานว่าเคยจ่ายเงินจริง */}
         {booking.payment?.receiptNo && (
-          <Button as={Link} to={`/booking/${booking.id}/receipt`} size="sm" variant="secondary">
-            <FileText size={14} /> {t('bookings.viewReceipt')}
+          <Button as={Link} to={`/booking/${booking.id}/receipt`} size="sm" variant="cream">
+            {t('bookings.viewReceipt')}
           </Button>
         )}
-        {(booking.status === 'PENDING_PAYMENT' || booking.status === 'PENDING_VERIFICATION') && (
+        {/* ส่งสลิปแล้ว ไม่ต้องกดชำระซ้ำ — บอกแค่ว่ากำลังดำเนินการ */}
+        {booking.status === 'PENDING_VERIFICATION' && (
+          <span className="text-caption sm:text-body-2">{t('bookings.inProgress')}</span>
+        )}
+        {booking.status === 'PENDING_PAYMENT' && (
           <Button as={Link} to={`/booking/${booking.id}/payment`} size="sm">
             <CreditCard size={14} /> {t('bookings.payNow')}
           </Button>
         )}
-        {/* หมดเวลาไปไม่นาน — คนที่โอนแล้วแต่ส่งสลิปไม่ทันยังส่งได้ ไม่ต้องรู้เองว่าต้องกลับไปหน้าไหน */}
-        {booking.status === 'EXPIRED' && booking.canUploadSlip && (
-          <Button as={Link} to={`/booking/${booking.id}/payment`} size="sm" variant="secondary">
-            <Upload size={14} /> {t('bookings.lateSlipAction')}
-          </Button>
-        )}
-        {booking.status === 'EXPIRED' && booking.payment?.status === 'PENDING_VERIFICATION' && (
-          <Chip tone="info">{t('bookings.lateSlipWaiting')}</Chip>
-        )}
         {booking.seatChange?.canChange && (
-          <Button as={Link} to={`/booking/${booking.id}/change-seats`} size="sm" variant="secondary">
-            <ArrowLeftRight size={14} /> {t('seatChange.action')}
+          <Button as={Link} to={`/booking/${booking.id}/change-seats`} size="sm" variant="cream">
+            {t('seatChange.action')}
           </Button>
         )}
         {/* คำขอเปลี่ยนที่นั่งที่ยังรอโอนส่วนต่าง — พากลับไปหน้าชำระได้ตรง ๆ ไม่ต้องจำว่าค้างอยู่ตรงไหน */}
@@ -168,8 +179,8 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
           </Button>
         )}
         {booking.canCancel && (
-          <Button variant="danger" size="sm" onClick={() => onCancel(booking)}>
-            {t('bookings.cancel')}
+          <Button variant="dangerSolid" size="sm" onClick={() => onCancel(booking)}>
+            {t('common.cancel')}
           </Button>
         )}
 
@@ -207,11 +218,11 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
         {/* หลักฐานการโอนคืนเป็นเรื่องเงินของลูกค้าเอง จึงให้เปิดดูได้เหมือนที่ผู้ดูแลเห็น */}
         {booking.payment?.hasRefundSlip && (
           <Button
-            variant="secondary"
+            variant="cream"
             size="sm"
             onClick={() => onViewRefundSlip({ bookingId: booking.id, payment: booking.payment })}
           >
-            <ReceiptText size={14} /> {t('bookings.viewRefundSlip')}
+            {t('bookings.viewRefundSlip')}
           </Button>
         )}
 
@@ -226,9 +237,9 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
                 as={Link}
                 to={`/booking/${booking.id}/receipt?payment=${money.id}`}
                 size="sm"
-                variant="secondary"
+                variant="cream"
               >
-                <FileText size={14} /> {t('seatChange.viewReceipt')}
+                {t('seatChange.viewReceipt')}
               </Button>
             );
           }
@@ -250,11 +261,11 @@ const BookingCard = ({ booking, onCancel, onEditRefundAccount, onViewRefundSlip 
               )}
               {money.hasRefundSlip && (
                 <Button
-                  variant="secondary"
+                  variant="cream"
                   size="sm"
                   onClick={() => onViewRefundSlip({ bookingId: booking.id, payment: money, paymentId: money.id })}
                 >
-                  <ReceiptText size={14} /> {t('bookings.viewRefundSlip')}
+                  {t('bookings.viewRefundSlip')}
                 </Button>
               )}
             </Fragment>

@@ -60,9 +60,10 @@ const LoginPage = () => {
 
   return (
     <div className="mx-auto flex max-w-xl flex-col justify-center px-4 py-12">
-      <div className="card p-6 sm:p-8">
-        <div className="mb-6 flex items-center gap-3">
-          <span className="rounded-xl bg-accent/15 p-2.5 text-accent">
+      {/* การ์ดพื้นเข้มขอบทอง ช่องกรอกพื้นทองอ่อน — ชุดเดียวกับหน้าสมัครสมาชิก (ปรับผ่าน selector ของการ์ด) */}
+      <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 sm:p-8 [&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
+        <div className="mb-6 flex items-center gap-2">
+          <span className="shrink-0 rounded-md border border-gold-50 bg-gold-90 p-1.5 text-gold-50">
             <LogIn size={20} />
           </span>
           <div>
@@ -96,7 +97,7 @@ const LoginPage = () => {
           <p className="-mt-2 text-right">
             <Link
               to="/forgot-password"
-              className="text-body-2 text-muted transition hover:text-accent"
+              className="text-body-1 text-fg transition hover:text-accent"
             >
               {t("login.forgotPassword")}
             </Link>
@@ -104,8 +105,8 @@ const LoginPage = () => {
 
           <Button
             type="submit"
-            size="lg"
-            className="mt-4"
+            variant="navy"
+            className="mt-10"
             loading={busy}
             disabled={!canSubmit}
           >
@@ -113,7 +114,7 @@ const LoginPage = () => {
           </Button>
         </form>
 
-        <p className="mt-6 border-t border-line pt-4 text-center text-body-2 text-muted">
+        <p className="mx-4 mt-8 border-t border-cream-40 pt-5 text-center text-body-1">
           {t("login.noAccount")}{" "}
           <Link
             to="/register"

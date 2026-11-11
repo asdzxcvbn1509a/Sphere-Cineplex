@@ -1,11 +1,26 @@
+import path from 'node:path';
 import prisma from '../src/lib/prisma.js';
+import { env, isSupabaseConfigured, SERVER_ROOT, SLIP_DIR } from '../src/config/env.js';
 import { buildSeatGrid } from '../src/services/theatres.js';
+import { PENDING_SLIP_WHERE } from '../src/services/payments.js';
 import { buildZonePrices, toPriceMap } from '../src/utils/pricing.js';
-import { generateBookingCode, generatePaymentReference } from '../src/utils/codes.js';
-import { createPromptPayPayload } from '../src/utils/promptpay.js';
-import { BANGKOK_OFFSET_MS, bangkokDateKey } from '../src/utils/datetime.js';
 import { hashPassword } from '../src/utils/password.js';
-import { issueReceiptNo } from '../src/services/receipts.js';
+import { ADMINS, CUSTOMERS, MOVIES, THEATRES } from './seed/catalog.js';
+import { createRandom } from './seed/random.js';
+import { buildSchedule, dayKeyFrom, DAYS_AHEAD, HISTORY_DAYS } from './seed/schedule.js';
+import { buildInventory } from './seed/seating.js';
+import { seedSales } from './seed/sales.js';
+import { chooseTargets, pinsFor, runScenarios } from './seed/scenarios.js';
+import { slipCounts } from './seed/slipImage.js';
+
+/**
+ * ข้อมูลตัวอย่างของระบบ — ล้างทุกตารางแล้วสร้างใหม่ทั้งหมด
+ *
+ * 1. แคตตาล็อก: ผู้ใช้ หนัง โรง ที่นั่ง และรอบฉายย้อนหลัง HISTORY_DAYS วันถึงล่วงหน้า DAYS_AHEAD วัน (seed/catalog.js, seed/schedule.js)
+ * 2. ประวัติการขายที่จบแล้ว เขียนลงฐานตรงพร้อมเวลาย้อนหลัง (seed/sales.js)
+ * 3. สถานการณ์ที่ยังเดินอยู่ เรียก service ตัวจริง (seed/scenarios.js)
+ * รูปสลิปตัวอย่างเก็บลงที่เก็บสลิปเดียวกับ API (ดิสก์ หรือ Supabase ถ้าตั้ง SUPABASE_URL)
+ */
 
 /**
  * รหัสผ่านของบัญชีตัวอย่าง — Password123 เขียนอยู่ใน README ใช้ได้แค่ตอนพัฒนา
@@ -13,121 +28,7 @@ import { issueReceiptNo } from '../src/services/receipts.js';
  */
 const DEMO_PASSWORD = process.env.SEED_PASSWORD || 'Password123';
 
-/** สร้าง Date จากวัน+ชั่วโมงตามเวลาไทย */
-const bangkokTime = (dateKey, hour, minute = 0) => {
-  const hh = String(hour).padStart(2, '0');
-  const mm = String(minute).padStart(2, '0');
-  return new Date(Date.parse(`${dateKey}T${hh}:${mm}:00.000Z`) - BANGKOK_OFFSET_MS);
-};
-
-const dayKeyOffset = (offsetDays) => {
-  return bangkokDateKey(new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000));
-};
-
-const poster = (slug) => `https://picsum.photos/seed/${slug}/400/600`;
-const backdrop = (slug) => `https://picsum.photos/seed/${slug}-bd/1280/720`;
-
-const movies = [
-  {
-    titleTh: 'ฤดูฝนที่หายไป',
-    titleEn: 'The Vanished Monsoon',
-    synopsisTh:
-      'เรื่องราวของช่างภาพสารคดีที่กลับบ้านเกิดในหน้าฝน แล้วพบว่าหมู่บ้านทั้งหมู่บ้านจำเธอไม่ได้ ระหว่างตามหาคำตอบ เธอค่อย ๆ ค้นพบความลับที่ครอบครัวเก็บงำมานานยี่สิบปี',
-    synopsisEn:
-      'A documentary photographer returns to her hometown during the rainy season to find that no one remembers her. Her search for answers unearths a secret her family buried twenty years ago.',
-    posterUrl: poster('monsoon'),
-    backdropUrl: backdrop('monsoon'),
-    durationMin: 118,
-    rating: 'PG13',
-    genres: ['ดราม่า', 'ลึกลับ'],
-    releaseDate: new Date('2026-08-14'),
-    status: 'NOW_SHOWING',
-  },
-  {
-    titleTh: 'ล่าข้ามมิติ',
-    titleEn: 'Rift Runner',
-    synopsisTh:
-      'นักวิ่งส่งของในกรุงเทพฯ ปี 2078 บังเอิญได้ครอบครองอุปกรณ์ที่เปิดรอยแยกระหว่างมิติ เขามีเวลา 12 ชั่วโมงในการส่งของชิ้นสุดท้าย ก่อนที่เมืองทั้งเมืองจะถูกกลืนหายไป',
-    synopsisEn:
-      'A courier in 2078 Bangkok stumbles upon a device that tears open the space between worlds. He has twelve hours to complete one last delivery before the city collapses into the rift.',
-    posterUrl: poster('rift'),
-    backdropUrl: backdrop('rift'),
-    durationMin: 132,
-    rating: 'PG13',
-    genres: ['ไซไฟ', 'แอ็คชั่น'],
-    releaseDate: new Date('2026-08-28'),
-    status: 'NOW_SHOWING',
-  },
-  {
-    titleTh: 'บ้านเลขที่ 13',
-    titleEn: 'House No. 13',
-    synopsisTh:
-      'ครอบครัวหนึ่งย้ายเข้าบ้านเช่าราคาถูกผิดปกติในซอยเปลี่ยว คืนแรกที่ย้ายเข้า เสียงเคาะประตูดังขึ้นสิบสามครั้งตรงเวลาเที่ยงคืน และดังต่อเนื่องทุกคืนไม่มีขาด',
-    synopsisEn:
-      'A family moves into a suspiciously cheap rental house. On the first night, thirteen knocks land on the door at exactly midnight — and every night after that.',
-    posterUrl: poster('house13'),
-    backdropUrl: backdrop('house13'),
-    durationMin: 105,
-    rating: 'N15',
-    genres: ['สยองขวัญ', 'ระทึกขวัญ'],
-    releaseDate: new Date('2026-09-01'),
-    status: 'NOW_SHOWING',
-  },
-  {
-    titleTh: 'รักครั้งสุดท้ายที่เชียงคาน',
-    titleEn: 'Last Love in Chiang Khan',
-    synopsisTh:
-      'ชายหนุ่มผู้สูญเสียความทรงจำระยะสั้นเดินทางไปเชียงคานทุกปีเพื่อตามหาใครบางคนที่เขาจำหน้าไม่ได้ แต่จำความรู้สึกได้ทุกครั้ง',
-    synopsisEn:
-      'A young man with short-term memory loss travels to Chiang Khan every year, searching for someone whose face he cannot recall but whose presence he always feels.',
-    posterUrl: poster('chiangkhan'),
-    backdropUrl: backdrop('chiangkhan'),
-    durationMin: 112,
-    rating: 'G',
-    genres: ['โรแมนติก', 'ดราม่า'],
-    releaseDate: new Date('2026-07-24'),
-    status: 'NOW_SHOWING',
-  },
-  {
-    titleTh: 'ปฏิบัติการล่าฝัน',
-    titleEn: 'Operation Daydream',
-    synopsisTh:
-      'พนักงานออฟฟิศสี่คนตัดสินใจลาออกพร้อมกันเพื่อเปิดร้านก๋วยเตี๋ยวเรือ แต่ทำเลที่เลือกดันอยู่ตรงข้ามร้านของอดีตเจ้านาย',
-    synopsisEn:
-      'Four office workers quit on the same day to open a boat-noodle shop — directly across the street from their former boss.',
-    posterUrl: poster('daydream'),
-    backdropUrl: backdrop('daydream'),
-    durationMin: 98,
-    rating: 'G',
-    genres: ['ตลก', 'ฟีลกู๊ด'],
-    releaseDate: new Date('2026-08-07'),
-    status: 'NOW_SHOWING',
-  },
-  {
-    titleTh: 'ตำนานนาคี ภาค 4',
-    titleEn: 'Naga Legend IV',
-    synopsisTh:
-      'บทสรุปของตำนานพญานาคแห่งลุ่มน้ำโขง เมื่อคำสาบานเมื่อสามร้อยปีก่อนถูกทวงคืนในคืนวันออกพรรษา',
-    synopsisEn:
-      'The finale of the Mekong naga saga, as a three-hundred-year-old oath comes due on the night of the end of Buddhist Lent.',
-    posterUrl: poster('naga'),
-    backdropUrl: backdrop('naga'),
-    durationMin: 140,
-    rating: 'PG13',
-    genres: ['แฟนตาซี', 'ผจญภัย'],
-    releaseDate: new Date('2026-10-09'),
-    status: 'COMING_SOON',
-  },
-];
-
-const theatres = [
-  { name: 'โรงที่ 1', screenType: '2D', rowsCount: 8, colsCount: 12, basePrice: 180 },
-  { name: 'โรงที่ 2', screenType: '3D', rowsCount: 7, colsCount: 14, basePrice: 220 },
-  { name: 'โรงที่ 3 (IMAX)', screenType: 'IMAX', rowsCount: 10, colsCount: 16, basePrice: 300 },
-];
-
-const SLOT_HOURS = [11, 14, 17, 20];
-const DAYS_AHEAD = 7;
+const DAY = 24 * 60 * 60 * 1000;
 
 const reset = async () => {
   // ลบตามลำดับความสัมพันธ์ เพื่อให้รัน seed ซ้ำได้เสมอ
@@ -147,167 +48,198 @@ const reset = async () => {
   await prisma.user.deleteMany();
 };
 
-const main = async () => {
-  console.log('🌱 เริ่ม seed ข้อมูล...');
-  await reset();
-
+const seedUsers = async (now) => {
   // hash ครั้งเดียวแล้วใช้ร่วมกัน — bcrypt ตั้งใจให้ช้า ทำซ้ำทุกบัญชีจะหน่วง seed โดยไม่จำเป็น
   const passwordHash = await hashPassword(DEMO_PASSWORD);
-  const admin = await prisma.user.create({
-    data: {
-      email: 'admin@cinebook.test',
-      phone: '0800000000',
-      name: 'ผู้ดูแลระบบ',
-      role: 'ADMIN',
-      passwordHash,
-    },
-  });
-  const customer = await prisma.user.create({
-    data: {
-      email: 'somchai@example.test',
-      phone: '0891234567',
-      name: 'สมชาย ใจดี',
-      passwordHash,
-    },
-  });
-  console.log(`   ✓ ผู้ใช้ 2 คน (admin: ${admin.email}, user: ${customer.email})`);
-
-  const createdMovies = [];
-  for (const movie of movies) {
-    createdMovies.push(await prisma.movie.create({ data: movie }));
-  }
-  console.log(`   ✓ ภาพยนตร์ ${createdMovies.length} เรื่อง`);
-
-  const createdTheatres = [];
-  for (const theatre of theatres) {
-    const { basePrice, ...data } = theatre;
-    const created = await prisma.theatre.create({
-      data: { ...data, seats: { create: buildSeatGrid(data.rowsCount, data.colsCount) } },
-      include: { _count: { select: { seats: true } } },
+  const create = ({ email, phone, name, joinedDaysAgo }, role) => {
+    const joinedAt = new Date(now.getTime() - joinedDaysAgo * DAY);
+    return prisma.user.create({
+      data: { email, phone, name, role, passwordHash, createdAt: joinedAt, updatedAt: joinedAt },
     });
-    createdTheatres.push({ ...created, basePrice });
-    console.log(`   ✓ ${created.name}: ${created._count.seats} ที่นั่ง`);
+  };
+
+  const admins = {};
+  for (const admin of ADMINS) admins[admin.key] = await create(admin, 'ADMIN');
+  const users = {};
+  for (const customer of CUSTOMERS) {
+    users[customer.key] = { ...(await create(customer, 'USER')), activity: customer.activity };
   }
-
-  const nowShowing = createdMovies.filter((m) => m.status === 'NOW_SHOWING');
-  let showtimeCount = 0;
-
-  for (let day = 0; day < DAYS_AHEAD; day += 1) {
-    const dateKey = dayKeyOffset(day);
-    for (let t = 0; t < createdTheatres.length; t += 1) {
-      const theatre = createdTheatres[t];
-      for (let s = 0; s < SLOT_HOURS.length; s += 1) {
-        const movie = nowShowing[(day + t * 2 + s) % nowShowing.length];
-        const startsAt = bangkokTime(dateKey, SLOT_HOURS[s]);
-        // ข้ามรอบที่เวลาผ่านไปแล้วของวันนี้
-        if (startsAt <= new Date()) continue;
-
-        await prisma.showtime.create({
-          data: {
-            movieId: movie.id,
-            theatreId: theatre.id,
-            startsAt,
-            endsAt: new Date(startsAt.getTime() + movie.durationMin * 60 * 1000),
-            basePrice: theatre.basePrice,
-            zonePrices: { create: buildZonePrices(theatre.basePrice) },
-          },
-        });
-        showtimeCount += 1;
-      }
-    }
-  }
-  console.log(`   ✓ รอบฉาย ${showtimeCount} รอบ (${DAYS_AHEAD} วันข้างหน้า)`);
-
-  await seedSampleBookings(customer);
-
-  console.log('\n✅ seed เสร็จสมบูรณ์');
-  console.log('   ผู้ดูแลระบบ : admin@cinebook.test (หรือเบอร์ 0800000000)');
-  console.log('   ผู้ใช้ทั่วไป : somchai@example.test (หรือเบอร์ 0891234567)');
-  // รหัสที่ตั้งเองไม่พิมพ์ออกมา — กันไปค้างอยู่ใน log หรือประวัติเทอร์มินัล
-  console.log(
-    `   รหัสผ่านทั้งสองบัญชี : ${process.env.SEED_PASSWORD ? '(ตามค่า SEED_PASSWORD)' : DEMO_PASSWORD}\n`,
-  );
+  return { admins, users };
 };
 
-/** ใส่การจองที่ชำระแล้วไว้บ้าง เพื่อให้หน้ารายงานของ admin และหน้าใบเสร็จมีข้อมูลให้ดูทันที */
-const seedSampleBookings = async (customer) => {
-  const showtimes = await prisma.showtime.findMany({
-    take: 3,
-    orderBy: { startsAt: 'asc' },
-    include: { zonePrices: true, theatre: true },
+const seedMovies = async (now) => {
+  const movies = [];
+  for (const movie of MOVIES) {
+    const { releaseInDays, lastShowInDays, popularity, formats, ...data } = movie;
+    const releaseDate = new Date(`${dayKeyFrom(now, releaseInDays)}T00:00:00.000Z`);
+    const created = await prisma.movie.create({ data: { ...data, releaseDate } });
+    movies.push({ ...created, releaseInDays, lastShowInDays, popularity, formats });
+  }
+  return movies;
+};
+
+/** "C5" → { rowLabel: 'C', seatNumber: 5 } */
+const parseSeatLabel = (label) => ({ rowLabel: label[0], seatNumber: Number(label.slice(1)) });
+
+const seedTheatres = async () => {
+  const theatres = [];
+  for (const theatre of THEATRES) {
+    const { basePrice, opensAt, brokenSeats = [], closedFromDay, isActive = true, ...data } = theatre;
+    const created = await prisma.theatre.create({
+      data: { ...data, isActive, seats: { create: buildSeatGrid(data.rowsCount, data.colsCount) } },
+    });
+    if (brokenSeats.length > 0) {
+      await prisma.seat.updateMany({
+        where: { theatreId: created.id, OR: brokenSeats.map(parseSeatLabel) },
+        data: { isActive: false },
+      });
+    }
+    const seats = await prisma.seat.findMany({ where: { theatreId: created.id } });
+    theatres.push({ ...created, basePrice, opensAt, closedFromDay, seats });
+  }
+  return theatres;
+};
+
+const seedShowtimes = async ({ movies, theatres, random, now }) => {
+  const schedule = buildSchedule({ movies, theatres, random, now });
+  const created = await prisma.showtime.createManyAndReturn({
+    data: schedule.map(({ movie, theatre, startsAt, endsAt, basePrice }) => ({
+      movieId: movie.id,
+      theatreId: theatre.id,
+      startsAt,
+      endsAt,
+      basePrice,
+    })),
+    select: { id: true, theatreId: true, startsAt: true },
   });
+  // จับคู่ id กลับด้วย (โรง, เวลาเริ่ม) ซึ่ง unique อยู่แล้ว
+  const idOf = new Map(created.map((row) => [`${row.theatreId}|${row.startsAt.getTime()}`, row.id]));
 
-  let created = 0;
-  const paid = [];
-  for (const [index, showtime] of showtimes.entries()) {
-    const seats = await prisma.seat.findMany({
-      where: { theatreId: showtime.theatreId },
-      orderBy: [{ rowLabel: 'asc' }, { seatNumber: 'asc' }],
-      skip: 3 + index * 5,
-      take: 2,
-    });
-    if (seats.length < 2) continue;
+  const showtimes = schedule.map((show) => {
+    const zonePrices = buildZonePrices(show.basePrice);
+    return {
+      ...show,
+      id: idOf.get(`${show.theatre.id}|${show.startsAt.getTime()}`),
+      status: 'SCHEDULED',
+      zonePrices,
+      priceMap: toPriceMap(zonePrices, show.basePrice),
+    };
+  });
+  await prisma.zonePrice.createMany({
+    data: showtimes.flatMap((showtime) => showtime.zonePrices.map((zp) => ({ ...zp, showtimeId: showtime.id }))),
+  });
+  return showtimes;
+};
 
-    const priceMap = toPriceMap(showtime.zonePrices, showtime.basePrice);
-    const seatSnapshot = seats.map((seat) => ({
-      id: seat.id,
-      rowLabel: seat.rowLabel,
-      seatNumber: seat.seatNumber,
-      label: `${seat.rowLabel}${seat.seatNumber}`,
-      zone: seat.zone,
-      price: priceMap[seat.zone],
-    }));
-    const total = seatSnapshot.reduce((sum, seat) => sum + seat.price, 0);
-    const paidAt = new Date(Date.now() - (index + 1) * 12 * 60 * 60 * 1000);
+const countBy = async (model, field, where) => {
+  const rows = await prisma[model].groupBy({ by: [field], where, _count: { _all: true } });
+  return Object.fromEntries(rows.map((row) => [row[field], row._count._all]));
+};
 
-    const booking = await prisma.booking.create({
-      data: {
-        code: generateBookingCode(),
-        userId: customer.id,
-        showtimeId: showtime.id,
-        status: 'PAID',
-        totalAmount: total,
-        holdExpiresAt: null,
-        paidAt,
-        seatSnapshot,
-        seats: {
-          create: seatSnapshot.map((seat) => ({
-            showtimeId: showtime.id,
-            seatId: seat.id,
-            price: seat.price,
-          })),
-        },
-      },
-    });
+const formatCounts = (counts) => {
+  return Object.entries(counts)
+    .map(([key, count]) => `${key} ${count}`)
+    .join(' · ');
+};
 
-    const payment = await prisma.payment.create({
-      data: {
-        bookingId: booking.id,
-        // ใบหลัก (ค่าตั๋วตอนจอง) — booking.payment อ่านผ่านตัวนี้
-        mainBookingId: booking.id,
-        amount: total,
-        qrPayload: createPromptPayPayload(total),
-        reference: generatePaymentReference(),
-        status: 'APPROVED',
-        slipUploadedAt: paidAt,
-        verifiedAt: paidAt,
-      },
-    });
-    paid.push({ paymentId: payment.id, paidAt, seatSnapshot });
-    created += 1;
+const printSummary = async (now, scenarioNotes) => {
+  const [users, movies, theatres, showtimes, bookings, payments, seatChanges, pendingSlips, notifications, unread] =
+    await Promise.all([
+      countBy('user', 'role'),
+      countBy('movie', 'status'),
+      countBy('theatre', 'isActive'),
+      Promise.all([
+        prisma.showtime.count({ where: { startsAt: { lte: now } } }),
+        prisma.showtime.count({ where: { startsAt: { gt: now } } }),
+        prisma.showtime.count({ where: { status: 'CANCELLED' } }),
+      ]),
+      countBy('booking', 'status'),
+      countBy('payment', 'status'),
+      countBy('seatChange', 'status'),
+      prisma.payment.count({ where: PENDING_SLIP_WHERE }),
+      prisma.notification.count(),
+      prisma.notification.count({ where: { readAt: null } }),
+    ]);
+  const slips = slipCounts();
+  const storage = isSupabaseConfigured
+    ? `Supabase bucket "${env.SUPABASE_SLIP_BUCKET}"`
+    : path.relative(SERVER_ROOT, SLIP_DIR);
+
+  console.log(`   ✓ ผู้ใช้: ${formatCounts(users)}`);
+  console.log(`   ✓ ภาพยนตร์: ${formatCounts(movies)}`);
+  console.log(`   ✓ โรง: เปิด ${theatres.true ?? 0} · ปิดใช้งาน ${theatres.false ?? 0}`);
+  console.log(
+    `   ✓ รอบฉาย: ฉายไปแล้ว ${showtimes[0]} · กำลังจะฉาย ${showtimes[1]} · ถูกยกเลิก ${showtimes[2]} ` +
+      `(ย้อนหลัง ${HISTORY_DAYS} วัน ถึงล่วงหน้า ${DAYS_AHEAD} วัน)`,
+  );
+  console.log(`   ✓ การจอง: ${formatCounts(bookings)}`);
+  console.log(`   ✓ รายการเงิน: ${formatCounts(payments)} (สลิปรอตรวจในคิว ${pendingSlips})`);
+  console.log(`   ✓ คำขอเปลี่ยนที่นั่ง: ${formatCounts(seatChanges)}`);
+  console.log(`   ✓ แจ้งเตือน ${notifications} รายการ (ยังไม่อ่าน ${unread})`);
+  console.log(`   ✓ รูปสลิปตัวอย่าง: โอนเข้า ${slips.payment} · โอนคืน ${slips.refund} → ${storage}`);
+  for (const note of scenarioNotes) console.log(`   • ${note}`);
+};
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * ฐานข้อมูลอยู่เครื่องอื่น (เช่น seed เว็บจริงตาม DEPLOY.md) แต่ไม่ได้ตั้ง Supabase Storage — รูปสลิปตัวอย่างจึงไปอยู่ในดิสก์
+ * ของเครื่องที่รัน seed ซึ่ง API บนเซิร์ฟเวอร์มองไม่เห็น ผู้ดูแลจะเจอแต่ "ไม่มีรูปสลิป" ทุกใบ
+ */
+const slipsOnWrongMachine = () => {
+  if (isSupabaseConfigured) return false;
+  try {
+    return !LOCAL_HOSTS.has(new URL(env.DATABASE_URL).hostname);
+  } catch {
+    return false;
   }
+};
 
-  // ออกเลขใบเสร็จตามเวลาที่จ่ายจริง (เก่าไปใหม่) แบบเดียวกับตอนอนุมัติสลิป — ลูปข้างบนสร้างใบที่จ่ายล่าสุดก่อน
-  paid.sort((a, b) => a.paidAt - b.paidAt);
-  for (const { paymentId, paidAt, seatSnapshot } of paid) {
-    const receiptNo = await issueReceiptNo(prisma, paidAt);
-    await prisma.payment.update({
-      where: { id: paymentId },
-      data: { receiptNo, receiptName: customer.name, receiptSeats: seatSnapshot },
-    });
+const main = async () => {
+  console.log('🌱 เริ่ม seed ข้อมูล...');
+  const now = new Date();
+  const random = createRandom();
+  await reset();
+
+  const { admins, users } = await seedUsers(now);
+  const movies = await seedMovies(now);
+  const theatres = await seedTheatres();
+  const showtimes = await seedShowtimes({ movies, theatres, random, now });
+
+  const world = {
+    now,
+    random,
+    admins,
+    users,
+    bookers: Object.values(users).filter((user) => user.activity > 0),
+    showtimes,
+    inventory: new Map(theatres.map((theatre) => [theatre.id, buildInventory(theatre.seats)])),
+    // ระหว่างสุ่มยอดขาย: รอบ → ที่นั่งที่ขายไปแล้ว · รอบ → ลูกค้าที่จองรอบนั้นแล้ว (ดู sales.js)
+    taken: new Map(),
+    bookedUsers: new Map(),
+  };
+
+  const targets = chooseTargets(world);
+  const pinned = await seedSales(world, { pins: pinsFor(world, targets), targets });
+  const scenarioNotes = await runScenarios(world, targets, pinned);
+
+  await printSummary(now, scenarioNotes);
+
+  console.log('\n✅ seed เสร็จสมบูรณ์');
+  console.log('   ผู้ดูแลระบบ : admin@cinebook.test (หรือเบอร์ 0800000000) · staff@cinebook.test');
+  console.log('   ผู้ใช้ทั่วไป : somchai@example.test (หรือเบอร์ 0891234567) — มีการจองครบทุกแท็บ');
+  console.log(`   ลูกค้าอื่น ๆ : ${CUSTOMERS.length - 1} บัญชี @example.test (ดูรายชื่อใน prisma/seed/catalog.js)`);
+  // รหัสที่ตั้งเองไม่พิมพ์ออกมา — กันไปค้างอยู่ใน log หรือประวัติเทอร์มินัล
+  console.log(
+    `   รหัสผ่านทุกบัญชี : ${process.env.SEED_PASSWORD ? '(ตามค่า SEED_PASSWORD)' : DEMO_PASSWORD}`,
+  );
+  console.log(
+    `   ⏱  การจองที่ยังรอชำระจะหมดเวลาภายใน ${env.SEAT_HOLD_MINUTES} นาทีหลังเปิด API ตามกติกาจริง\n`,
+  );
+  if (slipsOnWrongMachine()) {
+    console.warn('   ⚠  ฐานข้อมูลไม่ได้อยู่บนเครื่องนี้ แต่ไม่ได้ตั้ง SUPABASE_URL — รูปสลิปตัวอย่างถูกเขียนลงดิสก์ของเครื่องนี้');
+    console.warn('      เว็บที่ใช้ฐานนี้จะเปิดรูปสลิปไม่ได้ ให้ตั้ง SUPABASE_URL กับ SUPABASE_SECRET_KEY แล้ว seed ใหม่ (ดู DEPLOY.md)\n');
   }
-
-  console.log(`   ✓ ตัวอย่างการจองที่ชำระแล้ว ${created} รายการ (พร้อมใบเสร็จ)`);
 };
 
 main()

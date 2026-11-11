@@ -8,7 +8,7 @@ import Chip from '../ui/Chip.jsx';
  * มือถือย้ายยอดเงินลงเป็นแถวล่างเต็มความกว้าง รายละเอียดจะไม่ถูกคอลัมน์ยอดเงินบีบจนอ่านยาก
  */
 const PaymentSummaryCard = ({ booking, amountLabel, amount, children }) => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const { showtime } = booking;
 
   return (
@@ -22,7 +22,7 @@ const PaymentSummaryCard = ({ booking, amountLabel, amount, children }) => {
         <p className="truncate font-semibold">{pick(showtime.movie, 'title')}</p>
         {/* โรง วัน เวลาเป็นชิปทองแบบเดียวกับการ์ดในหน้าการจองของฉัน — ลูกค้าเห็นรอบที่จ่ายเป็นชุดเดียวกันทุกหน้า */}
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <Chip tone="accent">{showtime.theatre.name}</Chip>
+          <Chip tone="accent">{theatreName(showtime.theatre.name)}</Chip>
           <Chip tone="accent">{formatDate(showtime.startsAt, lang)}</Chip>
           <Chip tone="accent">{formatTime(showtime.startsAt, lang)}</Chip>
         </div>
@@ -31,7 +31,7 @@ const PaymentSummaryCard = ({ booking, amountLabel, amount, children }) => {
       <div className="flex basis-full items-center justify-between gap-2 border-t border-line pt-3 sm:block sm:shrink-0 sm:basis-auto sm:border-0 sm:pt-0 sm:text-right">
         <p className="text-caption text-muted">{amountLabel}</p>
         <p className="text-h2 font-bold text-accent sm:text-h1">
-          {amount} <span className="text-caption font-normal text-muted sm:block">{t('common.baht')}</span>
+          ฿ {amount}
         </p>
       </div>
     </div>

@@ -275,14 +275,7 @@ const AdminUsersPage = () => {
                         <td className="px-4 py-3">
                           {/* จอ xl ปุ่มอยู่บรรทัดเดียวเสมอ — ตัดลงบรรทัดใหม่แล้วแถวจะสูงกว่าแถวอื่น */}
                           <div className="flex flex-wrap justify-end gap-1 xl:flex-nowrap">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title={t('common.edit')}
-                              onClick={() => openEdit(user)}
-                            >
-                              <Pencil size={14} />
-                            </Button>
+                            {/* เรียง: ตั้งรหัสผ่าน (ทอง) → แก้ไข → ลบ (แดง) */}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -294,7 +287,15 @@ const AdminUsersPage = () => {
                                 setPasswordTarget(user);
                               }}
                             >
-                              <KeyRound size={14} />
+                              <KeyRound size={14} className={isMe ? '' : 'text-gold-50'} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title={t('common.edit')}
+                              onClick={() => openEdit(user)}
+                            >
+                              <Pencil size={14} />
                             </Button>
                             <Button
                               variant="ghost"
@@ -334,13 +335,14 @@ const AdminUsersPage = () => {
         open={Boolean(editTarget)}
         onClose={() => setEditTarget(null)}
         title={t('admin.userPage.editTitle')}
-        cancelLabel={t('common.close')}
+        cancelLabel={t('admin.bookingPage.cancelBack')}
         confirmLabel={t('common.save')}
         variant="primary"
         loading={busy}
         onConfirm={saveEdit}
       >
-        <div className="flex flex-col gap-3">
+        {/* ช่องกรอกพื้นครีมขอบทอง หัวช่องตัวอ่อน — ชุดเดียวกับหน้าต่างอื่นฝั่งผู้ดูแล */}
+        <div className="flex flex-col gap-3 [&_.input-base]:border-gold-50 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
           <Field label={t('register.nameLabel')} error={editError.name}>
             <Input value={editForm.name} onChange={setEditField('name')} maxLength={60} />
           </Field>
@@ -372,16 +374,20 @@ const AdminUsersPage = () => {
         open={Boolean(passwordTarget)}
         onClose={() => setPasswordTarget(null)}
         title={t('admin.userPage.resetTitle')}
-        cancelLabel={t('common.close')}
+        cancelLabel={t('admin.bookingPage.cancelBack')}
         confirmLabel={t('admin.userPage.resetConfirm')}
-        variant="primary"
+        variant="dangerBright"
         loading={busy}
         onConfirm={savePassword}
       >
-        <p className="mb-4 text-body-2 text-muted">
-          {t('admin.userPage.resetBody', { name: passwordTarget?.name })}
+        {/* ชื่อเจ้าของบัญชีสีทองตัวหนา — เห็นชัดว่ากำลังเปลี่ยนรหัสของใคร */}
+        <p className="mb-4 text-body-1">
+          {t('admin.userPage.resetBodyBefore')}{' '}
+          <span className="font-semibold text-gold-50">{passwordTarget?.name}</span>{' '}
+          {t('admin.userPage.resetBodyAfter')}
         </p>
         <Field
+          className="[&_.input-base]:border-gold-50 [&>span:first-child]:text-body-1 [&>span:first-child]:text-fg!"
           label={t('profile.newPassword')}
           required
           error={passwordError}

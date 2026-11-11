@@ -20,9 +20,10 @@ UX/UI designed from a survey of 30 real users (details in [chat_history.md](chat
 - Cancel up to 3 hours before the showtime with a refund to a bank account, and see the admin's refund slip
 - Change seats after paying — moving to pricier seats means paying the difference, cheaper seats get it back
 - In-app notifications; the whole UI switches between Thai and English
+- A Contact us page, opened from the headset icon in the header, that links to the cinema's social channels
 
 **Admins**
-- Slip review queue (late slips included) and a refund queue with proof-of-transfer slips, with pending-work badges on the menu
+- Slip review queue and a refund queue with proof-of-transfer slips, with pending-work badges on the menu
 - Search all bookings by booking code, receipt number, phone or name; cancel or move seats for a customer
 - Cancel a whole showtime in one action — every customer is notified and paid bookings are queued for refunds
 - Manage movies, theatres (seat zone editor) and showtimes (free time-slot finder), and user accounts (temporary passwords, roles)
@@ -102,7 +103,7 @@ Every variable and its default is listed in [Configuration](docs/configuration.m
 ```bash
 cd server
 npm run db:migrate      # create tables from prisma/schema.prisma
-npm run db:seed         # 6 movies, 3 theatres, showtimes for the next 7 days
+npm run db:seed         # 14 movies, 6 theatres, ~500 bookings in every state, showtimes from 10 days ago to 7 days ahead
 ```
 
 ### 5. Run the system
@@ -130,13 +131,16 @@ Open <http://localhost:5173>
 | Role | Email | Phone | Password | Notes |
 |---|---|---|---|---|
 | Admin | `admin@cinebook.test` | `0800000000` | `Password123` | Can access `/admin` |
-| Regular user | `somchai@example.test` | `0891234567` | `Password123` | Has sample booking history |
+| Admin | `staff@cinebook.test` | `0800000001` | `Password123` | A second admin, so the queues show who checked or refunded what |
+| Regular user | `somchai@example.test` | `0891234567` | `Password123` | Has bookings in every tab: a rejected slip to pay again, a slip under review, a seat-change difference to pay, refunds, past tickets |
+| Other customers | `*@example.test` | — | `Password123` | 15 more accounts, listed in `server/prisma/seed/catalog.js` |
 | New user | — | — | — | Sign up yourself at `/register` |
 
 The first field on the login page accepts either an **email or a phone number**; the system looks for an `@` to decide which one to search by
 so users don't have to remember which one they signed up with. Phone numbers are always normalized to 10 digits (`089-123-4567` = `0891234567`)
 
-In development mode the login page has shortcut buttons that fill in the two sample accounts above (not shown in production builds)
+The sample data is dated relative to the day you run the seed, so run it again when the showtimes run out. Unpaid bookings and seat changes it leaves open
+expire 10 minutes after the API starts, exactly as real ones would. Slips waiting for review stay in the queue until an admin checks them
 
 You can set `SEED_PASSWORD` when running the seed to use a password other than `Password123` — **you must set it every time you seed a site outsiders can reach**, because anyone can read the password in this table (see [DEPLOY.md](DEPLOY.md))
 
@@ -168,7 +172,7 @@ You can set `SEED_PASSWORD` when running the seed to use a password other than `
 ```
 ├─ server/                        Independent project with its own package.json
 │  ├─ prisma/schema.prisma        The whole database structure
-│  ├─ prisma/seed.js              Sample data
+│  ├─ prisma/seed.js              Sample data (wipes every table) — builds on the modules in prisma/seed/
 │  ├─ uploads/slips/payments/     Slips from customers' payments (not in git · used when Supabase isn't configured)
 │  ├─ uploads/slips/refunds/      Slips of refunds admins sent to customers (not in git · used when Supabase isn't configured)
 │  ├─ src/
@@ -205,7 +209,7 @@ You can set `SEED_PASSWORD` when running the seed to use a password other than `
 
 | Document | What's in it |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Layers and shared modules, background jobs, the main flow and every design decision (concurrency, holds, late slips, sessions, refunds, receipts, seat changes…) |
+| [docs/architecture.md](docs/architecture.md) | Layers and shared modules, background jobs, the main flow and every design decision (concurrency, holds, the payment deadline, sessions, refunds, receipts, seat changes…) |
 | [docs/api.md](docs/api.md) | All 68 endpoints with request bodies, responses and errors, shared objects, rate limits and the full error-code table |
 | [docs/state-machines.md](docs/state-machines.md) | Status diagrams for bookings, payments, seat changes and showtimes, with what triggers each transition |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable, the seed script, the test environment and the go-live checklist |

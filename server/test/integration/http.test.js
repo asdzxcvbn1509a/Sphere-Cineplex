@@ -302,6 +302,25 @@ describe('boolean ใน query string', () => {
     assert.equal(all.unreadCount, 1);
     assert.equal((await list('unreadOnly=true')).notifications.length, 1);
   });
+
+  test('DELETE /notifications/:id ลบได้เฉพาะของตัวเอง — ของคนอื่นตอบ 200 แต่ไม่ถูกลบ', async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const item = await notify({ userId: owner.id, type: 'BOOKING_EXPIRED', context: { code: 'DEL001' } });
+    const remove = (user) =>
+      fetch(`${base}/api/notifications/${item.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${signAccessToken(user)}` },
+      });
+
+    assert.equal((await remove(other)).status, 200);
+    assert.ok(await prisma.notification.findUnique({ where: { id: item.id } }));
+
+    assert.equal((await remove(owner)).status, 200);
+    assert.equal(await prisma.notification.findUnique({ where: { id: item.id } }), null);
+    // ลบซ้ำ (เช่น กดจากอีกแท็บ) ไม่ error
+    assert.equal((await remove(owner)).status, 200);
+  });
 });
 
 describe('เพิกถอน access token เมื่อเปลี่ยนรหัสผ่าน', () => {

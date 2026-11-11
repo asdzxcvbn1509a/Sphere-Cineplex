@@ -13,7 +13,6 @@ import {
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
-import Chip from '../../components/ui/Chip.jsx';
 import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Field from '../../components/ui/Field.jsx';
@@ -44,7 +43,7 @@ const Amount = ({ value, unit }) => (
 );
 
 const AdminTheatresPage = () => {
-  const { t } = useI18n();
+  const { t, theatreName } = useI18n();
   const toast = useToast();
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
@@ -210,7 +209,7 @@ const AdminTheatresPage = () => {
                         */}
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 xl:flex-nowrap">
                           <span className="font-medium xl:truncate" title={theatre.name}>
-                            {theatre.name}
+                            {theatreName(theatre.name)}
                           </span>
                           {!theatre.isActive && (
                             <StatusBadge status="CANCELLED" label={t('admin.theatreForm.inactiveBadge')} />
@@ -218,9 +217,10 @@ const AdminTheatresPage = () => {
                         </div>
                       </td>
                       <td className="px-4 py-2" data-label={t('admin.theatreForm.screenType')}>
-                        <Chip tone="accent" size="sm">
+                        {/* ป้ายประเภทจอพื้นเข้มขอบทอง ตัวทอง */}
+                        <span className="rounded-md border border-gold-50 bg-cocoa-100 px-2 py-0.5 text-caption text-gold-50">
                           {theatre.screenType}
-                        </Chip>
+                        </span>
                       </td>
                       {/*
                         ตัวเลขกับหน่วยไม่ตัดบรรทัดทุกจอ — จอ lg ตารางไม่ได้ fixed ถ้าช่องแคบเบราว์เซอร์ตัด "ที่นั่ง" กลางคำเป็น "ที่ / นั่ง"
@@ -307,7 +307,7 @@ const AdminTheatresPage = () => {
         footer={
           <>
             <Button variant="ghost" onClick={() => setEditing(null)}>
-              {t('common.cancel')}
+              {t('admin.bookingPage.cancelBack')}
             </Button>
             <Button form="theatre-form" type="submit" loading={saving}>
               {t('common.save')}
@@ -315,7 +315,12 @@ const AdminTheatresPage = () => {
           </>
         }
       >
-        <form id="theatre-form" onSubmit={save} className="flex flex-col gap-4">
+        {/* ช่องกรอกพื้นครีมขอบทอง หัวช่องตัวอ่อน — ชุดเดียวกับหน้าต่างเพิ่มรอบฉาย */}
+        <form
+          id="theatre-form"
+          onSubmit={save}
+          className="flex flex-col gap-4 [&_.input-base]:border-gold-50 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!"
+        >
           <Field label={t('admin.theatreForm.name')} required>
             <Input value={form.name} onChange={setField('name')} required />
           </Field>
@@ -336,19 +341,17 @@ const AdminTheatresPage = () => {
               <Input type="number" min={1} max={30} value={form.colsCount} onChange={setField('colsCount')} required />
             </Field>
           </div>
-          <p className="text-body-2 text-muted">{t('admin.theatreForm.resizeWarning')}</p>
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-surface-2/50 p-3">
+          <p className="-mt-2 text-caption text-muted">{t('admin.theatreForm.resizeWarning')}</p>
+          <label className="flex cursor-pointer items-center gap-3" title={t('admin.theatreForm.isActiveHint')}>
             <input
               type="checkbox"
               // checkbox สีครีมตาม DS — color-scheme light ให้กล่องตอนยังไม่ติ๊กเป็นพื้นสว่างด้วย
-              className="mt-0.5 h-4 w-4 shrink-0 accent-field scheme-light"
+              className="h-4 w-4 shrink-0 accent-field scheme-light"
               checked={form.isActive}
               onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
             />
-            <span>
-              <span className="block text-body-2 font-medium">{t('admin.theatreForm.isActive')}</span>
-              <span className="mt-0.5 block text-caption text-muted">{t('admin.theatreForm.isActiveHint')}</span>
-            </span>
+            {/* คำอธิบายย้ายไปเป็น title (ชี้ค้างดูได้) ให้แถวเหลือบรรทัดเดียวตามแบบ */}
+            <span className="text-body-1 font-medium">{t('admin.theatreForm.isActive')}</span>
           </label>
         </form>
       </Modal>

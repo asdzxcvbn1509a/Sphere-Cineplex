@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Clock3, RefreshCw, TimerReset } from 'lucide-react';
+import { RefreshCw, TimerReset } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getSeatMap } from '../api/showtimes.js';
 import { cancelBooking, createBooking, listMyBookings } from '../api/bookings.js';
@@ -10,7 +10,6 @@ import { useToast } from '../context/ToastContext.jsx';
 import BottomBar from '../components/layout/BottomBar.jsx';
 import Breadcrumb from '../components/ui/Breadcrumb.jsx';
 import Button from '../components/ui/Button.jsx';
-import Chip from '../components/ui/Chip.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import ErrorBlock from '../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../components/ui/LoadingBlock.jsx';
@@ -18,7 +17,7 @@ import SeatMap from '../components/seatmap/SeatMap.jsx';
 import SeatLegend from '../components/seatmap/SeatLegend.jsx';
 import useApi from '../hooks/useApi.js';
 import useSeatSelection from '../hooks/useSeatSelection.js';
-import { formatDate, formatMoney, formatTime } from '../utils/format.js';
+import { formatBaht, formatDate, formatTime } from '../utils/format.js';
 import { seatLabels } from '../utils/seats.js';
 
 const MAX_SEATS = 8;
@@ -29,7 +28,7 @@ const SeatSelectionPage = () => {
   const { showtimeId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const isAuthenticated = useIsAuthenticated();
   const toast = useToast();
 
@@ -170,17 +169,19 @@ const SeatSelectionPage = () => {
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-h2 font-bold sm:text-h1">{pick(showtime.movie, 'title')}</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body-2 text-muted sm:text-body-1">
-            <span>{showtime.theatre.name}</span>
-            {/* ชิปทองแบบเดียวกับหน้ารายละเอียดหนัง — พื้น surface-2 เท่ากับพื้นหน้า กรอบจะหายไป */}
-            <Chip tone="accent" size="sm">
-              {showtime.theatre.screenType}
-            </Chip>
-            <span className="inline-flex items-center gap-1">
-              <Clock3 size={13} />
-              {formatDate(showtime.startsAt, lang)} · {formatTime(showtime.startsAt, lang)}
-            </span>
-          </p>
+          {/* โรง ประเภทจอ วันที่ เวลา เป็นชิปขอบทองชุดเดียวกัน อ่านเป็นแถวข้อมูลรอบฉายได้ในแวบเดียว */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {[
+              theatreName(showtime.theatre.name),
+              showtime.theatre.screenType,
+              formatDate(showtime.startsAt, lang),
+              formatTime(showtime.startsAt, lang),
+            ].map((text) => (
+              <span key={text} className="rounded-md border border-accent px-2 py-0.5 text-body-2 text-accent">
+                {text}
+              </span>
+            ))}
+          </div>
         </div>
 
         <Button variant="ghost" size="sm" onClick={() => reload({ silent: true })}>
@@ -216,7 +217,7 @@ const SeatSelectionPage = () => {
           <div className="text-right">
             <p className="text-caption text-muted">{t('seats.totalPrice')}</p>
             <p className="text-h2 font-bold text-accent">
-              {formatMoney(total, lang)} <span className="text-body-2">{t('common.baht')}</span>
+              {formatBaht(total, lang)}
             </p>
           </div>
 

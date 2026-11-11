@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, Mail, Phone, UserRound } from 'lucide-react';
+import { Lock, Mail, PhoneCall, User } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { changePassword as changePasswordApi, updateProfile } from '../api/auth.js';
 import { useAuthStore, useAuthUser } from '../store/authStore.js';
@@ -97,10 +97,11 @@ const ProfilePage = () => {
       <h1 className="mb-1 text-h1 font-bold">{t('profile.title')}</h1>
       <p className="mb-6 text-body-2 text-muted sm:text-body-1">{t('profile.subtitle')}</p>
 
+      {/* การ์ดพื้นเข้มขอบทอง ช่องกรอกพื้นทองอ่อน — ชุดเดียวกับหน้าสมัครสมาชิก (ปรับผ่าน selector ของการ์ด) */}
       <div className="flex flex-col gap-4">
-        <section className="card p-5 sm:p-7">
+        <section className="rounded-xl border border-gold-40 bg-cocoa-100 p-5 sm:p-7 [&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
           <h2 className="flex items-center gap-2 text-h2 font-bold">
-            <UserRound size={20} className="text-accent" /> {t('profile.accountSection')}
+            <User size={24} fill="currentColor" className="shrink-0 text-gold-50" /> {t('profile.accountSection')}
           </h2>
 
           <form onSubmit={saveName} className="mt-4 flex flex-col gap-4">
@@ -109,15 +110,15 @@ const ProfilePage = () => {
             </Field>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-                <p className="flex items-center gap-1.5 text-caption uppercase tracking-wide text-muted sm:text-body-2">
-                  <Mail size={14} /> {t('register.emailLabel')}
+              <div className="rounded-md border border-gold-50 bg-cream-20 px-4 py-2 text-cocoa-100 sm:px-5">
+                <p className="flex items-center gap-1.5 text-caption">
+                  <Mail size={20} strokeWidth={1.5} className="text-gold-50" /> {t('register.emailLabel')}
                 </p>
                 <p className="mt-1 truncate text-body-2 sm:text-body-1">{user?.email}</p>
               </div>
-              <div className="rounded-xl bg-surface-2 px-3 py-3 sm:px-4">
-                <p className="flex items-center gap-1.5 text-caption uppercase tracking-wide text-muted sm:text-body-2">
-                  <Phone size={14} /> {t('register.phoneLabel')}
+              <div className="rounded-md border border-gold-50 bg-cream-20 px-4 py-2 text-cocoa-100 sm:px-5">
+                <p className="flex items-center gap-1.5 text-caption">
+                  <PhoneCall size={20} strokeWidth={1.5} className="text-gold-50" /> {t('register.phoneLabel')}
                 </p>
                 <p className="mt-1 text-body-2 sm:text-body-1">{user?.phone}</p>
               </div>
@@ -125,19 +126,19 @@ const ProfilePage = () => {
             <p className="text-caption text-muted sm:text-body-2">{t('profile.contactLocked')}</p>
 
             <div>
-              <Button type="submit" loading={savingName} disabled={name.trim() === user?.name}>
+              <Button type="submit" variant="navy" size="sm" loading={savingName} disabled={name.trim() === user?.name}>
                 {t('common.save')}
               </Button>
             </div>
           </form>
         </section>
 
-        <section className="card p-5 sm:p-7">
+        <section className="rounded-xl border border-gold-40 bg-cocoa-100 p-5 sm:p-7 [&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
           <h2 className="flex items-center gap-2 text-h2 font-bold">
-            <KeyRound size={20} className="text-accent" /> {t('profile.passwordSection')}
+            <Lock size={24} fill="currentColor" className="shrink-0 text-gold-50 [&>path]:fill-none" /> {t('profile.passwordSection')}
           </h2>
-          {/* เยื้อง 28px = ไอคอนหัวข้อ 20px + gap-2 ให้คำเตือนตรงกับตัวหนังสือหัวข้อ อ่านเป็นคำอธิบายของหัวข้อนี้ */}
-          <p className="mt-1 pl-7 text-caption text-muted sm:text-body-2">{t('profile.passwordNotice')}</p>
+          {/* เยื้อง 32px = ไอคอนหัวข้อ 24px + gap-2 ให้คำเตือนตรงกับตัวหนังสือหัวข้อ อ่านเป็นคำอธิบายของหัวข้อนี้ */}
+          <p className="mt-1 pl-8 text-caption text-muted sm:text-body-2">{t('profile.passwordNotice')}</p>
 
           <form onSubmit={savePassword} className="mt-4 flex flex-col gap-4">
             <Field
@@ -149,7 +150,7 @@ const ProfilePage = () => {
                 autoComplete="current-password"
                 value={passwordForm.currentPassword}
                 onChange={setPasswordField('currentPassword')}
-                placeholder={t('login.passwordPlaceholder')}
+                placeholder={t('profile.currentPlaceholder')}
               />
             </Field>
 
@@ -163,7 +164,7 @@ const ProfilePage = () => {
                 autoComplete="new-password"
                 value={passwordForm.newPassword}
                 onChange={setPasswordField('newPassword')}
-                placeholder={t('register.passwordPlaceholder')}
+                placeholder={t('profile.newPlaceholder')}
               />
             </Field>
 
@@ -183,7 +184,7 @@ const ProfilePage = () => {
             )}
 
             <div>
-              <Button type="submit" loading={savingPassword}>
+              <Button type="submit" variant="navy" size="sm" loading={savingPassword}>
                 {t('profile.changePassword')}
               </Button>
             </div>

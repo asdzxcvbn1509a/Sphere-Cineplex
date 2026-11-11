@@ -57,7 +57,6 @@ All configuration lives in the API's environment. The web app's code reads no en
 | `CANCEL_CUTOFF_HOURS` | `3` | Customers can cancel while at least this much time remains before the showtime |
 | `MAX_SEATS_PER_BOOKING` | `8` | Maximum seats per booking |
 | `MAX_PENDING_BOOKINGS_PER_USER` | `3` | Unfinished bookings (awaiting payment + awaiting slip review) one account can hold at once |
-| `LATE_SLIP_GRACE_MINUTES` | `30` | Minutes after the payment window closes during which a slip is still accepted (`0` = off) — also applies to seat-change difference slips |
 | `SEAT_CHANGE_CUTOFF_MINUTES` | `30` | Customers can change seats themselves until this many minutes before the showtime |
 | `MAX_SEAT_CHANGES_PER_BOOKING` | `2` | Seat changes a customer can make per booking (expired/cancelled requests and admin moves don't count) |
 
@@ -96,11 +95,19 @@ Render's free plan blocks SMTP ports 25, 465 and 587 — see [DEPLOY.md](../DEPL
 
 ## Seed script
 
-`npm run db:seed` (`server/prisma/seed.js`) **wipes every table** and creates 6 movies, 3 theatres, showtimes for the next 7 days, an admin (`admin@cinebook.test`) and a customer with paid bookings (`somchai@example.test`)
+`npm run db:seed` (`server/prisma/seed.js` with the modules in `server/prisma/seed/`) **wipes every table**, then creates:
+
+- 2 admins (`admin@cinebook.test`, `staff@cinebook.test`) and 16 customers, including the demo customer `somchai@example.test`
+- 14 movies (now showing, coming soon, archived) and 6 theatres, one of them inactive and some with broken seats
+- Showtimes from 10 days ago to 7 days ahead, with two cancelled showtimes
+- About 500 bookings covering every booking, payment, refund and seat-change state, with their notifications and receipts
+- A sample slip image for every slip, written through the same slip storage as the API: disk, or Supabase Storage when `SUPABASE_URL` is set
+
+Everything is dated relative to the day it runs. Finished history is written straight to the database (`seed/sales.js`); the states still in progress go through the real services (`seed/scenarios.js`)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEED_PASSWORD` | `Password123` | Password of both demo accounts. **Always set it when seeding a site outsiders can reach** — the default is published in the README |
+| `SEED_PASSWORD` | `Password123` | Password of every seeded account. **Always set it when seeding a site outsiders can reach** — the default is published in the README |
 
 ## Test environment
 

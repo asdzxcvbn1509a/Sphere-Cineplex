@@ -106,7 +106,8 @@ const SelectMenu = ({ value, onChange, options, className, menuClassName = 'w-72
           role="listbox"
           aria-label={props['aria-label']}
           className={clsx(
-            'card absolute left-0 top-full z-30 mt-1 flex flex-col gap-0.5 p-1.5 shadow-xl',
+            // รายการพื้นครีมขอบทอง ตัวเข้ม — ตัวที่เลือกพื้นดำตัวขาว
+            'absolute left-0 top-full z-30 mt-1 flex flex-col gap-0.5 rounded-lg border border-gold-50 bg-cream-30 p-1.5 text-cocoa-100 shadow-xl',
             menuClassName,
           )}
         >
@@ -124,10 +125,10 @@ const SelectMenu = ({ value, onChange, options, className, menuClassName = 'w-72
                 onClick={() => choose(option)}
                 className={clsx(
                   'flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2',
-                  // ตัวที่เลือก = "รายการที่เลือก" ของ DS · ตัวที่ชี้/เลื่อนคีย์บอร์ดมาถึง = พื้นอ่อนลงหนึ่งขั้น
+                  // ตัวที่ชี้/เลื่อนคีย์บอร์ดมาถึง = พื้นครีมเข้มขึ้นหนึ่งขั้น
                   isSelected
-                    ? 'border-selected-line bg-selected text-on-selected'
-                    : clsx('border-transparent', index === active && 'bg-surface-2'),
+                    ? 'border-cocoa-100 bg-cocoa-100 text-cream-10'
+                    : clsx('border-transparent', index === active && 'bg-cream-40'),
                 )}
               >
                 {option.tone && (
@@ -140,7 +141,7 @@ const SelectMenu = ({ value, onChange, options, className, menuClassName = 'w-72
                   <span className="block text-body-2 font-medium">{option.label}</span>
                   {/* ตัวที่เลือกไม่ใช้ muted — ครีมหม่นบนน้ำเงินคอนทราสต์ไม่พอ (แบบเดียวกับแผงรายการคิว) */}
                   {option.description && (
-                    <span className={clsx('block text-caption', !isSelected && 'text-muted')}>
+                    <span className={clsx('block text-caption', !isSelected && 'text-cocoa-70')}>
                       {Array.isArray(option.description)
                         ? option.description.map((part, partIndex) => (
                             <Fragment key={part}>

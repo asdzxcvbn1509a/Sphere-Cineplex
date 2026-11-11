@@ -34,12 +34,7 @@ test('ป้ายจากสถานะของการจองตรง �
   assert.equal(displayStatusOf({ status: 'CANCELLED', payment: null }), 'CANCELLED');
 });
 
-test('สลิปค่าตั๋วที่ส่งหลังหมดเวลา — การจองยัง EXPIRED แต่ป้ายเป็นรอตรวจสอบสลิป', () => {
-  const late = booking({ status: 'EXPIRED', payment: money('BOOKING', 'PENDING_VERIFICATION') });
-  assert.equal(displayStatusOf(late), 'PENDING_VERIFICATION');
-});
-
-test('ส่วนต่างเปลี่ยนที่นั่ง — รอโอน · สลิปรอตรวจ (ทั้งคำขอที่เปิดอยู่และสลิปส่งช้า) · รอคืน', () => {
+test('ส่วนต่างเปลี่ยนที่นั่ง — รอโอน · สลิปรอตรวจ · รอคืน', () => {
   const awaitingTopUp = booking({
     seatChanges: [change('PENDING_PAYMENT', money('SEAT_CHANGE_TOPUP', 'AWAITING_SLIP'))],
   });
@@ -50,21 +45,10 @@ test('ส่วนต่างเปลี่ยนที่นั่ง — ร
   });
   assert.equal(displayStatusOf(topUpReview), 'TOPUP_PENDING_VERIFICATION');
 
-  const lateTopUp = booking({
-    seatChanges: [change('EXPIRED', money('SEAT_CHANGE_TOPUP', 'PENDING_VERIFICATION'))],
-  });
-  assert.equal(displayStatusOf(lateTopUp), 'TOPUP_PENDING_VERIFICATION');
-
   const cheaperSeats = booking({
     seatChanges: [change('COMPLETED', money('SEAT_CHANGE_REFUND', 'REFUND_PENDING'))],
   });
   assert.equal(displayStatusOf(cheaperSeats), 'DIFF_REFUND_PENDING');
-
-  // ส่วนต่างที่โอนหลังหมดเวลาแล้วที่นั่งไม่ว่าง — ผู้ดูแลยืนยันยอดแล้วต้องคืน
-  const lateTopUpRefund = booking({
-    seatChanges: [change('EXPIRED', money('SEAT_CHANGE_TOPUP', 'REFUND_PENDING'))],
-  });
-  assert.equal(displayStatusOf(lateTopUpRefund), 'DIFF_REFUND_PENDING');
 });
 
 test('ย้ายฟรีหรือจ่ายส่วนต่างจบแล้ว ยังเป็นชำระเงินสำเร็จ', () => {
@@ -80,14 +64,10 @@ test('ย้ายฟรีหรือจ่ายส่วนต่างจ�
   );
 });
 
-test('การจองที่ปิดแล้วรอเงินคืน — แยกยกเลิกกับหมดเวลา', () => {
+test('การจองที่ยกเลิกแล้วรอเงินคืน', () => {
   assert.equal(
     displayStatusOf(booking({ status: 'CANCELLED', payment: money('BOOKING', 'REFUND_PENDING') })),
     'CANCELLED_REFUND_PENDING',
-  );
-  assert.equal(
-    displayStatusOf(booking({ status: 'EXPIRED', payment: money('BOOKING', 'REFUND_PENDING') })),
-    'EXPIRED_REFUND_PENDING',
   );
 });
 
@@ -96,7 +76,6 @@ test('คืนเงินสำเร็จ — ใบที่ปิดแล
     displayStatusOf(booking({ status: 'CANCELLED', payment: money('BOOKING', 'REFUNDED') })),
     'REFUNDED',
   );
-  assert.equal(displayStatusOf(booking({ status: 'EXPIRED', payment: money('BOOKING', 'REFUNDED') })), 'REFUNDED');
   assert.equal(
     displayStatusOf(booking({ seatChanges: [change('COMPLETED', money('SEAT_CHANGE_REFUND', 'REFUNDED'))] })),
     'REFUNDED',
@@ -122,7 +101,7 @@ test('ลำดับกฎ — เรื่องที่ยังค้าง
   const slipAndRefund = booking({
     seatChanges: [
       change('COMPLETED', money('SEAT_CHANGE_REFUND', 'REFUND_PENDING')),
-      change('EXPIRED', money('SEAT_CHANGE_TOPUP', 'PENDING_VERIFICATION')),
+      change('PENDING_VERIFICATION', money('SEAT_CHANGE_TOPUP', 'PENDING_VERIFICATION')),
     ],
   });
   assert.equal(displayStatusOf(slipAndRefund), 'TOPUP_PENDING_VERIFICATION');
@@ -144,7 +123,7 @@ test('ลำดับกฎ — เรื่องที่ยังค้าง
 
 test('ค่าที่เป็นไปได้ไม่ซ้ำกัน และเงื่อนไขกรองตัดทุกกฎที่มาก่อนออก', () => {
   assert.equal(new Set(DISPLAY_STATUSES).size, DISPLAY_STATUSES.length);
-  assert.equal(DISPLAY_STATUSES.length, 11);
+  assert.equal(DISPLAY_STATUSES.length, 10);
 
   // กฎแรกไม่มีอะไรต้องตัด
   assert.deepEqual(displayStatusWhere('PENDING_PAYMENT'), { status: 'PENDING_PAYMENT' });

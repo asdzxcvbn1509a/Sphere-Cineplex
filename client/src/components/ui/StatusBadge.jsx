@@ -21,7 +21,6 @@ const statusTone = {
   TOPUP_PENDING_PAYMENT: 'warning',
   DIFF_REFUND_PENDING: 'warning',
   CANCELLED_REFUND_PENDING: 'warning',
-  EXPIRED_REFUND_PENDING: 'warning',
   PENDING_VERIFICATION: 'info',
   TOPUP_PENDING_VERIFICATION: 'info',
   COMING_SOON: 'info',
@@ -35,12 +34,13 @@ const statusTone = {
   ARCHIVED: 'neutral',
 };
 
-const StatusBadge = ({ status, label, className }) => {
+// tone = บังคับโทนสีเอง เมื่อสถานะเดียวกันต้องการสีต่างจากค่าปกติในบางหน้า
+const StatusBadge = ({ status, label, tone, className }) => {
   return (
     <span
       className={clsx(
         'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-caption font-medium',
-        toneClass[statusTone[status] ?? 'neutral'],
+        toneClass[tone ?? statusTone[status] ?? 'neutral'],
         className,
       )}
     >

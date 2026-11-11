@@ -79,6 +79,12 @@
   --color-warning-bg: #3a2111;
   --color-danger: #ff9d92;
   --color-danger-bg: #3d1915;
+  /* แดงทึบสำหรับปุ่มที่ต้องสะดุดตา (ยกเลิกการจอง) — danger เป็นโทนอ่อนสำหรับตัวอักษรบนพื้นเข้ม */
+  --color-danger-solid: #d00000;
+  --color-danger-solid-hover: #a80000;
+  /* แดงสดอ่อนกว่า danger-solid ใช้กับตัวอักษรเข้ม — ปุ่มยืนยันยกเลิกในหน้าต่างพื้นน้ำเงิน */
+  --color-danger-bright: #f25c5c;
+  --color-danger-bright-hover: #e04444;
   --color-info: #9cc4ff;
   --color-info-bg: #112645;
 

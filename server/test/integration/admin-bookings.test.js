@@ -44,7 +44,7 @@ const sorted = (ids) => [...ids].sort();
 const idsOf = (result) => sorted(result.items.map((item) => item.id));
 
 /**
- * การจองอย่างน้อยหนึ่งใบต่อหนึ่งป้าย ทำผ่าน service จริงทั้งหมด ยกเว้นสลิปที่ส่งหลังหมดเวลาที่ตั้งสถานะเงินเอง
+ * การจองอย่างน้อยหนึ่งใบต่อหนึ่งป้าย ทำผ่าน service จริงทั้งหมด
  * คืน expected = { [ป้ายที่ควรได้]: [bookingId...] } · คืนเงินสำเร็จมีสองใบ: คืนส่วนต่าง (ยัง PAID) กับยกเลิกแล้วคืน
  * โรง 3 แถว × 10 ที่: A1–A10 ธรรมดา 200 · B1–B10 พรีเมียม 280 — ลูกค้าคนละบัญชีทุกใบ ไม่ชนเพดานกักที่นั่งต่อคน
  */
@@ -132,28 +132,13 @@ const buildEveryStatus = async () => {
     add('CANCELLED', booking);
   }
 
-  // หมดเวลาชำระสามใบด้วย job จริง แล้วตั้งสถานะเงินสองใบให้เป็นทางของสลิปที่ส่งหลังหมดเวลา
-  const unpaid = [];
-  for (const seat of [B(5), B(6), B(7)]) {
-    const booking = await book({ user: await createUser(), showtime, seats: [seat] });
+  // หมดเวลาชำระด้วย job จริง
+  {
+    const booking = await book({ user: await createUser(), showtime, seats: [B(5)] });
     await prisma.booking.update({ where: { id: booking.id }, data: { holdExpiresAt: minutesFromNow(-1) } });
-    unpaid.push(booking);
+    assert.equal(await releaseExpiredHolds(), 1);
+    add('EXPIRED', booking);
   }
-  assert.equal(await releaseExpiredHolds(), 3);
-  const [expired, lateSlip, lateRefund] = unpaid;
-  add('EXPIRED', expired);
-  // ส่งสลิปหลังหมดเวลา ยังรอผู้ดูแลตรวจ
-  await prisma.payment.update({
-    where: { mainBookingId: lateSlip.id },
-    data: { status: 'PENDING_VERIFICATION', slipUploadedAt: new Date() },
-  });
-  add('PENDING_VERIFICATION', lateSlip);
-  // ยืนยันยอดแล้วแต่ที่นั่งไม่ว่างแล้ว — ต้องโอนคืน
-  await prisma.payment.update({
-    where: { mainBookingId: lateRefund.id },
-    data: { status: 'REFUND_PENDING', refundDueAt: new Date(), refundAmount: lateRefund.totalAmount },
-  });
-  add('EXPIRED_REFUND_PENDING', lateRefund);
 
   return { expected, diffRefunded: diffRefunded.booking, cancelledRefunded };
 };
@@ -185,7 +170,6 @@ describe('ป้ายสถานะในหน้าการจองขอ�
       'TOPUP_PENDING_VERIFICATION',
       'DIFF_REFUND_PENDING',
       'CANCELLED_REFUND_PENDING',
-      'EXPIRED_REFUND_PENDING',
     ];
     const grouped = await listAllBookings({ displayStatus: inProgress, pageSize: 100 });
     assert.deepEqual(idsOf(grouped), sorted(inProgress.flatMap((status) => expected[status])));

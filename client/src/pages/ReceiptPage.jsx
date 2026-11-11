@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { Clapperboard, Printer, Ticket } from 'lucide-react';
+import { Printer } from 'lucide-react';
 import clsx from 'clsx';
 import { getReceipt } from '../api/bookings.js';
 import { useI18n } from '../context/I18nContext.jsx';
@@ -23,7 +23,7 @@ const ReceiptPage = () => {
   // ?payment= = ใบเสร็จส่วนต่างเปลี่ยนที่นั่ง (ไม่มี = ใบเสร็จค่าตั๋วตอนจอง)
   const [searchParams] = useSearchParams();
   const paymentId = searchParams.get('payment');
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const user = useAuthUser();
   const { data: receipt, loading, error } = useApi(
     () => getReceipt(bookingId, paymentId).then(({ data }) => data.receipt),
@@ -72,8 +72,8 @@ const ReceiptPage = () => {
         <Breadcrumb items={[...crumbs, { label: t('receipt.title') }]} />
         <div className="flex flex-wrap gap-2">
           {receipt.booking.status === 'PAID' && (
-            <Button as={Link} to={`/booking/${receipt.booking.id}/ticket`} variant="secondary" size="sm">
-              <Ticket size={14} /> {t('receipt.viewTicket')}
+            <Button as={Link} to={`/booking/${receipt.booking.id}/ticket`} variant="cream" size="sm">
+              {t('receipt.viewTicket')}
             </Button>
           )}
           <Button size="sm" onClick={() => window.print()}>
@@ -88,13 +88,15 @@ const ReceiptPage = () => {
       */}
       <article className="theme-paper overflow-hidden rounded-3xl p-6 shadow-2xl sm:p-10 print:rounded-none print:p-0 print:shadow-none">
         <header className="flex flex-col gap-6 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="inline-flex items-center gap-2 text-h2 font-bold">
-              <Clapperboard size={20} className="text-accent-dark" /> {issuer.name}
-            </p>
-            {issuer.address && (
-              <p className="mt-1 max-w-xs whitespace-pre-line text-body-2 text-muted">{issuer.address}</p>
-            )}
+          {/* โลโก้เป็นรูปจริง ไม่ใช่สีพื้นหลัง จึงติดไปด้วยตอนพิมพ์/บันทึก PDF — alt ว่างเพราะชื่อผู้ออกใบเสร็จอยู่ข้าง ๆ แล้ว */}
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="" width={264} height={243} className="h-14 w-auto shrink-0" />
+            <div>
+              <p className="text-h2 font-bold">{issuer.name}</p>
+              {issuer.address && (
+                <p className="mt-1 max-w-xs whitespace-pre-line text-body-2 text-muted">{issuer.address}</p>
+              )}
+            </div>
           </div>
           <div className="sm:text-right">
             <h1 className="text-h1 font-bold">{t('receipt.title')}</h1>
@@ -144,7 +146,7 @@ const ReceiptPage = () => {
             <div>
               <p className={LABEL}>{t('receipt.showtime')}</p>
               <p className="font-semibold">{formatDateTime(showtime.startsAt, lang)}</p>
-              <p className="text-muted">{showtime.theatre.name}</p>
+              <p className="text-muted">{theatreName(showtime.theatre.name)}</p>
             </div>
           </div>
         </section>
@@ -204,7 +206,7 @@ const ReceiptPage = () => {
           <p className="flex items-baseline gap-4">
             <span className="text-body-2 text-muted">{t('receipt.total')}</span>
             <span className="text-h1 font-bold tabular-nums">
-              {money(receipt.totalAmount)} {t('common.baht')}
+              ฿ {money(receipt.totalAmount)}
             </span>
           </p>
           <p className="text-body-2 text-muted">({pick(receipt, 'amountText')})</p>

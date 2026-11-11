@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { useI18n } from './I18nContext.jsx';
 
 const ToastContext = createContext(null);
 
@@ -17,6 +18,8 @@ const tones = {
 };
 
 export const ToastProvider = ({ children }) => {
+  // ToastProvider อยู่ใน I18nProvider (main.jsx) จึงใช้คำแปลได้
+  const { t } = useI18n();
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
 
@@ -70,7 +73,7 @@ export const ToastProvider = ({ children }) => {
                 type="button"
                 onClick={() => dismiss(toast.id)}
                 className="text-muted transition hover:text-fg"
-                aria-label="ปิด"
+                aria-label={t('common.close')}
               >
                 <X size={18} />
               </button>

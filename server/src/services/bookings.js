@@ -11,7 +11,7 @@ import { createPromptPayPayload } from '../utils/promptpay.js';
 import { compareIds, seatLabels, snapshotSeat, sortSeats } from '../utils/seats.js';
 import { bookingNotFound, notBookingOwner } from '../utils/bookingAccess.js';
 import { bookingStateChanged, isSeatConflict, lockShowtime, seatTakenError } from './locks.js';
-import { holdSecondsLeft, slipUploadWindow } from './slips.js';
+import { canUploadSlip, holdSecondsLeft } from './slips.js';
 import { OPEN_SEAT_CHANGE_STATUSES, shapeSeatChangeInfo } from './seatChangeRules.js';
 import { buildNotification, notify } from './notifications.js';
 import { getShowtimeById } from './showtimes.js';
@@ -64,7 +64,6 @@ const canCancel = (booking) => {
 };
 
 export const shapeBooking = (booking) => {
-  const { canUpload, lateUntil } = slipUploadWindow(booking);
   return {
     id: booking.id,
     code: booking.code,
@@ -78,9 +77,8 @@ export const shapeBooking = (booking) => {
     cancelledAt: booking.cancelledAt,
     expiredAt: booking.expiredAt,
     cancelReason: booking.cancelReason,
-    // หน้าการจองของฉันใช้โชว์ปุ่ม "ส่งสลิป (โอนแล้ว)" ให้การจองที่เพิ่งหมดเวลา
-    canUploadSlip: canUpload,
-    lateSlipUntil: lateUntil,
+    // ส่งสลิปได้เฉพาะตอนรอชำระ — หมดเวลาแล้วไม่รับอีก
+    canUploadSlip: canUploadSlip(booking),
     canCancel: canCancel(booking),
     cancelCutoffHours: env.CANCEL_CUTOFF_HOURS,
     seatChange: shapeSeatChangeInfo(booking),
@@ -476,7 +474,7 @@ export const expireBooking = async ({ id, code, userId }, now = new Date()) => {
       data: {
         status: 'EXPIRED',
         holdExpiresAt: null,
-        // จุดเริ่มนับช่วงผ่อนผันส่งสลิปช้า (slipUploadWindow)
+        // หมดเวลาแล้วจบ — ส่งสลิปไม่ได้อีก (canUploadSlip) · expiredAt เก็บไว้เป็นประวัติ
         expiredAt: now,
         cancelReason: 'หมดเวลาชำระเงิน',
       },
@@ -530,7 +528,6 @@ export const getTicket = async ({ bookingId, userId }) => {
 
 /**
  * สลิปที่ยังรอผู้ดูแลตัดสินในรอบนี้ — ค่าตั๋วที่รอตรวจ และส่วนต่างเปลี่ยนที่นั่งที่รอตรวจ (ที่นั่งใหม่ถูกกันไว้อยู่)
- * ส่วนต่างที่ส่งหลังหมดเวลาแล้วกันที่นั่งไม่ได้ (คำขอยัง EXPIRED) ไม่นับ — ไม่ได้ถือที่นั่ง ผู้ดูแลอนุมัติทีหลังก็คืนเงินได้ตามปกติ
  */
 const countPendingSlips = async (client, showtimeId) => {
   // เรียกทีละคำสั่ง — client อาจเป็น tx ของ interactive transaction ซึ่งไม่ควรยิงหลายคำสั่งพร้อมกัน

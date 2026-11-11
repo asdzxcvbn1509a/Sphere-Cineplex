@@ -135,22 +135,28 @@ PowerShell (Windows):
 ```powershell
 cd server
 $env:DATABASE_URL = '<DATABASE_URL from step 2.2>'
+$env:SUPABASE_URL = '<Project URL from step 2.4>'
+$env:SUPABASE_SECRET_KEY = '<Secret key from step 2.4>'
 $env:SEED_PASSWORD = '<new demo account password>'
 npm run db:seed
-Remove-Item Env:DATABASE_URL, Env:SEED_PASSWORD
+Remove-Item Env:DATABASE_URL, Env:SUPABASE_URL, Env:SUPABASE_SECRET_KEY, Env:SEED_PASSWORD
 ```
 
 macOS / Linux:
 
 ```bash
 cd server
-DATABASE_URL='<DATABASE_URL from step 2.2>' SEED_PASSWORD='<new password>' npm run db:seed
+DATABASE_URL='<DATABASE_URL from step 2.2>' SUPABASE_URL='<Project URL from step 2.4>' \
+  SUPABASE_SECRET_KEY='<Secret key from step 2.4>' SEED_PASSWORD='<new password>' npm run db:seed
 ```
 
 - Values set with `$env:` only apply to that terminal window. `server/.env` still points at your local database
 - **Don't forget `Remove-Item`**. If you do, the next command in the same window (e.g. `npm run db:reset`) will run against the production database
+- `SUPABASE_URL` / `SUPABASE_SECRET_KEY` let the seed upload its sample slip images (about 470 small PNGs) to the bucket the live API reads
+  - Without them the images land in your local `server/uploads`, and every slip on the live admin pages shows "No slip". The seed prints a warning at the end when that happens
+  - If you named the bucket something other than `slips` in step 2.3, set `SUPABASE_SLIP_BUCKET` too
 - `SEED_PASSWORD` replaces the `Password123` written in the README. Without it, anyone can log in as the admin
-  - The resulting accounts are `admin@cinebook.test` (admin) and `somchai@example.test`, both with this password
+  - The resulting accounts are `admin@cinebook.test` and `staff@cinebook.test` (admins), `somchai@example.test` and 15 more `@example.test` customers, all with this password
   - Make it 8+ characters with both letters and digits
 - Use single quotes `'...'` as in the example. If the password contains `$`, double quotes will mangle it
 
@@ -272,12 +278,12 @@ On a paid Render plan you can use Gmail (port 587 + App Password) as described i
 
 ## 12. Reset the demo (re-run the seed)
 
-You can re-run the command from step 4 at any time, e.g. when the sample showtimes run out (the seed only creates showtimes for the 7 days from the day it runs), but every run is a complete restart of the system:
+You can re-run the command from step 4 at any time, e.g. when the sample showtimes run out (the seed creates showtimes from 10 days before to 7 days after the day it runs), but every run is a complete restart of the system:
 
 - Self-registered users, bookings, payments, receipts and notifications are **all gone**, and everyone is logged out
 - The demo account password becomes the `SEED_PASSWORD` set for that run (if unset, it reverts to `Password123`)
 - Receipt numbers start again from 000001
-- Existing slip images in the bucket are **not deleted** along with them. To empty it, go to Supabase → Storage → `slips` and delete the `payments` and `refunds` folders
+- The seed's own sample slips (`seed-pay-*.png`, `seed-ref-*.png`) are overwritten, but slips that real users uploaded stay in the bucket. To empty it, go to Supabase → Storage → `slips` and delete the `payments` and `refunds` folders
 
 **Never run it once there are real users**, and never put the seed in Render's build or start command
 

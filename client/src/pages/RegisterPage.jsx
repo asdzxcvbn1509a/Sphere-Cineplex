@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { UserPlus } from 'lucide-react';
+import { User } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { register as registerApi } from '../api/auth.js';
 import { useAuthStore, useIsAuthenticated } from '../store/authStore.js';
@@ -83,11 +83,13 @@ const RegisterPage = () => {
 
   return (
     <div className="mx-auto flex max-w-xl flex-col justify-center px-4 py-12">
-      <div className="card p-6 sm:p-8">
+      {/*
+        การ์ดพื้นเข้มขอบทอง — ช่องกรอกในหน้านี้เป็นพื้นทองอ่อนขอบทอง หัวช่องและคำอธิบายเป็นตัวอ่อน
+        ปรับผ่าน selector ของการ์ดเอง ช่องกรอกหน้าอื่นยังเป็นครีมตาม DS
+      */}
+      <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 sm:p-8 [&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
         <div className="mb-6 flex items-center gap-3">
-          <span className="rounded-xl bg-accent/15 p-2.5 text-accent">
-            <UserPlus size={20} />
-          </span>
+          <User size={32} fill="currentColor" className="shrink-0 text-gold-50" />
           <div>
             <h1 className="text-h1 font-bold">{t('register.title')}</h1>
             <p className="text-body-2 text-muted">{t('register.subtitle')}</p>
@@ -165,12 +167,12 @@ const RegisterPage = () => {
             </p>
           )}
 
-          <Button type="submit" size="lg" className="mt-4" loading={busy}>
+          <Button type="submit" variant="navy" className="mt-4" loading={busy}>
             {t('register.submit')}
           </Button>
         </form>
 
-        <p className="mt-6 border-t border-line pt-4 text-center text-body-2 text-muted">
+        <p className="mx-4 mt-10 border-t border-gold-50 pt-6 text-center text-body-1">
           {t('register.haveAccount')}{' '}
           <Link
             to="/login"

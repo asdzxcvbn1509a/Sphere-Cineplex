@@ -55,6 +55,7 @@ const router = createBrowserRouter([
       { path: 'forgot-password', ...lazyPage(() => import('./pages/ForgotPasswordPage.jsx')) },
       // token มาทาง ?token= ในลิงก์ที่ส่งไปทางอีเมล
       { path: 'reset-password', ...lazyPage(() => import('./pages/ResetPasswordPage.jsx')) },
+      { path: 'contact', ...lazyPage(() => import('./pages/ContactPage.jsx')) },
 
       {
         path: 'booking/:bookingId/payment',

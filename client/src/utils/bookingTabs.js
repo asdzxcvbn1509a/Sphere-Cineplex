@@ -1,6 +1,6 @@
 /**
  * แท็บของหน้าการจองของฉัน — แบ่งจากรายการทั้งหมด (scope=all) ในเว็บเอง สลับแท็บจึงไม่ต้องรอโหลดใหม่
- * การจองหนึ่งใบอยู่ได้แท็บเดียว ตรวจตามลำดับ: สิ่งที่ลูกค้าต้องทำก่อน แล้วค่อยสิ่งที่รอผู้ดูแล
+ * การจองหนึ่งใบอยู่ได้แท็บเดียว (ยกเว้นแท็บประวัติที่รวมทุกใบ) ตรวจตามลำดับ: สิ่งที่ลูกค้าต้องทำก่อน แล้วค่อยสิ่งที่รอผู้ดูแล
  */
 export const BOOKING_TABS = ['unpaid', 'pending', 'paid', 'cancelled', 'history'];
 
@@ -20,8 +20,8 @@ export const bookingTab = (booking, now = new Date()) => {
   if (booking.status === 'PENDING_VERIFICATION' || openChange === 'PENDING_VERIFICATION') return 'pending';
 
   if (booking.status === 'CANCELLED' || booking.status === 'EXPIRED') {
-    // ปิดไปแล้วแต่ยังรอผู้ดูแลอยู่ (ตรวจสลิปที่ส่งหลังหมดเวลา / โอนเงินคืน) — ย้ายไปแท็บยกเลิกเมื่อเรื่องเงินจบ
-    if (booking.payment?.status === 'PENDING_VERIFICATION' || owesRefund(booking)) return 'pending';
+    // ปิดไปแล้วแต่ยังรอผู้ดูแลโอนเงินคืน — ย้ายไปแท็บยกเลิกเมื่อเรื่องเงินจบ
+    if (owesRefund(booking)) return 'pending';
     return 'cancelled';
   }
 
@@ -33,7 +33,12 @@ export const bookingTab = (booking, now = new Date()) => {
 /** { unpaid: [...], pending: [...], ... } — คงลำดับเดิมจาก server (จองล่าสุดก่อน) */
 export const groupBookingsByTab = (bookings, now = new Date()) => {
   const groups = Object.fromEntries(BOOKING_TABS.map((tab) => [tab, []]));
-  for (const booking of bookings) groups[bookingTab(booking, now)].push(booking);
+  for (const booking of bookings) {
+    const tab = bookingTab(booking, now);
+    // แท็บประวัติรวมทุกรายการที่เคยทำ (ทุกสถานะ) ส่วนแท็บอื่นยังแยกตามสถานะเหมือนเดิม
+    if (tab !== 'history') groups[tab].push(booking);
+    groups.history.push(booking);
+  }
   return groups;
 };
 

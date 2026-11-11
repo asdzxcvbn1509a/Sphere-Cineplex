@@ -8,6 +8,14 @@ import { Loader2 } from 'lucide-react';
 */
 const variants = {
   primary: 'bg-accent text-ink hover:bg-accent-dark disabled:hover:bg-accent',
+  // น้ำเงินเข้มขอบทอง — ปุ่มในหน้าชำระเงิน (บันทึก QR ส่งสลิป)
+  navy: 'bg-blue-90 text-cream-20 border border-gold-40 hover:bg-blue-70 disabled:hover:bg-blue-90',
+  // ครีมขอบทอง ตัวเข้ม — ปุ่มดู E-Ticket
+  cream: 'bg-cream-30 text-cocoa-100 border border-gold-50 hover:bg-cream-40',
+  // แดงทึบ ตัวขาว — ปุ่มยกเลิกบนแถบปุ่มของการ์ดการจอง
+  dangerSolid: 'bg-danger-solid text-cream-10 border border-danger-solid hover:bg-danger-solid-hover',
+  // แดงสด ตัวเข้ม — ปุ่มยืนยันยกเลิกการจองฝั่งผู้ดูแล (อยู่บนพื้นน้ำเงินของหน้าต่าง)
+  dangerBright: 'bg-danger-bright text-cocoa-100 border border-danger-bright hover:bg-danger-bright-hover',
   secondary: 'bg-surface-2 text-fg border border-line-strong hover:border-accent/60',
   ghost: 'text-muted hover:text-fg hover:bg-fg/8',
   danger: 'bg-danger-bg text-danger border border-danger/40 hover:border-danger',

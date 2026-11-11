@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
-import { ArrowLeftRight, FileText, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeftRight, FileText, Info, RefreshCw, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../../api/client.js';
 import { cancelBooking, listAllBookings } from '../../api/admin.js';
@@ -8,7 +8,6 @@ import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
 import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
-import Field from '../../components/ui/Field.jsx';
 import Input from '../../components/ui/Input.jsx';
 import SelectMenu from '../../components/ui/SelectMenu.jsx';
 import Textarea from '../../components/ui/Textarea.jsx';
@@ -23,9 +22,11 @@ import { formatBaht, formatDateTime } from '../../utils/format.js';
 
 /**
  * กลุ่มของตัวกรองสถานะ — ชื่อกลุ่มแบบเดียวกับแท็บในหน้าการจองของฉัน
- * ป้ายในตาราง (displayStatus จาก server) อยู่ได้กลุ่มเดียว รวมกันครบทุกป้ายที่ server มี — เลือกกลุ่มแล้วส่งทั้งกลุ่มไปกรองในคำขอเดียว
+ * ป้ายในตาราง (displayStatus จาก server) อยู่ได้กลุ่มเดียว — เลือกกลุ่มแล้วส่งทั้งกลุ่มไปกรองในคำขอเดียว
  * กติกาว่าใบไหนได้ป้ายไหนอยู่ที่ server (utils/bookingDisplayStatus.js) ที่เดียว ป้ายในตารางกับผลการกรองจึงตรงกันเสมอ
- * tone = สีจุดหน้าชื่อกลุ่ม ความหมายเดียวกับโทนของป้าย: รอลูกค้า · รอผู้ดูแล · สำเร็จ · จบแล้ว
+ * ยกเลิก (CANCELLED) กับหมดเวลา (EXPIRED) ไม่มีกลุ่มของตัวเองตามแบบ — ดูได้จาก "ทั้งหมด" หรือค้นด้วยรหัส/เบอร์
+ * ลิงก์รุ่นก่อนที่ส่ง ?status= เป็นสองค่านี้จึงเปิดเป็น "ทั้งหมด"
+ * tone = สีจุดหน้าชื่อกลุ่ม ความหมายเดียวกับโทนของป้าย: รอลูกค้า · รอผู้ดูแล · สำเร็จ
  */
 const STATUS_GROUPS = [
   { value: 'unpaid', tone: 'warning', statuses: ['PENDING_PAYMENT', 'TOPUP_PENDING_PAYMENT'] },
@@ -37,11 +38,11 @@ const STATUS_GROUPS = [
       'TOPUP_PENDING_VERIFICATION',
       'DIFF_REFUND_PENDING',
       'CANCELLED_REFUND_PENDING',
-      'EXPIRED_REFUND_PENDING',
     ],
+    // คำอธิบายใต้ชื่อกลุ่ม — สลิปส่วนต่างรอตรวจนับรวมใน "รอตรวจสอบสลิป" ไม่แยกบรรทัด แต่ยังถูกกรองในกลุ่มนี้
+    shown: ['PENDING_VERIFICATION', 'DIFF_REFUND_PENDING', 'CANCELLED_REFUND_PENDING'],
   },
   { value: 'paid', tone: 'success', statuses: ['PAID', 'REFUNDED'] },
-  { value: 'cancelled', tone: 'neutral', statuses: ['CANCELLED', 'EXPIRED'] },
 ];
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /** สถานะการจองที่ผู้ดูแลยกเลิกแทนลูกค้าได้ */
@@ -83,7 +84,7 @@ const toSearchParams = ({ status, date, q, page }) => {
 };
 
 const AdminBookingsPage = () => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
   const location = useLocation();
   // ตัวกรองเริ่มจาก URL — กลับมาจากใบเสร็จ/ย้ายที่นั่ง
@@ -195,7 +196,7 @@ const AdminBookingsPage = () => {
             ...STATUS_GROUPS.map((group) => ({
               value: group.value,
               label: t(`admin.bookingPage.group.${group.value}`),
-              description: group.statuses.map((status) => t(`admin.bookingPage.status.${status}`)),
+              description: (group.shown ?? group.statuses).map((status) => t(`admin.bookingPage.status.${status}`)),
               tone: group.tone,
             })),
           ]}
@@ -274,7 +275,7 @@ const AdminBookingsPage = () => {
                 )}
                 {!showSpinner &&
                   bookings.map((booking) => {
-                    const showtime = `${booking.showtime.theatre.name} · ${formatDateTime(booking.showtime.startsAt, lang)}`;
+                    const showtime = `${theatreName(booking.showtime.theatre.name)} · ${formatDateTime(booking.showtime.startsAt, lang)}`;
                     const seats = booking.seats.map((seat) => seat.label).join(', ');
                     return (
                       // title บนข้อความที่อาจถูกตัด — ชี้ค้างเห็นเต็ม
@@ -380,18 +381,25 @@ const AdminBookingsPage = () => {
       <ConfirmModal
         open={Boolean(cancelTarget)}
         onClose={() => setCancelTarget(null)}
-        title={t('bookings.cancelTitle')}
-        cancelLabel={t('common.close')}
+        title={t('admin.bookingPage.cancelTitle', { code: cancelTarget?.code })}
+        cancelLabel={t('admin.bookingPage.cancelBack')}
         confirmLabel={t('bookings.cancel')}
+        variant="dangerBright"
         loading={busy}
         onConfirm={handleCancel}
       >
-        <p className="mb-3 text-body-2 text-muted">
-          {t('bookings.cancelBody', { code: cancelTarget?.code })}
+        <p className="mb-3 flex items-center gap-1.5 text-body-1">
+          <Info size={16} className="shrink-0" /> {t('admin.bookingPage.cancelNotice')}
         </p>
-        <Field label={t('admin.paymentQueue.rejectReason')}>
-          <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={200} />
-        </Field>
+        {/* ช่องเหตุผลพื้นทองอ่อนขอบทอง — ข้อความนี้ส่งถึงลูกค้าในแจ้งเตือน */}
+        <Textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          maxLength={200}
+          placeholder={t('admin.bookingPage.cancelReasonPlaceholder')}
+          aria-label={t('admin.paymentQueue.rejectReason')}
+          className="min-h-24 border-gold-50 bg-gold-20"
+        />
       </ConfirmModal>
     </div>
   );

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, FileText, Hourglass, Ticket, TicketX } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleAlert, ClockFading, TicketX } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { getBooking } from '../api/bookings.js';
 import { getPayment, uploadSlip } from '../api/payments.js';
@@ -16,7 +16,7 @@ import useApi from '../hooks/useApi.js';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
 import { bookingTab } from '../utils/bookingTabs.js';
-import { formatDateTime, formatMoney, formatTime } from '../utils/format.js';
+import { formatDateTime, formatMoney } from '../utils/format.js';
 
 const PaymentPage = () => {
   const { bookingId } = useParams();
@@ -44,11 +44,9 @@ const PaymentPage = () => {
   const holdDeadline = data?.holdDeadline ?? null;
 
   const status = booking?.status;
-  // ส่งสลิปหลังหมดเวลาแล้วที่นั่งไม่ว่าง — การจองคงหมดเวลา แต่สลิปรอผู้ดูแลตรวจเพื่อคืนเงิน
-  const lateWaiting = status === 'EXPIRED' && payment?.status === 'PENDING_VERIFICATION';
 
   // ระหว่างรอ admin ตรวจสลิป หน้าจะอัปเดตเองโดยไม่ต้องให้ผู้ใช้กดรีเฟรช
-  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
+  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION');
 
   const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () =>
     reload({ silent: true }),
@@ -80,16 +78,7 @@ const PaymentPage = () => {
   const holdOver = status === 'PENDING_PAYMENT' && (!holdDeadline || secondsLeft === 0);
   const expired = status === 'EXPIRED' || holdOver;
   const wasRejected = payment?.status === 'REJECTED' && status === 'PENDING_PAYMENT';
-  // server บอกว่ายังรับสลิปส่งช้าได้ — สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
-  const lateUpload = expired && !lateWaiting && payment?.canUploadSlip;
-  const lateRefund =
-    status === 'EXPIRED' && ['REFUND_PENDING', 'REFUNDED'].includes(payment?.status);
-  // การจองที่ยกเลิกมีการ์ดของตัวเองด้านล่าง — เดิมรวมอยู่ในนี้แล้วขึ้น "หมดเวลาชำระเงินแล้ว"
-  // ทั้งที่อาจจ่ายไปแล้วและรอเงินคืน (แจ้งเตือนยกเลิก/รอบฉายถูกยกเลิก/คืนเงินแล้ว พามาที่หน้านี้)
-  const closed = expired && !lateUpload && !lateWaiting && !lateRefund;
   const refundStatus = booking.payment?.status;
-
-  const uploadForm = <SlipUploadForm onUpload={handleUpload} />;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -120,68 +109,43 @@ const PaymentPage = () => {
           <CheckCircle2 className="mx-auto mb-3 text-success" size={40} />
           <h2 className="text-h2 font-bold">{t('payment.approvedTitle')}</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <Button as={Link} to={`/booking/${booking.id}/ticket`}>
-              <Ticket size={16} /> {t('payment.viewTicket')}
+            <Button as={Link} to={`/booking/${booking.id}/ticket`} variant="cream">
+              {t('payment.viewTicket')}
             </Button>
-            <Button as={Link} to={`/booking/${booking.id}/receipt`} variant="secondary">
-              <FileText size={16} /> {t('payment.viewReceipt')}
+            <Button as={Link} to={`/booking/${booking.id}/receipt`} variant="cream">
+              {t('payment.viewReceipt')}
             </Button>
           </div>
         </div>
       )}
 
       {status === 'PENDING_VERIFICATION' && (
-        <div className="card border-info/40 p-6 text-center sm:p-8">
-          <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
+        <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 text-center sm:p-8">
+          <ClockFading className="mx-auto mb-3 text-accent" size={40} />
           <h2 className="text-h2 font-bold">{t('payment.waitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-            {t('payment.waitingBody')}
+          {/* จอตั้งแต่ lg กว้างพอให้ทั้งประโยคอยู่บรรทัดเดียว — มือถือยังตัดบรรทัดตามปกติ */}
+          <p className="mx-auto mt-2 text-body-2 text-muted sm:text-body-1 lg:whitespace-nowrap">
+            {t('payment.waitingBody')}{' '}
+            {/* "กรุณารอสักครู่..." ห้ามตัดกลางวลี — ถ้าไม่พอที่ให้ขึ้นบรรทัดใหม่ทั้งก้อน */}
+            <span className="whitespace-nowrap">{t('payment.waitingWait')}</span>
           </p>
           <p className="mt-3 text-caption text-muted">{t('payment.waitingHint')}</p>
         </div>
       )}
 
-      {lateWaiting && (
-        <div className="card border-info/40 p-6 text-center sm:p-8">
-          <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-h2 font-bold">{t('payment.lateWaitingTitle')}</h2>
+      {/* หมดเวลาแล้วจบ ไม่มีการรับสลิปหลังหมดเวลา — บอกคนที่โอนวินาทีสุดท้ายแต่ส่งไม่ทันว่าต้องติดต่อเจ้าหน้าที่ */}
+      {expired && (
+        <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 text-center sm:p-8">
+          <CircleAlert className="mx-auto mb-3 text-danger" size={40} />
+          <h2 className="text-h1 font-bold">{t('payment.expired')}</h2>
           <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-            {t('payment.lateWaitingBody')}
+            {t('payment.expiredContact')}{' '}
+            {/* "พร้อมรหัสการจอง ..." ห้ามตัดกลางวลี — ถ้าไม่พอที่ให้ขึ้นบรรทัดใหม่ทั้งก้อน */}
+            <span className="whitespace-nowrap">{t('payment.expiredContactCode', { code: booking.code })}</span>
           </p>
-        </div>
-      )}
-
-      {lateRefund && (
-        <div className="card border-accent/40 p-6 text-center sm:p-8">
-          <CheckCircle2 className="mx-auto mb-3 text-accent" size={40} />
-          <h2 className="text-h2 font-bold">{t('payment.lateRefundTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-            {t('payment.lateRefundBody')}
-          </p>
-          {/* ปุ่มแจ้งบัญชีรับเงินคืนอยู่ที่การ์ดของใบนี้ — พาไปแท็บที่ใบนี้อยู่ (รอคืน = รอดำเนินการ) */}
-          <Button as={Link} to={`/my-bookings?tab=${bookingTab(booking)}`} variant="secondary" className="mt-4">
-            {t('payment.goMyBookings')}
+          <Button variant="navy" size="sm" className="mt-4" onClick={() => navigate('/')}>
+            {t('errors.goHome')}
           </Button>
-        </div>
-      )}
-
-      {lateUpload && (
-        <div className="flex flex-col gap-4">
-          <div className="card border-accent/40 p-5 sm:p-6">
-            <h2 className="flex items-center gap-2 text-h2 font-bold">
-              <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('payment.lateTitle')}
-            </h2>
-            <p className="mt-2 text-body-2 text-muted sm:text-body-1">
-              {t('payment.lateBody', {
-                time: payment.lateSlipUntil ? formatTime(payment.lateSlipUntil, lang) : '—',
-              })}
-            </p>
-            <p className="mt-3 text-body-2 text-muted">
-              {t('payment.reference')}:{' '}
-              <span className="font-code text-fg">{payment.reference}</span>
-            </p>
-          </div>
-          {uploadForm}
         </div>
       )}
 
@@ -200,16 +164,6 @@ const PaymentPage = () => {
           {/* บัญชีรับเงินคืนและสลิปคืนเงินอยู่ที่การ์ดของการจองนี้ — รอคืนเงินอยู่แท็บรอดำเนินการ นอกนั้นแท็บยกเลิก */}
           <Button as={Link} to={`/my-bookings?tab=${bookingTab(booking)}`} variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
-          </Button>
-        </div>
-      )}
-
-      {closed && (
-        <div className="card border-danger/40 p-6 text-center sm:p-8">
-          <AlertTriangle className="mx-auto mb-3 text-danger" size={40} />
-          <h2 className="text-h2 font-bold">{t('payment.expired')}</h2>
-          <Button variant="secondary" className="mt-4" onClick={() => navigate('/')}>
-            {t('errors.goHome')}
           </Button>
         </div>
       )}
@@ -239,7 +193,7 @@ const PaymentPage = () => {
               notice={t('payment.payNotice')}
             />
 
-            {uploadForm}
+            <SlipUploadForm onUpload={handleUpload} />
           </div>
         </>
       )}

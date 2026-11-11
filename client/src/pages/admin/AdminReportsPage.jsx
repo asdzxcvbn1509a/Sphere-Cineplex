@@ -89,6 +89,9 @@ const AdminReportsPage = () => {
             }))}
             value={groupBy}
             onChange={setGroupBy}
+            // แถบครีมทองขอบทอง แท็บที่เลือกพื้นดำตัวขาว — ชุดเดียวกับแท็บหน้าคืนเงิน
+            className="border border-gold-50 bg-gold-20"
+            activeClassName="bg-cocoa-100 text-cream-10"
           />
         </div>
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Clock3, Info, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Info, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 import { apiError } from '../api/client.js';
 import { getBooking, requestSeatChange } from '../api/bookings.js';
@@ -38,7 +38,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
   const { bookingId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
 
   const [selected, setSelected] = useState([]);
@@ -205,15 +205,20 @@ const ChangeSeatsPage = ({ admin = false }) => {
           <h1 className="text-h1 font-bold">
             {admin ? t('seatChange.adminTitle') : t('seatChange.title')}
           </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body-2 text-muted sm:text-body-1">
-            <span className="font-semibold text-fg">{pick(showtime.movie, 'title')}</span>
-            <span>{showtime.theatre.name}</span>
-            <span className="inline-flex items-center gap-1">
-              <Clock3 size={13} />
-              {formatDate(showtime.startsAt, lang)} · {formatTime(showtime.startsAt, lang)}
-            </span>
-            <span className="font-code text-accent">{booking.code}</span>
-          </p>
+          <p className="mt-1 text-body-1 font-semibold">{pick(showtime.movie, 'title')}</p>
+          {/* โรง ประเภทจอ วันที่ เวลา เป็นชิปขอบทองชุดเดียวกับหน้าเลือกที่นั่ง */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {[
+              theatreName(showtime.theatre.name),
+              showtime.theatre.screenType,
+              formatDate(showtime.startsAt, lang),
+              formatTime(showtime.startsAt, lang),
+            ].map((text, index) => (
+              <span key={index} className="rounded-md border border-accent px-2 py-0.5 text-body-2 text-accent">
+                {text}
+              </span>
+            ))}
+          </div>
         </div>
         {!blockedReason && (
           <Button variant="ghost" size="sm" onClick={() => reload({ silent: true })}>
@@ -248,14 +253,19 @@ const ChangeSeatsPage = ({ admin = false }) => {
     <div className="mx-auto max-w-6xl px-4 pb-10 pt-6">
       {header}
 
-      <p className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-body-2 text-muted">
-        <Info size={16} className="mt-0.5 shrink-0" />
-        {admin
-          ? t('seatChange.adminIntro')
-          : `${t('seatChange.intro', { count: required })} · ${t('seatChange.policy', {
+      {/* กล่องคำแนะนำพื้นเข้มขอบทอง หัวข้อตัวหนาตามด้วยกติกาในประโยคเดียว */}
+      <p className="mb-4 rounded-lg border border-gold-40 bg-cocoa-100 px-4 py-3 text-body-1">
+        {admin ? (
+          t('seatChange.adminIntro')
+        ) : (
+          <>
+            <span className="font-bold">{t('seatChange.introLabel')}</span> :{' '}
+            {t('seatChange.intro', {
               left: booking.seatChange.changesLeft,
               minutes: booking.seatChange.cutoffMinutes,
-            })}`}
+            })}
+          </>
+        )}
       </p>
 
       {closedOwn.length > 0 && (
@@ -327,10 +337,11 @@ const ChangeSeatsPage = ({ admin = false }) => {
         onConfirm={submit}
       >
         <div className="flex flex-col gap-3 text-body-2">
-          <p className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 font-semibold">
+          {/* ที่นั่งเดิม → ใหม่ บนพื้นทองอ่อน ตัวเข้ม — ที่นั่งใหม่ตัวหนากว่าให้เห็นว่าคือผลลัพธ์ */}
+          <p className="flex flex-wrap items-center gap-2 rounded-lg border border-gold-50 bg-gold-30 px-4 py-2.5 text-body-1 text-cocoa-90">
             {booking.seats.map((seat) => seat.label).join(', ')}
-            <ArrowRight size={14} className="text-muted" />
-            <span className="text-accent">{seatLabels(selectedSeats)}</span>
+            <ArrowRight size={16} />
+            <span className="font-semibold text-cocoa-100">{seatLabels(selectedSeats)}</span>
           </p>
 
           <p className="text-muted">
@@ -342,7 +353,7 @@ const ChangeSeatsPage = ({ admin = false }) => {
           </p>
 
           {!admin && preview.diffAmount < 0 && (
-            <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface-2/60 p-3">
+            <div className="flex flex-col gap-3">
               <RefundAccountFields form={refundForm} onChange={setRefundForm} errors={refundErrors} />
             </div>
           )}

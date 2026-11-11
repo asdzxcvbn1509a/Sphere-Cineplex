@@ -9,9 +9,9 @@ export const formatMoney = (amount, lang = 'th', options) => {
   return new Intl.NumberFormat(localeOf(lang), options).format(Number(amount ?? 0));
 };
 
-/** ยอดเงินแบบ "1,240 ฿" — สั้นกว่าต่อท้ายด้วย "บาท" ใช้ในที่แคบอย่างแถวรายการและแผงรายละเอียดของคิวผู้ดูแล */
+/** ยอดเงินแบบ "฿ 1,240" — ทุกหน้าใช้ ฿ นำหน้าตัวเลขแทนคำว่า "บาท" ต่อท้าย */
 export const formatBaht = (amount, lang = 'th') => {
-  return `${formatMoney(amount, lang)} ฿`;
+  return `฿ ${formatMoney(amount, lang)}`;
 };
 
 /** สัดส่วน → เปอร์เซ็นต์จำนวนเต็มพร้อมเครื่องหมาย เช่น 0.7 → "+70%" · -0.25 → "-25%" · 0 → "0%" */

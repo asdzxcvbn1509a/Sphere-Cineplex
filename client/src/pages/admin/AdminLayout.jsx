@@ -79,12 +79,12 @@ const AdminLayout = () => {
                   key={key}
                   to={to}
                   end={end}
-                  // เมนูที่เลือก = "รายการที่เลือก" ใน DS (น้ำเงิน) — ขอบโปร่งในเมนูอื่นกันความกว้าง/สูงกระโดด
+                  // เมนูที่เลือกพื้นน้ำตาลเทาตัวขาว (สีเดียวกับแถบปุ่มของการ์ดการจอง) — ขอบโปร่งในเมนูอื่นกันความกว้าง/สูงกระโดด
                   className={({ isActive }) =>
                     clsx(
                       'flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-body-2 font-medium transition',
                       isActive
-                        ? 'border-selected-line bg-selected text-on-selected'
+                        ? 'border-cream-70 bg-cream-80 text-cream-10'
                         : 'border-transparent text-muted hover:bg-surface-2 hover:text-fg',
                     )
                   }
@@ -93,9 +93,8 @@ const AdminLayout = () => {
                   {t(`admin.${key}`)}
                   {count > 0 && (
                     <span
-                      // สีแดง = งานค้างที่รอผู้ดูแล เด่นทั้งบนเมนูปกติและเมนูที่เลือก (น้ำเงิน)
-                      // ตัวอักษรเป็น ink เพราะสีแดงของ DS เป็นโทนอ่อน ตัวขาวจะอ่านไม่ออก
-                      className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-caption font-medium text-ink"
+                      // วงทอง = งานค้างที่รอผู้ดูแล เด่นทั้งบนเมนูปกติและเมนูที่เลือก ตัวเลขเข้มอ่านชัดบนทอง
+                      className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-50 px-1.5 text-caption font-medium text-cocoa-100"
                       aria-label={t('admin.pendingBadge', { count })}
                     >
                       {count > 99 ? '99+' : count}

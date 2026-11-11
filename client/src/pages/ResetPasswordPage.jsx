@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { KeyRound, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Loader2, Lock, ShieldAlert } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { checkResetToken, resetPassword } from '../api/auth.js';
 import { useI18n } from '../context/I18nContext.jsx';
@@ -97,7 +97,8 @@ const ResetPasswordPage = () => {
 
   return (
     <div className="mx-auto flex max-w-xl flex-col justify-center px-4 py-12">
-      <div className="card p-6 sm:p-8">
+      {/* การ์ดพื้นเข้มขอบทอง ช่องกรอกพื้นทองอ่อน — ชุดเดียวกับหน้าเข้าสู่ระบบ/สมัครสมาชิก */}
+      <div className="rounded-xl border border-gold-40 bg-cocoa-100 p-6 sm:p-8 [&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!">
         {status === 'checking' && (
           <p className="flex items-center justify-center gap-2 py-8 text-body-2 text-muted">
             <Loader2 size={18} className="animate-spin" /> {t('reset.checking')}
@@ -126,21 +127,17 @@ const ResetPasswordPage = () => {
 
         {status === 'ready' && (
           <>
-            <div className="mb-6 flex items-center gap-3">
-              <span className="rounded-xl bg-accent/15 p-2.5 text-accent">
-                <KeyRound size={20} />
-              </span>
+            <div className="mb-6 flex items-center gap-2">
+              <Lock size={32} fill="currentColor" className="shrink-0 text-gold-50 [&>path]:fill-none" />
               <div>
                 <h1 className="text-h1 font-bold">{t('reset.title')}</h1>
-                <p className="text-body-2 text-muted">
+                <p className="text-body-1 text-muted">
                   {t('reset.forAccount', { email: account?.email ?? '' })}
                 </p>
               </div>
             </div>
 
-            <p className="mb-4 flex items-start gap-1.5 text-body-2 text-muted">
-              <ShieldCheck size={14} className="mt-0.5 shrink-0" /> {t('reset.signedOutNotice')}
-            </p>
+            <p className="mb-6 text-body-2 text-muted">{t('reset.signedOutNotice')}</p>
 
             <form onSubmit={submit} noValidate className="flex flex-col gap-4">
               <Field
@@ -154,6 +151,7 @@ const ResetPasswordPage = () => {
                   autoComplete="new-password"
                   value={form.password}
                   onChange={setField('password')}
+                  placeholder={t('profile.newPlaceholder')}
                 />
               </Field>
 
@@ -162,6 +160,7 @@ const ResetPasswordPage = () => {
                   autoComplete="new-password"
                   value={form.confirm}
                   onChange={setField('confirm')}
+                  placeholder={t('register.confirmPlaceholder')}
                 />
               </Field>
 
@@ -171,7 +170,7 @@ const ResetPasswordPage = () => {
                 </p>
               )}
 
-              <Button type="submit" size="lg" className="mt-4" loading={busy}>
+              <Button type="submit" variant="navy" className="mt-4" loading={busy}>
                 {t('reset.submit')}
               </Button>
             </form>

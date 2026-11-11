@@ -22,9 +22,9 @@ const pageItems = (page, pages) => {
 const PAGE_BUTTON =
   'flex size-8 shrink-0 items-center justify-center rounded-lg border text-body-2 font-medium tabular-nums transition disabled:cursor-not-allowed disabled:opacity-50 sm:size-9';
 const NUMBERED_HEIGHT = 'h-8 sm:h-9';
-// หน้าอื่นหน้าตาแบบปุ่ม secondary · หน้าปัจจุบัน = "รายการที่เลือก" ของ DS (น้ำเงิน) แบบเมนูข้าง
-const PAGE_IDLE = 'border-line-strong bg-surface-2 text-fg hover:border-accent/60';
-const PAGE_CURRENT = 'border-selected-line bg-selected text-on-selected';
+// หน้าอื่นพื้นเข้มขอบเทา ตัวขาว · หน้าปัจจุบันพื้นทองตัวเข้ม เด่นจากปุ่มอื่นทันที
+const PAGE_IDLE = 'border-cocoa-80 bg-cocoa-100 text-cream-10 hover:border-accent/60';
+const PAGE_CURRENT = 'border-accent bg-accent text-cocoa-100';
 
 /**
  * ปุ่มเปลี่ยนหน้าของรายการฝั่งผู้ดูแล — ซ่อนตัวเองเมื่อมีหน้าเดียว

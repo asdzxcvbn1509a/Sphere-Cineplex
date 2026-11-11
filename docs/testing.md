@@ -51,13 +51,13 @@ Files run one at a time (`--test-concurrency=1`); cases inside a file fire truly
 | `auth.test.js` | Refresh token rotation, reuse detection, multi-tab refresh races, one reset link used by two requests at once |
 | `bookings.test.js` | Concurrent bookings of the same seat and of overlapping seat sets, seats from another theatre, the expiry job, double cancellation |
 | `holds.test.js` | Seat hold limits (`PENDING_BOOKING_EXISTS`, `TOO_MANY_PENDING_BOOKINGS`) |
-| `late-slip.test.js` | Late slips (seats restored or refund path), grace period, the expiry job racing a slip upload, rejecting after the showtime starts |
 | `overview.test.js` | Admin overview: yesterday's revenue counted only up to the same time of day, refund rows telling a seat-change difference from a cancellation |
 | `payments.test.js` | Concurrent approve / reject / cancel, recording a refund twice, slip queue order (`sort`) |
 | `refunds.test.js` | Refund queue order (`sort`, both tabs), the refund account holder name (optional for older clients), editing a recorded refund (slip replacement, file clean-up), who may open payment and refund slips |
 | `receipts.test.js` | Receipt numbering (sequential, concurrent, rolled back with a failed transaction), frozen payer names, who may open a receipt, refund stamps, admin search by receipt number |
-| `seat-changes.test.js` | Same/cheaper/pricier seat changes, quotas and deadlines, concurrent changes, cancelling after a change, late difference slips, admin moves, HTTP |
+| `seat-changes.test.js` | Same/cheaper/pricier seat changes, quotas and deadlines, concurrent changes, cancelling after a change, no difference slip after expiry (including the expiry job racing an upload), admin moves, HTTP |
 | `showtimes.test.js` | Cancelling a whole showtime, customer refund accounts, delete guards, editing booked showtimes, inactive seats, reminders |
+| `slip-deadline.test.js` | No slip after the payment deadline (409 `HOLD_EXPIRED`, file removed), a slip a few seconds late before the job runs, the expiry job racing a slip upload (exactly one wins), rejecting after the showtime starts |
 | `http.test.js` | Real HTTP: security headers, `PROXY_SECRET` checks and `/api/health` statuses, slip file checks and upload limits, missing slip files, pagination, query booleans, token revocation, `/auth/refresh` responses, login and sign-up rate limits, changing the email |
 
 Test data comes from `server/test/helpers/fixtures.js` (`createUser`, `createShowtimeFixture`, `book`, `createPaidBooking`, `makeSlipFile`, `apiErrorWith`, …)
@@ -90,7 +90,7 @@ Key cases to try by hand:
 9. **Forgot password** — at `/login` click "Forgot password?" → enter the registered email → open the link (find it in the server console, or click it in the blue box on screen when running in development mode) → set a new password → you must be taken back to the login page with the email pre-filled · opening the same link again must say the link is no longer valid
 10. **Language switch** — click the EN / ไทย button in the top bar; every page must switch language, including movie titles from the database
 11. **Cancelling a whole showtime** — a showtime with both paid and unpaid bookings → on `/admin/showtimes` click "Cancel showtime" → paid bookings must appear at `/admin/refunds`, and customers get a notification and can click "Add refund account" at `/my-bookings` · trying to delete that showtime must fail
-12. **Late slip submission** — set `SEAT_HOLD_MINUTES=1`, book and let the hold expire → the payment page must still offer slip upload, and uploading must restore the original seats · repeat, but have another account book those seats before uploading → the slip must enter the queue with a "Paid after the deadline" badge, and approving it sends it to the refund queue
+12. **Payment deadline** — set `SEAT_HOLD_MINUTES=1`, book and let the countdown reach 0 → the payment page must show only the "Payment window closed" card with the line about contacting staff with the booking code (no QR, no upload form), and the card at `/my-bookings` must have no upload button · do the same for a pricier seat change → its payment page shows the expired card with the same advice, and the original seats are kept
 13. **Seat hold limits** — book, then press back from the payment page → the seat map must show the dialog to pay for or cancel the existing booking **immediately** (without picking new seats first, and with no 409 in the console)
 14. **Multiple tabs** — while logged in, open the site in 3 tabs at once (or close and reopen a browser that restores its tabs) → every tab must still be logged in
 15. **Editing the price of a booked showtime** — at `/admin/showtimes`, change the base price of a showtime that already has bookings without touching the time → it must save

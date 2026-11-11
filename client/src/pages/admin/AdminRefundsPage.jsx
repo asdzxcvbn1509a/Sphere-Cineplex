@@ -98,6 +98,9 @@ const AdminRefundsPage = () => {
           items={TABS.map((item) => ({ value: item, label: t(`admin.refundPage.tab${item}`) }))}
           value={tab}
           onChange={changeTab}
+          // แถบครีมทองขอบทอง แท็บที่เลือกพื้นดำตัวขาว
+          className="border border-gold-50 bg-gold-20"
+          activeClassName="bg-cocoa-100 text-cream-10"
         />
         {/* แท็บรอคืนรีเฟรชเองทุก 20 วินาทีอยู่แล้ว ปุ่มนี้ไว้ดึงทันที (เช่น ลูกค้าเพิ่งโทรมาแจ้งว่ายกเลิก) */}
         <Button variant="secondary" size="sm" className="ml-auto" loading={refreshing} onClick={refresh}>

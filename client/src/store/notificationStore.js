@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import {
+  deleteNotification,
   getUnreadCount,
   listNotifications,
   markAllNotificationsRead,
@@ -65,6 +66,22 @@ export const useNotificationStore = create((set, get) => ({
       await markAllNotificationsRead();
     } catch {
       get().fetchUnreadCount();
+    }
+  },
+
+  /** เอาออกจากรายการทันทีไม่รอ API — ลบอันที่ยังไม่อ่าน ตัวเลขบนกระดิ่งลดตามด้วย */
+  remove: async (id) => {
+    const target = get().items.find((item) => item.id === id);
+    set((state) => ({
+      items: state.items.filter((item) => item.id !== id),
+      unreadCount: target && !target.readAt ? Math.max(0, state.unreadCount - 1) : state.unreadCount,
+    }));
+
+    try {
+      await deleteNotification(id);
+    } catch {
+      // ลบไม่สำเร็จ — ดึงรายการจริงกลับมา แจ้งเตือนที่หายไปจะกลับมาให้เห็น
+      get().fetchNotifications().catch(() => {});
     }
   },
 

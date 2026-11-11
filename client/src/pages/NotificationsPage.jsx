@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { BellOff, CheckCheck } from 'lucide-react';
+import { BellOff, X } from 'lucide-react';
 import clsx from 'clsx';
 import { useNotificationStore } from '../store/notificationStore.js';
 import { useI18n } from '../context/I18nContext.jsx';
@@ -42,6 +42,7 @@ const NotificationsPage = () => {
   const fetchNotifications = useNotificationStore((store) => store.fetchNotifications);
   const markAllRead = useNotificationStore((store) => store.markAllRead);
   const markRead = useNotificationStore((store) => store.markRead);
+  const remove = useNotificationStore((store) => store.remove);
 
   // รายการอยู่ใน store — หน้านี้ดูแลแค่สถานะการโหลด
   const { loading, error, reload } = useApi(() => fetchNotifications(), [fetchNotifications]);
@@ -58,8 +59,8 @@ const NotificationsPage = () => {
           )}
         </div>
         {unreadCount > 0 && (
-          <Button variant="secondary" size="sm" onClick={markAllRead}>
-            <CheckCheck size={14} /> {t('notifications.markAllRead')}
+          <Button variant="cream" size="sm" onClick={markAllRead}>
+            {t('notifications.markAllRead')}
           </Button>
         )}
       </div>
@@ -89,29 +90,36 @@ const NotificationsPage = () => {
           );
 
           const className = clsx(
-            'card block border-l-4 p-4 text-left transition hover:border-accent sm:px-5',
+            // pr เว้นที่ให้ปุ่มกากบาทที่วางทับมุมขวาบน
+            'card block w-full border-l-4 p-4 pr-12 text-left transition hover:border-accent sm:px-5 sm:pr-14',
             typeTone[item.type] ?? 'border-l-line',
             unread && 'bg-surface-2/60',
           );
 
-          return to ? (
-            <Link
-              key={item.id}
-              to={to}
-              className={className}
-              onClick={() => unread && markRead(item.id)}
-            >
+          const body = to ? (
+            <Link to={to} className={className} onClick={() => unread && markRead(item.id)}>
               {content}
             </Link>
           ) : (
-            <button
-              key={item.id}
-              type="button"
-              className={className}
-              onClick={() => unread && markRead(item.id)}
-            >
+            <button type="button" className={className} onClick={() => unread && markRead(item.id)}>
               {content}
             </button>
+          );
+
+          // ปุ่มลบอยู่นอกลิงก์ (ซ้อนปุ่มในลิงก์ไม่ได้) แล้ววางทับมุมขวาบนของการ์ด
+          return (
+            <div key={item.id} className="relative">
+              {body}
+              <button
+                type="button"
+                onClick={() => remove(item.id)}
+                aria-label={t('notifications.delete')}
+                title={t('notifications.delete')}
+                className="absolute right-2 top-2 rounded-lg p-2 text-muted transition hover:bg-fg/8 hover:text-fg"
+              >
+                <X size={18} />
+              </button>
+            </div>
           );
         })}
       </div>

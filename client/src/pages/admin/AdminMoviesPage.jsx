@@ -25,6 +25,8 @@ import { slicePage } from '../../utils/pagination.js';
  * ระยะต่อแถวบนจอ xl = xl:h-23 (92px — โปสเตอร์ 64px + ระยะบนล่าง) — เปลี่ยนคู่กับ class ของแถว
  * เส้นคั่นแถวรวมอยู่ในความสูงนี้แล้ว (border-collapse)
  */
+/** หัวหมวดในฟอร์มภาพยนตร์ — ตัวเล็กสีทอง เต็มแถวของกริด */
+const SECTION_TITLE = 'col-span-full text-caption font-semibold text-gold-50';
 const ROW_HEIGHT = 92;
 
 const emptyMovie = {
@@ -42,7 +44,7 @@ const emptyMovie = {
 };
 
 const AdminMoviesPage = () => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, genre } = useI18n();
   const toast = useToast();
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -248,9 +250,9 @@ const AdminMoviesPage = () => {
                       <td
                         className="px-4 py-3 text-muted xl:truncate"
                         data-label={t('admin.movieForm.genres')}
-                        title={movie.genres.join(', ')}
+                        title={movie.genres.map(genre).join(', ')}
                       >
-                        {movie.genres.join(', ')}
+                        {movie.genres.map(genre).join(', ')}
                       </td>
                       <td className="px-4 py-3 text-muted xl:truncate" data-label={t('admin.movieForm.releaseDate')}>
                         {formatDate(movie.releaseDate, lang)}
@@ -299,72 +301,79 @@ const AdminMoviesPage = () => {
         footer={
           <>
             <Button variant="ghost" onClick={() => setEditing(null)}>
-              {t('common.cancel')}
+              {t('admin.bookingPage.cancelBack')}
             </Button>
             <Button form="movie-form" type="submit" loading={saving}>
-              {t('common.confirm')}
+              {t('common.save')}
             </Button>
           </>
         }
       >
-        <form id="movie-form" onSubmit={save} className="grid gap-4 sm:grid-cols-2">
-          <Field label={t('admin.movieForm.titleTh')} required>
-            <Input value={form.titleTh} onChange={setField('titleTh')} required />
-          </Field>
-          <Field label={t('admin.movieForm.titleEn')} required>
-            <Input value={form.titleEn} onChange={setField('titleEn')} required />
-          </Field>
+        {/*
+          แบ่งเป็นสามหมวด (ข้อมูลหลัก · รายละเอียดการฉาย · รูปภาพ) หัวหมวดสีทอง คั่นด้วยเส้น
+          ช่องกรอกพื้นครีมขอบทอง หัวช่องตัวอ่อน — ปรับผ่าน selector ของฟอร์ม ช่องกรอกหน้าอื่นไม่เปลี่ยน
+          เรตไม่มีในฟอร์มแล้ว (เว็บไม่แสดงเรต) — ค่าเดิมของเรื่องยังส่งกลับไปตามเดิม
+        */}
+        <form
+          id="movie-form"
+          onSubmit={save}
+          className="flex flex-col gap-6 [&_.input-base]:border-gold-50 [&_label>span:first-child]:text-fg!"
+        >
+          <section className="grid gap-4 sm:grid-cols-2">
+            <h3 className={SECTION_TITLE}>{t('admin.movieForm.sectionMain')}</h3>
+            <Field label={t('admin.movieForm.titleTh')} required>
+              <Input value={form.titleTh} onChange={setField('titleTh')} required />
+            </Field>
+            <Field label={t('admin.movieForm.titleEn')} required>
+              <Input value={form.titleEn} onChange={setField('titleEn')} required />
+            </Field>
+            <Field label={t('admin.movieForm.synopsisTh')} className="sm:col-span-2">
+              <Textarea value={form.synopsisTh} onChange={setField('synopsisTh')} />
+            </Field>
+            <Field label={t('admin.movieForm.synopsisEn')} className="sm:col-span-2">
+              <Textarea value={form.synopsisEn} onChange={setField('synopsisEn')} />
+            </Field>
+          </section>
 
-          <Field label={t('admin.movieForm.synopsisTh')} className="sm:col-span-2">
-            <Textarea value={form.synopsisTh} onChange={setField('synopsisTh')} />
-          </Field>
-          <Field label={t('admin.movieForm.synopsisEn')} className="sm:col-span-2">
-            <Textarea value={form.synopsisEn} onChange={setField('synopsisEn')} />
-          </Field>
+          <section className="grid gap-4 border-t border-cream-40 pt-6 sm:grid-cols-3">
+            <h3 className={SECTION_TITLE}>{t('admin.movieForm.sectionShow')}</h3>
+            <Field label={t('admin.movieForm.durationMin')} required>
+              <Input
+                type="number"
+                min={30}
+                max={400}
+                value={form.durationMin}
+                onChange={setField('durationMin')}
+                placeholder={t('admin.movieForm.durationPlaceholder')}
+                required
+              />
+            </Field>
+            <Field label={t('admin.movieForm.releaseDate')} required>
+              <Input type="date" value={form.releaseDate} onChange={setField('releaseDate')} required />
+            </Field>
+            <Field label={t('admin.movieForm.status')}>
+              <Select value={form.status} onChange={setField('status')}>
+                {['NOW_SHOWING', 'COMING_SOON', 'ARCHIVED'].map((status) => (
+                  <option key={status} value={status}>
+                    {t(`admin.movieStatus.${status}`)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label={t('admin.movieForm.genres')} className="sm:col-span-3">
+              <Input value={form.genres} onChange={setField('genres')} placeholder={t('admin.movieForm.genresPlaceholder')} />
+            </Field>
+          </section>
 
-          <Field label={t('admin.movieForm.posterUrl')} required className="sm:col-span-2">
-            <Input type="url" value={form.posterUrl} onChange={setField('posterUrl')} required />
-          </Field>
-          <Field label={t('admin.movieForm.backdropUrl')} className="sm:col-span-2">
-            <Input type="url" value={form.backdropUrl} onChange={setField('backdropUrl')} />
-          </Field>
-
-          <Field label={t('admin.movieForm.durationMin')} required>
-            <Input
-              type="number"
-              min={30}
-              max={400}
-              value={form.durationMin}
-              onChange={setField('durationMin')}
-              required
-            />
-          </Field>
-          <Field label={t('admin.movieForm.rating')}>
-            <Select value={form.rating} onChange={setField('rating')}>
-              {['G', 'PG13', 'N15', 'N18'].map((rating) => (
-                <option key={rating} value={rating}>
-                  {rating}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label={t('admin.movieForm.genres')} className="sm:col-span-2">
-            <Input value={form.genres} onChange={setField('genres')} placeholder="ดราม่า, ลึกลับ" />
-          </Field>
-
-          <Field label={t('admin.movieForm.releaseDate')} required>
-            <Input type="date" value={form.releaseDate} onChange={setField('releaseDate')} required />
-          </Field>
-          <Field label={t('admin.movieForm.status')}>
-            <Select value={form.status} onChange={setField('status')}>
-              {['NOW_SHOWING', 'COMING_SOON', 'ARCHIVED'].map((status) => (
-                <option key={status} value={status}>
-                  {t(`admin.movieStatus.${status}`)}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <section className="grid gap-4 border-t border-cream-40 pt-6">
+            <h3 className={SECTION_TITLE}>{t('admin.movieForm.sectionImages')}</h3>
+            <Field label={t('admin.movieForm.posterUrl')} required>
+              <Input type="url" value={form.posterUrl} onChange={setField('posterUrl')} placeholder="https://..." required />
+            </Field>
+            <Field label={t('admin.movieForm.backdropUrl')}>
+              <Input type="url" value={form.backdropUrl} onChange={setField('backdropUrl')} placeholder="https://..." />
+            </Field>
+          </section>
         </form>
       </Modal>
 
@@ -399,9 +408,9 @@ const AdminMoviesPage = () => {
           ) : (
             <>
               <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-                {t('common.cancel')}
+                {t('admin.bookingPage.cancelBack')}
               </Button>
-              <Button variant="danger" loading={deleting} onClick={() => remove()}>
+              <Button variant="dangerBright" loading={deleting} onClick={() => remove()}>
                 {t('common.delete')}
               </Button>
             </>
@@ -433,8 +442,11 @@ const AdminMoviesPage = () => {
             </div>
           </div>
         ) : (
-          <p className="text-body-2 text-muted">
-            {t('admin.movieForm.deleteBody', { title: deleteTarget && pick(deleteTarget.movie, 'title') })}
+          // ชื่อเรื่องสีทอง เห็นชัดว่ากำลังจะลบเรื่องไหน
+          <p className="text-body-1">
+            {t('admin.movieForm.deleteBodyBefore')}{' '}
+            <span className="text-gold-50">{deleteTarget && pick(deleteTarget.movie, 'title')}</span>{' '}
+            {t('admin.movieForm.deleteBodyAfter')}
           </p>
         )}
       </Modal>

@@ -7,8 +7,16 @@ import clsx from 'clsx';
  * ข้อความแท็บไม่ตัดบรรทัด — แท็บเยอะจนเกินจอมือถือ ให้หน้าที่ใช้หุ้มด้วยกล่อง overflow-x-auto เลื่อนแนวนอนแทน
  *
  * items: [{ value, label }]
+ * activeClassName = สีแท็บที่เลือก ถ้าหน้าไหนต้องการต่างจากน้ำเงินของ DS
  */
-const Tabs = ({ items, value, onChange, stretch = false, className }) => {
+const Tabs = ({
+  items,
+  value,
+  onChange,
+  stretch = false,
+  className,
+  activeClassName = 'bg-selected text-on-selected',
+}) => {
   return (
     <div
       className={clsx(
@@ -28,7 +36,7 @@ const Tabs = ({ items, value, onChange, stretch = false, className }) => {
             className={clsx(
               'whitespace-nowrap rounded-lg px-4 py-1.5 text-body-2 font-medium transition',
               stretch && 'flex-1 px-3 sm:flex-none sm:px-4',
-              active ? 'bg-selected text-on-selected' : 'text-field-muted hover:text-ink',
+              active ? activeClassName : 'text-field-muted hover:text-ink',
             )}
           >
             {item.label}

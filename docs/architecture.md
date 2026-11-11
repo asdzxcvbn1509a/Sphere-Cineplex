@@ -56,7 +56,7 @@ The booking, payment and seat-change services share these modules. None of them 
 | Module | What it holds |
 |---|---|
 | `services/locks.js` | The system-wide lock order, `lockShowtime(tx, id)` (`FOR SHARE`), `lockBooking(tx, id)` (`FOR UPDATE`), seat-conflict detection (`isSeatConflict`, `seatTakenError`) and the shared 409 errors `BOOKING_STATE_CHANGED` / `PAYMENT_NOT_PENDING` |
-| `services/slips.js` | Everything a hold-with-slip has in common, for both a booking (ticket payment) and a seat change (difference payment): `holdSecondsLeft`, `slipUploadWindow` (on-time and late-slip rules), `queueSlipForReview` (the compare-and-set that moves a holder to `PENDING_VERIFICATION`, with the fallback to the late-slip path when it races the expiry job), `discardSlipOnError` (removes an uploaded file when the request fails) and the payment verdict builders |
+| `services/slips.js` | Everything a hold-with-slip has in common, for both a booking (ticket payment) and a seat change (difference payment): `holdSecondsLeft`, `canUploadSlip` (slips only while awaiting payment), `queueSlipForReview` (the compare-and-set that moves a holder to `PENDING_VERIFICATION`; when the expiry job wins the race the upload gets 409 `HOLD_EXPIRED`), `discardSlipOnError` (removes an uploaded file when the request fails) and the payment verdict builders |
 | `services/seatChangeRules.js` | Seat-change rules and response shapes used by bookings (booking card, cancel guard), seat changes and payments (queue summaries). No database access |
 | `utils/bookingAccess.js` | `BOOKING_NOT_FOUND`, `SEAT_CHANGE_NOT_FOUND`, `NOT_BOOKING_OWNER` and `canAccessBooking(requester, ownerId)` (owner or admin) |
 | `utils/pagination.js` | `paginationQuery` for route schemas and `findPage()`, which runs `findMany` + `count` in parallel for the admin lists |
@@ -124,7 +124,8 @@ Pick movie → pick date/showtime → pick seats ─┐
 ```
 
 **Expired holds:** a background job checks every 30 seconds; once a booking is past its payment deadline it becomes `EXPIRED`, its seats are released and the user is notified
-Anyone who already transferred the money but didn't upload the slip in time can still upload it for another 30 minutes (see [Late slip submission](#late-slip-submission))
+There is no transfer after the deadline: an expired booking no longer accepts a slip (409 `HOLD_EXPIRED`). The payment page shows only the "payment window closed" card, which tells anyone who already transferred to contact staff with the booking code
+The countdown on the payment page is computed from the `holdSecondsLeft` the server sends, not the customer's device clock, so a device whose clock runs behind won't show more time left than there really is (and lead someone to transfer after the window has closed)
 
 **Slip rejected after the showtime starts:** the booking doesn't go back to `PENDING_PAYMENT`; it's closed as `EXPIRED` and the seats are released — there's no point giving another 10 minutes to pay for a showtime that's already playing
 
@@ -175,19 +176,16 @@ An unpaid booking holds its seats for 10 minutes. Without limits, a single accou
 - **Holding pending bookings across all showtimes beyond `MAX_PENDING_BOOKINGS_PER_USER`** (default 3, counting both awaiting payment and awaiting slip review) → 409 `TOO_MANY_PENDING_BOOKINGS`
 - `POST /api/bookings` allows 10 successful bookings per account per 10 minutes, stopping scripts that loop book-and-cancel to make seats flicker so nobody else can book them
 
-### Late slip submission
+### No transfer after the deadline
 
-A customer who scanned and paid in the final minute but came back too late to upload the slip used to get nothing but an "expired" message, even though the money had already arrived — that payment had no place in the system at all
-Now the slip can still be uploaded for `LATE_SLIP_GRACE_MINUTES` minutes (default 30) after the hold expires, both from the original payment page and from the "Upload slip (already paid)" button on `/my-bookings`
+The payment deadline is final, for ticket payments and seat-change differences alike. Once a booking or seat change is `EXPIRED`, its seats are back on sale and no slip is accepted any more
+(An earlier version accepted slips for 30 minutes after expiry and then restored the seats or sent the money to the refund queue. That path has been removed)
 
 | Situation at upload time | Result |
 |---|---|
-| The original seats are still free and the showtime hasn't started | The seats are restored and the slip enters the review queue as usual, as if the hold had never expired |
-| The seats were booked by someone else / the showtime started or was cancelled | The booking stays `EXPIRED`, but the slip enters the review queue with a "Paid after the deadline" badge — for the admin, **approve = queue a refund** (no ticket is issued); reject = closed |
-| Past the grace period | 409 `HOLD_EXPIRED`, telling the customer to contact staff with the booking code |
-
-Restoring the seats relies on the same unique constraint as a normal booking, so there's no way to end up sharing seats with whoever booked them in the meantime
-And the countdown on the payment page is computed from the `holdSecondsLeft` the server sends, not the customer's device clock — so a device whose clock runs behind won't show more time left than there really is
+| Still `PENDING_PAYMENT`, even a few seconds past the deadline (the job runs every 30 s) | Accepted as usual: the seats are still the customer's, and an upload that started in time isn't lost. The page hides the upload form when the countdown reaches 0 |
+| The expiry job closes it at the same moment | Exactly one wins (compare-and-set on the status): the slip enters review, or the upload gets 409 `HOLD_EXPIRED` and its file is deleted |
+| `EXPIRED` | 409 `HOLD_EXPIRED`, whose message tells the customer to contact staff with the booking code. The payment pages show the same advice on their "expired" card |
 
 ### User accounts and passwords
 
@@ -355,8 +353,7 @@ Differences from [changing seats](#seat-changes) to cheaper ones go into this sa
 - **Detail panel**
   - The destination account, with the amount, a copy button for the account number and a "Confirm refund" button that stays disabled until a slip is attached
   - For refunded items, a short history: what caused the refund, then who confirmed it and when
-  - The badge and the first history entry are named after the cause, not after "the customer", because nothing records who cancelled (customer, admin or a cancelled showtime)
-  - For late payments the time shown is when the slip was sent (`slipUploadedAt`), since `refundDueAt` is when the admin approved it
+  - The badge and the first history entry are named after the cause (a cancellation, or a move to cheaper seats), not after "the customer", because nothing records who cancelled (customer, admin or a cancelled showtime)
 
 **Destination account** — since transfers are manual, the system has to know which account to refund to. The cancel dialog for **paid bookings only** has fields to choose a bank (from a list of major banks, or typed in) and enter the account number and the account holder's name. Without a bank and account number the cancellation fails (400 `REFUND_ACCOUNT_REQUIRED`). Unpaid bookings aren't asked for this, since there's no money to return
 
@@ -382,7 +379,6 @@ Admins can open any customer's receipt from `/admin/bookings` and can search boo
 | Number `RC-2026-000123` | Sequential per year (Gregorian year, Thai time) from the `ReceiptCounter` table, in the same transaction as the approval | PostgreSQL's `SEQUENCE` doesn't roll back — every failed approval would lose a number, leaving gaps in the receipts that make audits impossible |
 | Two admins approve the same slip | The slower one fails the status check before reaching the counter | No numbers wasted; exactly one receipt |
 | Payer name | A copy is stored in `Payment.receiptName` when the receipt is issued | Users can edit their name in the profile later, but receipts already issued must not change with it |
-| Late slips that go to the refund queue | No receipt is issued | No ticket was sold; that money is being refunded |
 | Cancelled / refunded later | The receipt still opens, stamped "Refund pending" or "Refunded" | A receipt is proof that the money was really received; it shouldn't disappear because of a refund |
 | Seats changed after the receipt was issued | The seats on the receipt are frozen in `Payment.receiptSeats`, with a note of the current seats · An extra difference payment gets its own new receipt number (`?payment=`) | The web version of a receipt must always match the one already emailed |
 
@@ -409,7 +405,7 @@ The seat change page starts with the current seats all selected (dashed outline)
 | Pricier | The new seats are held for `SEAT_HOLD_MINUTES` while the difference is transferred via PromptPay QR; meanwhile the current seats still belong to the customer → the slip enters the same `/admin/payments` queue as ticket payments → the move only happens once an admin approves, and a new difference receipt is issued (also emailed) |
 
 Not transferring in time, a rejected slip, or the customer cancelling the request = the move just doesn't happen; the current seats aren't lost
-A rejected slip gets a new `REJECTED_RETRY_MINUTES` window to transfer (unless the showtime has started), and late slips are accepted within `LATE_SLIP_GRACE_MINUTES`, just like ticket payments — if the new seats are still free the slip enters review as usual; if not, admin approval = refunding the difference
+A rejected slip gets a new `REJECTED_RETRY_MINUTES` window to transfer (unless the showtime has started), and once the request has expired no difference slip is accepted (409 `HOLD_EXPIRED`), just like ticket payments
 (Ticket payments and difference payments go through the same slip-submission code in `server/src/services/slips.js`)
 
 **Pricing** — seats in zones the booking already has are priced at what was paid, while new zones use the showtime's current price. So moving within the same zone is always free, even if an admin changes the showtime's prices later

@@ -49,6 +49,19 @@ export const I18nProvider = ({ children }) => {
     [lang],
   );
 
+  /**
+   * ข้อมูลจาก DB ที่มีภาษาไทยภาษาเดียว — แปลในเว็บด้วยตาราง data.genres / รูปแบบชื่อโรง
+   * แนวหนังเป็นชุดคำตายตัว · ชื่อโรง "โรงที่ 3 (IMAX)" → "Theatre 3 (IMAX)" ชื่ออื่นที่ไม่เข้ารูปแบบคงเดิม
+   */
+  const genre = useCallback(
+    (name) => (lang === 'en' ? resolve(dictionaries.en, `data.genres.${name}`) ?? name : name),
+    [lang],
+  );
+  const theatreName = useCallback(
+    (name) => (lang === 'en' && name ? name.replace(/^โรงที่\s*/, 'Theatre ') : name ?? ''),
+    [lang],
+  );
+
   const value = useMemo(
     () => ({
       lang,
@@ -56,8 +69,10 @@ export const I18nProvider = ({ children }) => {
       toggleLang: () => setLang((current) => (current === 'th' ? 'en' : 'th')),
       t,
       pick,
+      genre,
+      theatreName,
     }),
-    [lang, t, pick],
+    [lang, t, pick, genre, theatreName],
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

@@ -40,14 +40,15 @@ const HomePage = () => {
         <p className="mt-3 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('home.heroSubtitle')}</p>
 
         <div className="relative mt-6 max-w-2xl">
-          <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-field-muted" size={18} />
+          {/* ช่องค้นหาหน้าแรกเป็นพื้นเข้มกลืนกับ hero ต่างจากช่องกรอกฟอร์มที่เป็นพื้นครีม */}
+          <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('home.searchPlaceholder')}
             aria-label={t('home.searchPlaceholder')}
-            className="input-base py-3.5 pl-11 text-body-1"
+            className="input-base border-line bg-surface py-3.5 pl-11 text-body-1 text-fg [color-scheme:dark] placeholder:text-muted"
           />
         </div>
       </section>

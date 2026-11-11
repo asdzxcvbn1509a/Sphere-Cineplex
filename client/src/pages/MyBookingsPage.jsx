@@ -135,6 +135,7 @@ const MyBookingsPage = () => {
         <Tabs
           items={BOOKING_TABS.map((item) => ({ value: item, label: t(`bookings.tabs.${item}`) }))}
           value={tab}
+          activeClassName="bg-cocoa-100 text-cream-20"
           onChange={(next) => setSearchParams({ tab: next }, { replace: true })}
         />
       </div>

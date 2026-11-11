@@ -66,7 +66,7 @@ export const getReceipt = async ({ bookingId, paymentId, requester }) => {
   if (!canAccessBooking(requester, booking.userId)) {
     throw notBookingOwner('ไม่มีสิทธิ์ดูใบเสร็จของรายการนี้');
   }
-  // ออกให้เฉพาะใบที่อนุมัติแล้วการจองเป็น PAID — สลิปที่ส่งหลังหมดเวลาแล้วเข้าคิวคืนเงินทันทีไม่มีใบเสร็จ
+  // มีใบเสร็จเฉพาะรายการที่ผู้ดูแลอนุมัติแล้ว — เลขที่ใบเสร็จออกในขั้นตอนอนุมัติ
   const payment = await receiptPayment(booking, paymentId);
   if (!payment?.receiptNo) {
     throw ApiError.forbidden('RECEIPT_NOT_READY', 'รายการนี้ยังไม่มีใบเสร็จรับเงิน');

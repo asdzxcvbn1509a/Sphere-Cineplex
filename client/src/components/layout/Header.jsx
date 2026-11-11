@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Clapperboard, LayoutDashboard, LogOut, Menu, Ticket, User, X } from 'lucide-react';
+import { Bell, Headset, LayoutDashboard, LogOut, Menu, Ticket, User, X } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore, useAuthUser, useIsAdmin, useIsAuthenticated } from '../../store/authStore.js';
 import { useI18n } from '../../context/I18nContext.jsx';
@@ -9,12 +9,12 @@ import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import usePolling from '../../hooks/usePolling.js';
 import Button from '../ui/Button.jsx';
 
-// เมนูของหน้าที่เปิดอยู่ = "รายการที่เลือก" ใน DS (น้ำเงิน) — ขอบโปร่งในเมนูอื่นกันความสูงกระโดดตอนสลับหน้า
+// เมนูของหน้าที่เปิดอยู่ใช้ขอบและตัวอักษรสีทอง (accent) พื้นโปร่ง — ขอบโปร่งในเมนูอื่นกันความสูงกระโดดตอนสลับหน้า
 const navClass = ({ isActive }) =>
   clsx(
     'whitespace-nowrap rounded-lg border px-3 py-2 text-body-2 font-medium transition',
     isActive
-      ? 'border-selected-line bg-selected text-on-selected'
+      ? 'border-accent text-accent'
       : 'border-transparent text-muted hover:text-fg',
   );
 
@@ -75,9 +75,14 @@ const Header = () => {
     <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur print:hidden">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
         <Link to="/" className="flex min-w-0 items-center gap-2">
-          <Clapperboard className="shrink-0 text-accent" size={22} />
+          {/*
+            alt ว่างเพราะชื่อแบรนด์อยู่ข้าง ๆ แล้ว ถ้าใส่ชื่อซ้ำ โปรแกรมอ่านหน้าจอจะอ่านชื่อสองรอบ
+            width/height ให้เบราว์เซอร์รู้สัดส่วนรูปก่อนโหลดเสร็จ จองที่ไว้ก่อน ชื่อแบรนด์จะไม่กระโดด
+            จอมือถือย่อทั้งโลโก้และชื่อลงในสัดส่วนเดิม ไม่งั้นชื่อถูกตัดเป็น "Sphere Cine…" ตั้งแต่จอกว้าง 412px ลงไป
+          */}
+          <img src="/logo.png" alt="" width={264} height={243} className="h-8 w-auto shrink-0 sm:h-10" />
           {/* ชื่อแบรนด์ใช้ Cinzel ทั้งสองภาษาตาม DS */}
-          <span className="truncate font-brand text-h2 font-bold">{t('common.appName')}</span>
+          <span className="truncate font-brand text-body-1 font-bold sm:text-h2">{t('common.appName')}</span>
         </Link>
 
         <nav className="ml-4 hidden items-center gap-1 md:flex">
@@ -105,6 +110,19 @@ const Header = () => {
           >
             {t('nav.language')}
           </button>
+
+          {/*
+            ติดต่อเรา เปิดได้ทุกคนไม่ต้องล็อกอิน — จอมือถืออยู่ในเมนูแทน
+            แถบบนมือถือตอนล็อกอินมีปุ่มภาษา กระดิ่ง และปุ่มเมนูอยู่แล้ว เพิ่มอีกปุ่มชื่อแบรนด์จะถูกตัดตั้งแต่จอกว้าง 390px ลงไป
+          */}
+          <Link
+            to="/contact"
+            className="hidden rounded-lg p-2.5 text-muted transition hover:bg-surface-2 hover:text-fg md:block"
+            aria-label={t('nav.contact')}
+            title={t('nav.contact')}
+          >
+            <Headset size={18} />
+          </Link>
 
           {isAuthenticated ? (
             <>
@@ -153,7 +171,7 @@ const Header = () => {
             type="button"
             className="rounded-lg p-2.5 text-muted transition hover:bg-surface-2 hover:text-fg md:hidden"
             onClick={() => setMenuOpen((open) => !open)}
-            aria-label="เมนู"
+            aria-label={t('common.menu')}
             aria-expanded={menuOpen}
             aria-controls="mobile-menu"
           >
@@ -189,6 +207,11 @@ const Header = () => {
                 </span>
               </NavLink>
             )}
+            <NavLink to="/contact" className={navClass} onClick={() => setMenuOpen(false)}>
+              <span className="inline-flex items-center gap-2">
+                <Headset size={15} /> {t('nav.contact')}
+              </span>
+            </NavLink>
             {isAuthenticated ? (
               <button
                 type="button"

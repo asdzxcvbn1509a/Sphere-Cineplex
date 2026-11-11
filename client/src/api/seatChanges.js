@@ -3,7 +3,7 @@ import api from './client.js';
 // สร้างคำขอเปลี่ยนที่นั่งอยู่ที่ requestSeatChange ใน bookings.js — ไฟล์นี้คือขั้นถัดไปของคำขอที่ต้องโอนส่วนต่าง
 
 /**
- * คำขอเปลี่ยนที่นั่ง + ข้อมูลชำระส่วนต่าง (qrPayload, holdSecondsLeft, canUploadSlip, lateSlipUntil)
+ * คำขอเปลี่ยนที่นั่ง + ข้อมูลชำระส่วนต่าง (qrPayload, holdSecondsLeft, canUploadSlip)
  * status: PENDING_PAYMENT | PENDING_VERIFICATION | COMPLETED | CANCELLED | EXPIRED
  */
 export const getSeatChange = async (seatChangeId) => {

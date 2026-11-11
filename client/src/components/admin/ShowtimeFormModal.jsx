@@ -21,7 +21,7 @@ import {
  * initialForm.originalTheatreId = โรงเดิมของรอบที่กำลังแก้ (เพิ่มใหม่ไม่มี)
  */
 const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose, onSaved }) => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
   const [form, setForm] = useState(initialForm);
   const [saving, setSaving] = useState(false);
@@ -107,16 +107,21 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            {t('common.cancel')}
+            {t('admin.bookingPage.cancelBack')}
           </Button>
           {/* กันไว้ตั้งแต่ต้นทาง ไม่ต้องรอให้ server ตอบ 409 */}
           <Button form="showtime-form" type="submit" loading={saving} disabled={Boolean(conflict)}>
-            {t('common.confirm')}
+            {t('common.save')}
           </Button>
         </>
       }
     >
-      <form id="showtime-form" onSubmit={save} className="flex flex-col gap-4">
+      {/* ช่องกรอกพื้นครีมขอบทอง หัวช่องตัวอ่อน — ปรับผ่าน selector ของฟอร์ม ช่องกรอกหน้าอื่นไม่เปลี่ยน */}
+      <form
+        id="showtime-form"
+        onSubmit={save}
+        className="flex flex-col gap-4 [&_.input-base]:border-gold-50 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!"
+      >
         <Field label={t('admin.showtimeForm.movie')} required>
           <Select value={form.movieId} onChange={setField('movieId')} disabled={!creating} required>
             {movies.map((movie) => (
@@ -131,7 +136,7 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
           <Select value={form.theatreId} onChange={setField('theatreId')} required>
             {theatreOptions.map((theatre) => (
               <option key={theatre.id} value={theatre.id}>
-                {theatre.name} · {theatre.seatCount} {t('common.seat')}
+                {theatreName(theatre.name)} · {theatre.seatCount} {t('common.seat')}
                 {!theatre.isActive && ` (${t('admin.showtimeForm.theatreInactive')})`}
               </option>
             ))}
@@ -139,7 +144,7 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
         </Field>
 
         <Field
-          label={`${t('admin.showtimeForm.startsAt')} (UTC+7)`}
+          label={t('admin.showtimeForm.startsAt')}
           required
           error={
             conflict
@@ -155,18 +160,19 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
         </Field>
 
         {availability && (
-          <div className="-mt-2 flex flex-col gap-4 rounded-xl border border-line bg-surface-2/50 p-3">
+          // กล่องครีมขอบทอง ตัวเข้ม — รอบที่มีอยู่แล้วเป็นชิปเทา (ลงไม่ได้) เวลาที่ลงได้เป็นชิปทอง (กดได้)
+          <div className="-mt-2 flex flex-col gap-4 rounded-lg border border-gold-50 bg-cream-30 p-3 text-cocoa-100">
             {/* รอบที่มีอยู่แล้วในโรงนี้วันนี้ ให้เห็นภาพว่าเวลาไหนถูกจองไปแล้ว */}
             <div>
-              <p className="mb-1.5 text-body-2 font-medium text-muted">{t('admin.showtimeForm.busyInTheatre')}</p>
+              <p className="mb-2 text-body-1">{t('admin.showtimeForm.busyInTheatre')}</p>
               {availability.busy.length === 0 ? (
-                <p className="text-body-2 text-success">{t('admin.showtimeForm.noBusy')}</p>
+                <p className="text-body-2 text-cocoa-70">{t('admin.showtimeForm.noBusy')}</p>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {availability.busy.map((item) => (
                     <span
                       key={item.id}
-                      className="rounded-md border border-danger/30 bg-danger-bg px-2 py-1 text-caption text-danger"
+                      className="rounded-md border border-cream-50 bg-cream-50 px-2 py-1 text-caption text-cocoa-70"
                       title={pick(item.movie, 'title')}
                     >
                       {formatTime(item.startsAt, lang)}–{formatTime(item.endsAt, lang)}
@@ -178,13 +184,13 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
 
             {/* เวลาที่ลงรอบได้จริง คำนวณจากความยาวหนัง + เวลาเว้นระหว่างรอบ */}
             <div>
-              <p className="mb-1.5 text-body-2 font-medium text-muted">
+              <p className="mb-2 text-body-1">
                 {t('admin.showtimeForm.freeSlots', { minutes: availability.turnaroundMinutes })}
               </p>
               {availability.freeSlots.length === 0 ? (
-                <p className="text-body-2 text-danger">{t('admin.showtimeForm.noFreeSlot')}</p>
+                <p className="text-body-2 text-danger-solid">{t('admin.showtimeForm.noFreeSlot')}</p>
               ) : (
-                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto">
                   {availability.freeSlots.map((slot) => {
                     const value = toBangkokInputValue(slot);
                     const active = form.startsAt === value;
@@ -193,11 +199,11 @@ const ShowtimeFormModal = ({ showtimeId, initialForm, movies, theatres, onClose,
                         key={slot}
                         type="button"
                         onClick={() => setForm((current) => ({ ...current, startsAt: value }))}
-                        // เวลาที่เลือก = รายการที่เลือก (DS) — อยู่ใน Modal จึงเป็นฟ้าอ่อนจาก theme-blue
+                        // เวลาที่เลือกพื้นดำตัวขาว · เวลาอื่นชิปทองตัวเข้ม
                         className={
                           active
-                            ? 'rounded-md border border-selected-line bg-selected px-2 py-1 text-caption font-medium text-on-selected'
-                            : 'rounded-md border border-line-strong bg-surface px-2 py-1 text-caption text-fg transition hover:border-accent hover:text-accent'
+                            ? 'rounded-md border border-gold-50 bg-cocoa-100 px-2 py-1 text-caption font-medium text-cream-10'
+                            : 'rounded-md border border-gold-60 bg-gold-50 px-2 py-1 text-caption text-cocoa-100 transition hover:bg-gold-40'
                         }
                       >
                         {formatTime(slot, lang)}

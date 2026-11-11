@@ -6,8 +6,6 @@ import { completeRefund, updateRefund } from '../../api/admin.js';
 import { useI18n } from '../../context/I18nContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../ui/Button.jsx';
-import Chip from '../ui/Chip.jsx';
-import Input from '../ui/Input.jsx';
 import SlipDropzone from '../ui/SlipDropzone.jsx';
 import SlipImage from '../ui/SlipImage.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
@@ -20,23 +18,19 @@ const isSeatChangeMoney = (item) => item.kind !== 'BOOKING';
 
 /**
  * เหตุที่ต้องคืนเงิน — ใช้ทั้งป้ายสถานะ ชื่อเหตุการณ์แรกในประวัติ และเลือกเวลาที่ทำรายการ
- * ระบบไม่ได้เก็บว่าใครเป็นคนยกเลิก (ลูกค้า ผู้ดูแล หรือยกเลิกทั้งรอบ) จึงบอกที่เหตุ แล้วให้ cancelReason เล่ารายละเอียด
+ * ระบบไม่ได้เก็บว่าใครเป็นคนยกเลิก (ลูกค้า ผู้ดูแล หรือยกเลิกทั้งรอบ) จึงบอกแค่เหตุ
+ * เหตุผลที่บันทึกไว้ตอนยกเลิก (cancelReason) ไม่แสดง — ไม่ว่ายกเลิกเพราะอะไร ผู้ดูแลก็โอนคืนแบบเดียวกัน
  */
 const refundReasonOf = (item) => {
-  if (item.kind === 'SEAT_CHANGE_REFUND') return 'SEAT_CHANGE';
-  if (item.kind === 'SEAT_CHANGE_TOPUP') return 'LATE_TOPUP';
-  // ค่าตั๋วของการจองที่หมดเวลา = สลิปที่โอนมาหลังหมดเวลาแล้วที่นั่งไม่ว่าง (ผู้ดูแลยืนยันยอดแล้วจึงเข้าคิวนี้)
-  return item.booking.status === 'EXPIRED' ? 'LATE_PAYMENT' : 'CANCELLED';
+  return item.kind === 'SEAT_CHANGE_REFUND' ? 'SEAT_CHANGE' : 'CANCELLED';
 };
 
 /**
  * เวลาที่เกิดเหตุให้ต้องคืนเงิน
- * โอนหลังหมดเวลาใช้เวลาที่ลูกค้าส่งสลิป เพราะ refundDueAt ของกรณีนี้คือเวลาที่ผู้ดูแลอนุมัติ
  * เปลี่ยนไปที่ถูกกว่าเข้าคิวพร้อมกับการย้ายที่นั่ง refundDueAt จึงเป็นเวลาที่ลูกค้าทำรายการพอดี
  */
 const requestedAtOf = (item, reason) => {
   if (reason === 'CANCELLED') return item.booking.cancelledAt ?? item.refundDueAt;
-  if (reason === 'LATE_PAYMENT' || reason === 'LATE_TOPUP') return item.slipUploadedAt ?? item.refundDueAt;
   return item.refundDueAt;
 };
 
@@ -67,17 +61,16 @@ const HistoryEvent = ({ dot, label, at, children }) => {
 /**
  * แผงสลิป + แผงรายละเอียดของรายการคืนเงินที่เลือก (หน้าคืนเงินวาง key = id รายการ)
  *
- * สลิปที่แนบ หมายเหตุ และโหมดแก้ไขเป็น state ของรายการนี้เท่านั้น — เปลี่ยนรายการ (กดเอง หรือรายการหายจากคิวเพราะ
+ * สลิปที่แนบและโหมดแก้ไขเป็น state ของรายการนี้เท่านั้น — เปลี่ยนรายการ (กดเอง หรือรายการหายจากคิวเพราะ
  * ผู้ดูแลอีกคนบันทึกไปแล้ว) แผงนี้ถูกสร้างใหม่ทั้งหมด สลิปที่แนบไว้จึงไม่มีทางถูกส่งไปผิดรายการ
  *
  * onCompleted(item) — บันทึกการคืนสำเร็จ (หน้าเลื่อนไปรายการถัดไปแล้วโหลดคิวใหม่)
  * onChanged() — ข้อมูลรายการนี้เปลี่ยนหรืออาจไม่ตรงกับ server แล้ว ให้โหลดคิวใหม่
  */
 const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
   const [file, setFile] = useState(null);
-  const [note, setNote] = useState('');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   // เปลี่ยนสลิปแล้ว props ของ SlipImage เหมือนเดิมทุกตัว — ใส่ตัวนับนี้ใน key ให้โหลดรูปใหม่
@@ -86,15 +79,10 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
   const pending = item.status === 'REFUND_PENDING';
   const reason = refundReasonOf(item);
   const requestedAt = requestedAtOf(item, reason);
-  // เงินส่วนต่างบอกที่นั่งที่ย้ายในแถวที่นั่งแล้ว ส่วนค่าตั๋วบอกเหตุผลที่ระบบหรือผู้ดูแลบันทึกไว้ตอนยกเลิก
-  const requestDetail = isSeatChangeMoney(item) ? null : item.booking.cancelReason;
   const attaching = pending || editing;
-  // แก้ไขโดยไม่ได้เปลี่ยนอะไร = ไม่ต้องยิง server
-  const dirty = Boolean(file) || note.trim() !== (item.refundNote ?? '');
 
   const startEdit = () => {
     setFile(null);
-    setNote(item.refundNote ?? '');
     setEditing(true);
   };
 
@@ -118,7 +106,7 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
   const complete = async () => {
     setBusy(true);
     try {
-      await completeRefund(item.id, { note: note.trim(), file });
+      await completeRefund(item.id, { file });
       toast.success(t('admin.refundPage.completed'));
       onCompleted(item);
     } catch (error) {
@@ -130,11 +118,13 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
     }
   };
 
-  // ไม่แนบสลิปใหม่ = ใช้สลิปเดิม · หมายเหตุว่าง = ลบหมายเหตุเดิม (สถานะและเวลาที่คืนไม่เปลี่ยน ลูกค้าไม่ได้แจ้งเตือนซ้ำ)
+  // เปลี่ยนสลิปที่แนบผิด — สถานะและเวลาที่คืนไม่เปลี่ยน ลูกค้าไม่ได้แจ้งเตือนซ้ำ
+  // ส่งหมายเหตุเดิมกลับไปด้วย เพราะ server ถือว่าไม่ส่งหมายเหตุ = ลบทิ้ง
+  // (หน้านี้เลิกให้กรอกหมายเหตุแล้ว แต่รายการเก่าที่เคยมี ลูกค้ายังเห็นในหน้าต่างสลิปคืนเงิน)
   const saveEdit = async () => {
     setBusy(true);
     try {
-      await updateRefund(item.id, { note: note.trim(), file });
+      await updateRefund(item.id, { note: item.refundNote, file });
       toast.success(t('admin.refundPage.updated'));
       if (file) setSlipVersion((version) => version + 1);
       setFile(null);
@@ -161,14 +151,6 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
               disabled={busy}
               className="min-h-0 flex-1"
             />
-            <Input
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder={t('admin.refundPage.notePlaceholder')}
-              aria-label={t('admin.refundPage.note')}
-              maxLength={200}
-              disabled={busy}
-            />
           </div>
         ) : (
           <SlipImage
@@ -185,7 +167,7 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
         <div className={DETAIL_BODY}>
           <div className="flex items-start justify-between gap-2">
             <h2 className="font-code text-h2 font-semibold text-accent">{item.booking.code}</h2>
-            {/* รอคืน: ป้ายบอกเหตุที่ต้องคืน · คืนแล้ว: ที่เดียวกันเป็นปุ่มแก้ไข (เปลี่ยนสลิปที่แนบผิด หรือแก้หมายเหตุ) */}
+            {/* รอคืน: ป้ายบอกเหตุที่ต้องคืน · คืนแล้ว: ที่เดียวกันเป็นปุ่มแก้ไข (เปลี่ยนสลิปที่แนบผิด) */}
             {pending ? (
               <StatusBadge
                 status="REFUND_PENDING"
@@ -202,16 +184,17 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
             )}
           </div>
           <p className="mt-1 text-body-1 font-bold">{pick(item.booking.showtime.movie, 'title')}</p>
+          {/* โรง วันที่ เวลา เป็นชิปขอบทองพื้นโปร่ง ชุดเดียวกับฝั่งลูกค้า */}
           <div className="mt-3 flex flex-wrap gap-2">
-            <Chip tone="accent" size="sm">
-              {item.booking.showtime.theatre.name}
-            </Chip>
-            <Chip tone="accent" size="sm">
-              {formatDate(item.booking.showtime.startsAt, lang)}
-            </Chip>
-            <Chip tone="accent" size="sm">
-              {formatTime(item.booking.showtime.startsAt, lang)}
-            </Chip>
+            {[
+              theatreName(item.booking.showtime.theatre.name),
+              formatDate(item.booking.showtime.startsAt, lang),
+              formatTime(item.booking.showtime.startsAt, lang),
+            ].map((text, index) => (
+              <span key={index} className="rounded-md border border-accent px-1.5 py-0.5 text-body-2 text-accent">
+                {text}
+              </span>
+            ))}
           </div>
 
           <dl className={clsx(DETAIL_LIST, 'mt-4')}>
@@ -222,10 +205,7 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
             {pending && (
               <>
                 <dt className="text-muted">{t('admin.refundPage.requestedAt')}</dt>
-                <dd>
-                  {formatDateTime(requestedAt, lang)}
-                  {requestDetail && <span className="block text-caption text-muted">{requestDetail}</span>}
-                </dd>
+                <dd>{formatDateTime(requestedAt, lang)}</dd>
               </>
             )}
 
@@ -291,18 +271,11 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
             <section className="mt-5" aria-label={t('admin.refundPage.history')}>
               <h3 className="text-body-2 font-medium text-muted">{t('admin.refundPage.history')}</h3>
               <ol className="mt-3 flex flex-col gap-3">
-                <HistoryEvent dot="bg-muted" label={t(`admin.refundPage.event${reason}`)} at={requestedAt}>
-                  {requestDetail && <p className="text-caption text-muted">{requestDetail}</p>}
-                </HistoryEvent>
+                <HistoryEvent dot="bg-muted" label={t(`admin.refundPage.event${reason}`)} at={requestedAt} />
                 <HistoryEvent dot="bg-success" label={t('admin.refundPage.eventRefunded')} at={item.refundedAt}>
                   {item.refundedBy && (
                     <p className="text-caption text-muted">
                       {t('admin.refundPage.by', { name: item.refundedBy.name })}
-                    </p>
-                  )}
-                  {item.refundNote && (
-                    <p className="mt-1 rounded-md bg-surface-2 px-2 py-1 text-caption wrap-anywhere">
-                      {item.refundNote}
                     </p>
                   )}
                 </HistoryEvent>
@@ -337,7 +310,8 @@ const RefundWorkspace = ({ item, panelRef, onCompleted, onChanged }) => {
             <Button variant="secondary" className="flex-1" disabled={busy} onClick={cancelEdit}>
               {t('common.cancel')}
             </Button>
-            <Button variant="success" className="flex-1" loading={busy} disabled={!dirty} onClick={saveEdit}>
+            {/* ยังไม่ได้แนบสลิปใหม่ = ไม่มีอะไรเปลี่ยน ไม่ต้องยิง server */}
+            <Button variant="success" className="flex-1" loading={busy} disabled={!file} onClick={saveEdit}>
               {t('common.save')}
             </Button>
           </div>

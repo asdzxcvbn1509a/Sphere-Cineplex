@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, CheckCircle2, FileText, Hourglass, Ticket } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Hourglass } from 'lucide-react';
 import { apiError } from '../api/client.js';
 import { cancelSeatChange, getSeatChange, uploadSeatChangeSlip } from '../api/seatChanges.js';
 import { useI18n } from '../context/I18nContext.jsx';
@@ -16,7 +16,7 @@ import LoadingBlock from '../components/ui/LoadingBlock.jsx';
 import useApi from '../hooks/useApi.js';
 import useCountdown from '../hooks/useCountdown.js';
 import usePolling from '../hooks/usePolling.js';
-import { formatMoney, formatTime } from '../utils/format.js';
+import { formatMoney } from '../utils/format.js';
 
 /**
  * ชำระส่วนต่างของคำขอเปลี่ยนที่นั่ง (ย้ายไปที่นั่งที่แพงกว่า) — โครงเดียวกับหน้าชำระค่าตั๋ว
@@ -47,11 +47,9 @@ const SeatChangePaymentPage = () => {
 
   const status = change?.status;
   const paymentStatus = change?.payment?.status;
-  // ส่งสลิปหลังหมดเวลาแล้วที่นั่งใหม่ไม่ว่าง — คำขอคงหมดเวลา แต่สลิปรอผู้ดูแลตรวจเพื่อคืนเงิน
-  const lateWaiting = status === 'EXPIRED' && paymentStatus === 'PENDING_VERIFICATION';
 
   // ระหว่างรอผู้ดูแลตรวจสลิป หน้าจะอัปเดตเองโดยไม่ต้องกดรีเฟรช
-  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION' || lateWaiting);
+  usePolling(() => reload({ silent: true }), 5000, status === 'PENDING_VERIFICATION');
 
   const secondsLeft = useCountdown(status === 'PENDING_PAYMENT' ? holdDeadline : null, () =>
     reload({ silent: true }),
@@ -100,10 +98,6 @@ const SeatChangePaymentPage = () => {
   const holdOver = status === 'PENDING_PAYMENT' && (!holdDeadline || secondsLeft === 0);
   const expired = status === 'EXPIRED' || holdOver;
   const wasRejected = paymentStatus === 'REJECTED' && status === 'PENDING_PAYMENT';
-  // server บอกว่ายังรับสลิปส่งช้าได้ — สำหรับคนที่โอนแล้วแต่ส่งหลักฐานไม่ทัน
-  const lateUpload = expired && !lateWaiting && change.canUploadSlip;
-  const lateRefund = status === 'EXPIRED' && ['REFUND_PENDING', 'REFUNDED'].includes(paymentStatus);
-  const closed = expired && !lateUpload && !lateWaiting && !lateRefund;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -134,12 +128,12 @@ const SeatChangePaymentPage = () => {
           <CheckCircle2 className="mx-auto mb-3 text-success" size={40} />
           <h2 className="text-h2 font-bold">{t('seatChange.completedTitle')}</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <Button as={Link} to={`/booking/${booking.id}/ticket`}>
-              <Ticket size={16} /> {t('payment.viewTicket')}
+            <Button as={Link} to={`/booking/${booking.id}/ticket`} variant="cream">
+              {t('payment.viewTicket')}
             </Button>
             {payment?.receiptNo && (
-              <Button as={Link} to={`/booking/${booking.id}/receipt?payment=${payment.id}`} variant="secondary">
-                <FileText size={16} /> {t('seatChange.viewReceipt')}
+              <Button as={Link} to={`/booking/${booking.id}/receipt?payment=${payment.id}`} variant="cream">
+                {t('seatChange.viewReceipt')}
               </Button>
             )}
           </div>
@@ -155,53 +149,21 @@ const SeatChangePaymentPage = () => {
         </div>
       )}
 
-      {lateWaiting && (
-        <div className="card border-info/40 p-6 text-center sm:p-8">
-          <Hourglass className="mx-auto mb-3 animate-pulse text-info" size={40} />
-          <h2 className="text-h2 font-bold">{t('seatChange.lateWaitingTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
-            {t('seatChange.lateWaitingBody')}
-          </p>
-        </div>
-      )}
-
-      {lateRefund && (
-        <div className="card border-accent/40 p-6 text-center sm:p-8">
-          <CheckCircle2 className="mx-auto mb-3 text-accent" size={40} />
-          <h2 className="text-h2 font-bold">{t('seatChange.lateRefundTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('payment.lateRefundBody')}</p>
-          <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
-            {t('payment.goMyBookings')}
-          </Button>
-        </div>
-      )}
-
-      {lateUpload && (
-        <div className="flex flex-col gap-4">
-          <div className="card border-accent/40 p-5 sm:p-6">
-            <h2 className="flex items-center gap-2 text-h2 font-bold">
-              <AlertTriangle size={18} className="shrink-0 text-accent" /> {t('seatChange.lateTitle')}
-            </h2>
-            <p className="mt-2 text-body-2 text-muted sm:text-body-1">
-              {t('seatChange.lateBody', {
-                time: change.lateSlipUntil ? formatTime(change.lateSlipUntil, lang) : '—',
-              })}
-            </p>
-            <p className="mt-3 text-body-2 text-muted">
-              {t('payment.reference')}: <span className="font-code text-fg">{payment.reference}</span>
-            </p>
-          </div>
-          <SlipUploadForm onUpload={handleUpload} />
-        </div>
-      )}
-
-      {(closed || status === 'CANCELLED') && (
+      {(expired || status === 'CANCELLED') && (
         <div className="card p-6 text-center sm:p-8">
           <AlertTriangle className="mx-auto mb-3 text-muted" size={40} />
           <h2 className="text-h2 font-bold">
             {status === 'CANCELLED' ? t('seatChange.cancelledTitle') : t('seatChange.expiredTitle')}
           </h2>
           <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">{t('seatChange.expiredBody')}</p>
+          {/* หมดเวลาแล้วไม่รับสลิปส่วนต่างอีก — คนที่โอนแล้วแต่ส่งไม่ทันต้องรู้ว่าต้องติดต่อเจ้าหน้าที่ */}
+          {status !== 'CANCELLED' && (
+            <p className="mx-auto mt-2 max-w-2xl text-body-2 text-muted sm:text-body-1">
+              {t('seatChange.expiredContact')}{' '}
+              {/* "พร้อมรหัสการจอง ..." ห้ามตัดกลางวลี — ถ้าไม่พอที่ให้ขึ้นบรรทัดใหม่ทั้งก้อน */}
+              <span className="whitespace-nowrap">{t('payment.expiredContactCode', { code: booking.code })}</span>
+            </p>
+          )}
           <Button as={Link} to="/my-bookings" variant="secondary" className="mt-4">
             {t('payment.goMyBookings')}
           </Button>
@@ -235,6 +197,7 @@ const SeatChangePaymentPage = () => {
               secondsLeft={secondsLeft}
               downloadName={`promptpay-${booking.code}-seats`}
               notice={t('seatChange.payNotice')}
+              noteLabel={t('seatChange.payNoticeLabel')}
             />
 
             <SlipUploadForm onUpload={handleUpload} />

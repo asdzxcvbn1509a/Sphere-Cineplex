@@ -44,6 +44,7 @@ CineBook — movie theatre seat booking for a Thai audience: React SPA (`client/
 - `client/src/pages/SeatSelectionPage.jsx` and `ChangeSeatsPage.jsx` hard-code `MAX_SEATS` / `HOLD_MINUTES` to match the server's defaults
 - The fit-to-screen admin lists (bookings, showtimes, movies, theatres, users; `components/admin/fitLayout.js` + `hooks/useFitPageSize.js`) compute rows per page from a `ROW_HEIGHT` constant in each page. Keep it equal to the rows' `xl:h-*` class, and keep every `xl` cell to a fixed number of lines (`xl:truncate`, `line-clamp`), or rows overflow the box
 - `docs/` is gitignored except its top-level `*.md` files
+- The seed (`server/prisma/seed.js` + `seed/`) writes finished history straight to the database in `seed/sales.js` and drives open states through the real services in `seed/scenarios.js`. A schema change or a changed state transition must be mirrored in `sales.js`; never call `approvePayment`/`approveTopUp` from the seed (they email receipts)
 
 ## Conventions
 

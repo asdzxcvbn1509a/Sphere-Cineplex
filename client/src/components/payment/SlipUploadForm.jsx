@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Upload } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
 import Button from '../ui/Button.jsx';
 
@@ -38,17 +37,11 @@ const SlipUploadForm = ({ onUpload }) => {
   return (
     // ไม่ใส่ระยะห่างด้านนอก — หน้าที่เรียกใช้จัดเอง (เรียงต่อจากการ์ด QR)
     <form onSubmit={handleSubmit} className="card p-5 sm:p-6">
-      <h2 className="flex items-center gap-2 text-h2 font-semibold">
-        <Upload size={18} className="text-accent" /> {t('payment.uploadTitle')}
-      </h2>
+      <h2 className="text-h2 font-semibold">{t('payment.uploadTitle')}</h2>
       <p className="mt-1 text-body-2 text-muted">{t('payment.uploadHint')}</p>
 
-      <label className="mt-4 flex min-h-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line px-4 py-6 text-center transition hover:border-accent/60 sm:min-h-72">
-        {preview ? (
-          <img src={preview} alt="" className="max-h-64 rounded-lg object-contain" />
-        ) : (
-          <Upload size={22} className="text-muted" />
-        )}
+      <label className="mt-4 flex min-h-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gold-40 px-4 py-6 text-center transition hover:border-gold-30 sm:min-h-72">
+        {preview && <img src={preview} alt="" className="max-h-64 rounded-lg object-contain" />}
         {/* ชื่อไฟล์จากมือถือยาวติดกันไม่มีช่องว่าง (IMG_20261002_…) ต้องตัดกลางคำได้ ไม่งั้นดันจอล้น */}
         <span className="text-body-2 text-muted wrap-anywhere">{file ? file.name : t('payment.chooseFile')}</span>
         <input
@@ -59,7 +52,14 @@ const SlipUploadForm = ({ onUpload }) => {
         />
       </label>
 
-      <Button type="submit" size="lg" className="mt-4 w-full" loading={uploading} disabled={!file}>
+      <Button
+        type="submit"
+        size="lg"
+        variant="navy"
+        className="mt-4 w-full"
+        loading={uploading}
+        disabled={!file}
+      >
         {t('payment.submitSlip')}
       </Button>
     </form>

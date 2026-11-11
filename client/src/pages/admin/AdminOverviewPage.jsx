@@ -20,7 +20,7 @@ import ErrorBlock from '../../components/ui/ErrorBlock.jsx';
 import LoadingBlock from '../../components/ui/LoadingBlock.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import useApi from '../../hooks/useApi.js';
-import { formatDateTime, formatMoney, formatPercent, formatTime } from '../../utils/format.js';
+import { formatBaht, formatDateTime, formatPercent, formatTime } from '../../utils/format.js';
 
 /**
  * การ์ดตัวเลขสรุป — trend (ถ้ามี) อยู่ชิดขวาของแถวตัวเลข
@@ -127,7 +127,7 @@ const QueuePanel = ({ icon: Icon, title, to, rows, statusLabel }) => {
                     {row.customer}
                   </span>
                 </td>
-                <td className="px-3 py-3">{formatMoney(row.amount, lang)}</td>
+                <td className="px-3 py-3">{formatBaht(row.amount, lang)}</td>
                 <td className="py-3 pl-3 pr-5 sm:pr-6">
                   <StatusBadge status={row.status} label={statusLabel(row)} />
                 </td>
@@ -186,7 +186,7 @@ const AdminOverviewPage = () => {
           icon={Banknote}
           label={t('admin.revenueToday')}
           // ฿ นำหน้าแทนหน่วย "บาท" ต่อท้าย — ตัวเลขใหญ่สั้นลง เหลือที่วาง % เทียบเมื่อวานข้าง ๆ
-          value={`฿${formatMoney(data.revenueToday, lang)}`}
+          value={formatBaht(data.revenueToday, lang)}
           tone="text-accent"
           trend={
             <RevenueTrend

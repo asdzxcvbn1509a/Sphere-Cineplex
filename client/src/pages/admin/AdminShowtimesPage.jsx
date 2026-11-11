@@ -26,7 +26,7 @@ import { slicePage } from '../../utils/pagination.js';
 const ROW_HEIGHT = 56;
 
 const AdminShowtimesPage = () => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
   const [movies, setMovies] = useState([]);
   const [theatres, setTheatres] = useState([]);
@@ -227,7 +227,7 @@ const AdminShowtimesPage = () => {
                         data-label={t('admin.showtimeForm.theatre')}
                         title={`${showtime.theatre.name} (${showtime.theatre.screenType})`}
                       >
-                        {showtime.theatre.name}
+                        {theatreName(showtime.theatre.name)}
                         <span className="ml-1 text-caption">({showtime.theatre.screenType})</span>
                       </td>
                       <td className="px-4 py-3 text-muted xl:truncate" data-label={t('admin.showtimeForm.basePrice')}>
@@ -244,11 +244,7 @@ const AdminShowtimesPage = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap justify-end gap-1 xl:flex-nowrap">
-                          {showtime.status === 'SCHEDULED' && (
-                            <Button variant="ghost" size="sm" title={t('common.edit')} onClick={() => openEdit(showtime)}>
-                              <Pencil size={14} />
-                            </Button>
-                          )}
+                          {/* ยกเลิกรอบขึ้นก่อน — งานที่ผู้ดูแลมาหน้านี้เพื่อทำบ่อยที่สุดเมื่อรอบมีปัญหา */}
                           {canCancelShowtime(showtime) && (
                             <Button
                               variant="ghost"
@@ -257,6 +253,11 @@ const AdminShowtimesPage = () => {
                               onClick={() => openCancel(showtime)}
                             >
                               <Ban size={14} className="text-accent" />
+                            </Button>
+                          )}
+                          {showtime.status === 'SCHEDULED' && (
+                            <Button variant="ghost" size="sm" title={t('common.edit')} onClick={() => openEdit(showtime)}>
+                              <Pencil size={14} />
                             </Button>
                           )}
                           <Button
@@ -315,7 +316,7 @@ const AdminShowtimesPage = () => {
             {t('admin.showtimeForm.deleteBody', {
               time: formatDateTime(deleteTarget.startsAt, lang),
               movie: pick(deleteTarget.movie, 'title'),
-              theatre: deleteTarget.theatre.name,
+              theatre: theatreName(deleteTarget.theatre.name),
             })}
           </p>
         )}
@@ -336,7 +337,7 @@ const AdminShowtimesPage = () => {
               {t('admin.showtimeForm.cancelBody', {
                 time: formatDateTime(cancelTarget.startsAt, lang),
                 movie: pick(cancelTarget.movie, 'title'),
-                theatre: cancelTarget.theatre.name,
+                theatre: theatreName(cancelTarget.theatre.name),
               })}
             </p>
             <p className="rounded-lg border border-danger/40 bg-danger-bg px-3 py-2 text-body-2 text-danger">

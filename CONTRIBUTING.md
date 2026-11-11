@@ -33,7 +33,7 @@ Conventions and checklists for changing CineBook. Setting up a machine is covere
   | Lock a showtime or booking row inside a transaction | `lockShowtime`, `lockBooking` (`services/locks.js`) |
   | 409 for a lost compare-and-set | `bookingStateChanged()`, `paymentNotPending()` (`services/locks.js`) |
   | Seat taken by someone else | `isSeatConflict(err)`, `seatTakenError()` (`services/locks.js`) |
-  | Accept a slip for a booking or a seat change | `queueSlipForReview()`, `slipUploadWindow()`, `discardSlipOnError()` (`services/slips.js`) |
+  | Accept a slip for a booking or a seat change | `queueSlipForReview()`, `canUploadSlip()`, `discardSlipOnError()` (`services/slips.js`) |
   | Seat-change rules / response shapes | `services/seatChangeRules.js` |
   | Not found / not the owner | `bookingNotFound()`, `notBookingOwner(message)`, `canAccessBooking()` (`utils/bookingAccess.js`) |
   | A paginated admin list | `paginationQuery` in the route, `findPage()` in the service (`utils/pagination.js`) |
@@ -71,7 +71,7 @@ These are the parts where a mistake loses money or double-books a seat. For any 
 
 - Change `server/prisma/schema.prisma`, run `npm run db:migrate` locally and **commit the migration folder** — production only runs `prisma migrate deploy` ([DEPLOY.md](DEPLOY.md#11-future-updates))
 - Never change the production schema by hand (e.g. in Supabase's Table Editor)
-- Update `prisma/seed.js` and the test fixtures if the new columns need data
+- Update the seed and the test fixtures if the new columns need data. The seed writes finished history rows straight to the database in `prisma/seed/sales.js`, so new columns (or changed state rules) must be mirrored there
 
 ## UI text and languages
 

@@ -2,7 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 
 // controllers
-import { listNotifications, markAllRead, markRead } from '../controllers/notifications.js';
+import { deleteNotification, listNotifications, markAllRead, markRead } from '../controllers/notifications.js';
 // middleware
 import { authenticate } from '../middleware/authenticate.js';
 import { queryBoolean, validate } from '../middleware/validate.js';
@@ -21,5 +21,7 @@ router.get('/', validate({ query: listQuerySchema }), listNotifications);
 router.post('/read-all', markAllRead);
 // @ENDPOINT http://localhost:4000/api/notifications/:id/read
 router.post('/:id/read', markRead);
+// @ENDPOINT http://localhost:4000/api/notifications/:id
+router.delete('/:id', deleteNotification);
 
 export default router;

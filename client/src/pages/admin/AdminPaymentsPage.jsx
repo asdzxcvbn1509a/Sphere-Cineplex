@@ -7,7 +7,6 @@ import { useI18n } from '../../context/I18nContext.jsx';
 import { useAdminQueueStore } from '../../store/adminQueueStore.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import Button from '../../components/ui/Button.jsx';
-import Chip from '../../components/ui/Chip.jsx';
 import ConfirmModal from '../../components/ui/ConfirmModal.jsx';
 import Field from '../../components/ui/Field.jsx';
 import Textarea from '../../components/ui/Textarea.jsx';
@@ -33,16 +32,6 @@ import { formatBaht, formatDate, formatDateTime, formatTime } from '../../utils/
 /** สลิปส่วนต่างเปลี่ยนที่นั่ง — อนุมัติแล้วย้ายที่นั่งจริงและออกใบเสร็จส่วนต่าง */
 const isTopUp = (payment) => payment.kind === 'SEAT_CHANGE_TOPUP';
 
-/**
- * สลิปที่ส่งหลังหมดเวลาแล้วและเอาที่นั่งคืนไม่ได้ — อนุมัติ = เข้าคิวคืนเงิน
- * ค่าตั๋ว: การจองยังเป็น EXPIRED · ส่วนต่างเปลี่ยนที่นั่ง: คำขอยังเป็น EXPIRED (การจองเป็น PAID ตามเดิม)
- */
-const isLateSlip = (payment) => {
-  return isTopUp(payment)
-    ? payment.seatChange?.status === 'EXPIRED'
-    : payment.booking.status === 'EXPIRED';
-};
-
 /** แถวในแผงรายการ — เวลาท้ายแถวคือสลิปรอมานานเท่าไหร่ */
 const rowOf = (payment) => ({
   code: payment.booking.code,
@@ -52,7 +41,7 @@ const rowOf = (payment) => ({
 });
 
 const AdminPaymentsPage = () => {
-  const { t, lang, pick } = useI18n();
+  const { t, lang, pick, theatreName } = useI18n();
   const toast = useToast();
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState('oldest');
@@ -101,13 +90,10 @@ const AdminPaymentsPage = () => {
     setBusyId(payment.id);
     try {
       await approvePayment(payment.id);
-      // สลิปที่ส่งหลังหมดเวลาและที่นั่งไม่ว่างแล้ว อนุมัติ = เข้าคิวคืนเงิน ไม่ได้ออกตั๋ว
       toast.success(
-        isLateSlip(payment)
-          ? t('admin.paymentQueue.lateApproved', { code: payment.booking.code })
-          : isTopUp(payment)
-            ? t('admin.paymentQueue.topUpApproved', { code: payment.booking.code })
-            : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
+        isTopUp(payment)
+          ? t('admin.paymentQueue.topUpApproved', { code: payment.booking.code })
+          : `${payment.booking.code} → ${t('bookings.statusPAID')}`,
       );
       moveOnFrom(payment);
       await reload({ silent: true });
@@ -185,26 +171,22 @@ const AdminPaymentsPage = () => {
                 <div className={DETAIL_BODY}>
                   <h2 className="font-code text-h2 font-semibold text-accent">{selected.booking.code}</h2>
                   <p className="mt-1 text-body-1 font-bold">{pick(selected.booking.showtime.movie, 'title')}</p>
+                  {/* โรง วันที่ เวลา เป็นชิปขอบทองพื้นโปร่ง ชุดเดียวกับฝั่งลูกค้า */}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Chip tone="accent" size="sm">
-                      {selected.booking.showtime.theatre.name}
-                    </Chip>
-                    <Chip tone="accent" size="sm">
-                      {formatDate(selected.booking.showtime.startsAt, lang)}
-                    </Chip>
-                    <Chip tone="accent" size="sm">
-                      {formatTime(selected.booking.showtime.startsAt, lang)}
-                    </Chip>
+                    {[
+                      theatreName(selected.booking.showtime.theatre.name),
+                      formatDate(selected.booking.showtime.startsAt, lang),
+                      formatTime(selected.booking.showtime.startsAt, lang),
+                    ].map((text, index) => (
+                      <span key={index} className="rounded-md border border-accent px-1.5 py-0.5 text-body-2 text-accent">
+                        {text}
+                      </span>
+                    ))}
                   </div>
 
                   {isTopUp(selected) && (
                     <p className="mt-3 rounded-lg border border-info/40 bg-info-bg px-3 py-2 text-caption text-info sm:text-body-2">
                       {t('admin.paymentQueue.topUp')}
-                    </p>
-                  )}
-                  {isLateSlip(selected) && (
-                    <p className="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-caption text-warning sm:text-body-2">
-                      {isTopUp(selected) ? t('admin.paymentQueue.lateTopUp') : t('admin.paymentQueue.lateSlip')}
                     </p>
                   )}
 

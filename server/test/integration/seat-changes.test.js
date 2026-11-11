@@ -16,6 +16,7 @@ import { getQueueCounts } from '../../src/services/reports.js';
 import {
   adminChangeSeats,
   cancelSeatChange,
+  getSeatChange,
   releaseExpiredSeatChanges,
   requestSeatChange,
   uploadSeatChangeSlip,
@@ -33,6 +34,7 @@ import {
   createPaidBooking,
   createShowtimeFixture,
   createUser,
+  fileExists,
   makeSlipFile,
   minutesFromNow,
   paymentOf,
@@ -593,51 +595,35 @@ describe('ผู้ดูแลย้ายที่นั่งแทนลู�
   });
 });
 
-describe('สลิปส่วนต่างที่ส่งหลังหมดเวลา', () => {
-  test('ที่นั่งใหม่ยังว่าง → กันคืนแล้วเข้าคิวตรวจตามปกติ อนุมัติแล้วย้ายได้', async () => {
+describe('สลิปส่วนต่างหลังหมดเวลา', () => {
+  test('คำขอหมดเวลาแล้ว — ส่งสลิปส่วนต่างไม่ได้ ที่นั่งใหม่ว่าง และที่นั่งเดิมของการจองไม่เปลี่ยน', async () => {
     const { showtime, seats } = await createShowtimeFixture();
     const [admin, user] = await Promise.all([createAdmin(), createUser()]);
     const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[0]] });
     const pending = await change(paid, user, [seats[4]]);
     await expireNow(pending.seatChange.id);
 
-    const late = await payTopUp(pending.seatChange.id, user);
-    assert.equal(late.status, 'PENDING_VERIFICATION');
-    assert.equal(await seatStatus(showtime, 'B1'), 'HELD');
+    const detail = await getSeatChange({ seatChangeId: pending.seatChange.id, requester: user });
+    assert.equal(detail.canUploadSlip, false);
 
-    const topUp = await paymentOfSeatChange(pending.seatChange.id);
-    const approved = await approvePayment({ paymentId: topUp.id, adminId: admin.id });
-    assert.deepEqual(labelsOf(approved), ['B1']);
-  });
-
-  test('ที่นั่งใหม่ถูกจองไปแล้ว → เข้าคิวแบบคืนเงิน อนุมัติแล้วคืนส่วนต่าง ไม่มีใบเสร็จ และการจองไม่เปลี่ยน', async () => {
-    const { showtime, seats } = await createShowtimeFixture();
-    const [admin, user, other] = await Promise.all([createAdmin(), createUser(), createUser()]);
-    const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[0]] });
-    const pending = await change(paid, user, [seats[4]]);
-    await expireNow(pending.seatChange.id);
-    await book({ user: other, showtime, seats: [seats[4]] });
-
-    const late = await payTopUp(pending.seatChange.id, user);
-    assert.equal(late.status, 'EXPIRED');
-    assert.equal(late.payment.status, 'PENDING_VERIFICATION');
-    assert.equal((await getQueueCounts()).pendingSlips, 1);
-
-    const topUp = await paymentOfSeatChange(pending.seatChange.id);
-    await approvePayment({ paymentId: topUp.id, adminId: admin.id });
-
-    const refunded = await paymentOfSeatChange(pending.seatChange.id);
-    assert.equal(refunded.status, 'REFUND_PENDING');
-    assert.equal(refunded.refundAmount, 80);
-    assert.equal(refunded.receiptNo, null);
-    assert.equal(await prisma.notification.count({ where: { type: 'SEAT_CHANGE_LATE_REFUND' } }), 1);
+    const file = await makeSlipFile();
+    await assert.rejects(
+      uploadSeatChangeSlip({ seatChangeId: pending.seatChange.id, userId: user.id, file }),
+      apiErrorWith('HOLD_EXPIRED', 409),
+    );
+    assert.equal(await fileExists(file.path), false);
+    const closed = await prisma.seatChange.findUnique({ where: { id: pending.seatChange.id } });
+    assert.equal(closed.status, 'EXPIRED');
+    assert.equal((await paymentOfSeatChange(pending.seatChange.id)).status, 'REJECTED');
+    assert.equal(await seatStatus(showtime, 'B1'), 'AVAILABLE');
     assert.deepEqual(labelsOf(await getBookingById(paid.id)), ['A1']);
+    assert.equal((await getQueueCounts()).pendingSlips, 0);
   });
 
-  test('ส่งสลิปส่วนต่างพร้อมกับที่ job กำลังปิดคำขอ — ลูกค้าไม่เห็น error และที่นั่งใหม่ยังถูกกันไว้', async () => {
+  test('ส่งสลิปส่วนต่างพร้อมกับที่ job กำลังปิดคำขอ — ชนะได้ฝั่งเดียว และที่นั่งเดิมไม่ถูกแตะ', async () => {
     const { showtime, seats } = await createShowtimeFixture();
     const admin = await createAdmin();
-    // วนหลายรอบให้มีโอกาสสลับลำดับกันจริง ๆ — บางรอบ job ปิดคำขอก่อน (สลิปไปทางส่งช้า) บางรอบสลิปเข้าก่อน
+    // วนหลายรอบให้มีโอกาสสลับลำดับกันจริง ๆ — บางรอบ job ปิดคำขอก่อน บางรอบสลิปเข้าก่อน
     for (let i = 0; i < 4; i += 1) {
       const user = await createUser();
       const paid = await createPaidBooking({ user, admin, showtime, seats: [seats[i]] });
@@ -652,9 +638,17 @@ describe('สลิปส่วนต่างที่ส่งหลังห�
         payTopUp(pending.seatChange.id, user),
       ]);
 
-      assert.equal(upload.status, 'fulfilled', upload.reason?.message);
-      assert.equal(upload.value.status, 'PENDING_VERIFICATION');
-      assert.equal(await seatStatus(showtime, `B${i + 1}`), 'HELD');
+      const current = await prisma.seatChange.findUnique({ where: { id: pending.seatChange.id } });
+      if (upload.status === 'fulfilled') {
+        assert.equal(current.status, 'PENDING_VERIFICATION');
+        assert.equal(await seatStatus(showtime, `B${i + 1}`), 'HELD');
+      } else {
+        apiErrorWith('HOLD_EXPIRED', 409)(upload.reason);
+        assert.equal(current.status, 'EXPIRED');
+        assert.equal((await paymentOfSeatChange(pending.seatChange.id)).status, 'REJECTED');
+        assert.equal(await seatStatus(showtime, `B${i + 1}`), 'AVAILABLE');
+      }
+      assert.deepEqual(await heldSeatIds(paid.id), [seats[i].id]);
     }
   });
 });

@@ -2,17 +2,18 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { MoveHorizontal, X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext.jsx';
-import { formatMoney } from '../../utils/format.js';
-import { zoneRing } from './zoneRing.js';
+import { formatBaht, formatMoney } from '../../utils/format.js';
+import { zoneFill } from './zoneRing.js';
 
 /**
  * ผังที่นั่ง
  * ผลสำรวจ (13/30 คน) ให้ "การแยกสีที่นั่งว่าง/จองแล้วให้ชัดเจน" เป็นเรื่องสำคัญที่สุด
  * จึงใช้สามสถานะที่ต่างกันทั้งสี รูปร่าง และไอคอน ไม่พึ่งสีอย่างเดียว (เผื่อผู้ใช้ตาบอดสี)
- * ที่นั่งที่เลือกเป็นสีน้ำเงิน (รายการที่เลือกตาม DS) ไม่ใช่สีทอง — ปุ่มยืนยันสีทองในแถบล่างจะได้ไม่ถูกแย่งความเด่น
+ * ที่นั่งว่างเป็นพื้นน้ำเงินตามโซน (zoneFill) ที่นั่งที่เลือกจึงเป็นขอบเขียวพื้นโปร่ง ไม่ใช่สีทอง
+ * — ปุ่มยืนยันสีทองในแถบล่างจะได้ไม่ถูกแย่งความเด่น
  *
  * ownIds = ที่นั่งเดิมของการจองที่กำลังเปลี่ยนที่นั่ง — ในผังเป็น "จองแล้ว" (ของลูกค้าเอง) แต่ต้องกดเอาออก/เลือกคืนได้
- * ตอนไม่ได้เลือกไว้จึงแสดงขอบเส้นประ ให้รู้ว่าเป็นที่นั่งเดิมที่จะถูกปล่อย
+ * ตอนไม่ได้เลือกไว้จึงแสดงเส้นประสีเขียวแบบเดียวกับที่นั่งที่เลือก ให้รู้ว่าเป็นที่นั่งเดิมที่จะถูกปล่อย
  *
  * โรง 12–16 ที่ต่อแถวกว้างเกินจอมือถือ ถ้าย่อที่นั่งให้พอดีจอจะเล็กจนกดพลาด จึงให้เลื่อนแนวนอนแทน
  * โดยเปิดมาที่ช่วงที่นั่งที่เลือกค้างไว้หรือกลางโรง อักษรแถวติดขอบซ้าย และบอกผู้ใช้ว่าเลื่อนดูได้
@@ -91,24 +92,23 @@ const SeatMap = ({ rows, selectedIds, onToggle, disabled = false, ownIds = [] })
                           isTaken ? t('seats.occupied') : formatMoney(seat.price)
                         }${isOwn ? ` · ${t('seatChange.original')}` : ''}`}
                         aria-pressed={isSelected}
-                        title={`${label} · ${formatMoney(seat.price)} ${t('common.baht')}`}
+                        title={`${label} · ${formatBaht(seat.price)}`}
                         className={clsx(
                           'flex h-7 items-center justify-center rounded-md border text-caption font-medium transition sm:h-8',
                           seat.zone === 'SOFA' ? 'w-11 sm:w-12' : 'w-7 sm:w-8',
-                          // พื้นน้ำเงินต่างจากพื้นการ์ดแค่สีโทน — ขอบฟ้าอ่อน ขยายขนาด และเงา ทำให้เห็นชัดจากระยะไกล
-                          isSelected &&
-                            'scale-105 border-selected-line bg-selected text-on-selected shadow-lg shadow-selected-line/20',
-                          !isSelected &&
-                            isTaken &&
-                            'cursor-not-allowed border-danger/30 bg-danger-bg text-danger/70',
-                          // ที่นั่งเดิมที่ยังไม่ได้เลือกคืน — เส้นประโทนเดียวกับที่นั่งที่เลือก บอกว่าเคยเป็นของเราและจะถูกปล่อย
+                          // ที่นั่งว่างเป็นพื้นน้ำเงินตามโซน ที่นั่งที่เลือกจึงเป็นขอบเขียวพื้นโปร่ง ตัดกับทุกโซนชัด
+                          // ขยายขนาดเล็กน้อยให้เห็นชัดจากระยะไกล
+                          isSelected && 'scale-105 border-2 border-success bg-transparent text-success',
+                          !isSelected && isTaken && 'cursor-not-allowed border-danger bg-danger/70 text-cream-10',
+                          // ที่นั่งเดิมที่ยังไม่ได้เลือกคืน — เส้นประโทนเขียวเดียวกับที่นั่งที่เลือก บอกว่าเคยเป็นของเราและจะถูกปล่อย
+                          // (ถ้าใช้น้ำเงินแบบเดิมจะกลืนกับที่นั่งว่างที่เป็นพื้นน้ำเงินตามโซน)
                           !isSelected &&
                             isOwn &&
-                            'border-dashed border-selected-line bg-selected/30 text-selected-line hover:bg-selected/60',
+                            'border-dashed border-success bg-success/15 text-success hover:bg-success/30',
                           !isSelected &&
                             !isTaken &&
                             !isOwn &&
-                            `bg-surface-2 text-muted hover:border-accent hover:text-accent ${zoneRing[seat.zone]}`,
+                            `hover:border-accent ${zoneFill[seat.zone]}`,
                         )}
                       >
                         {isTaken && !isSelected ? <X size={11} strokeWidth={3} /> : seat.seatNumber}

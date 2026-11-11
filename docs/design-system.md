@@ -76,9 +76,12 @@ The pattern is `border-<tone>/30 bg-<tone>-bg text-<tone>`, as in `StatusBadge`,
 | `selected` / `selected-line` / `on-selected` | Blue 70 / Blue 30 / Cream 20 | Selected items |
 | `field` / `field-line` / `field-muted` | Cream 30 / Cream 40 / Cream 90 | Inputs, tab bars and checkboxes / their border / icons and inactive tabs on cream |
 | `paper` | Cream 10 | Light document surfaces (E-Ticket, receipt, QR frames) |
+| `danger-solid` / `danger-solid-hover` | `#D00000` / `#A80000` | Solid red fill with Cream 10 text: the customer's cancel button (`Button variant="dangerSolid"`) |
+| `danger-bright` / `danger-bright-hover` | `#F25C5C` / `#E04444` | Bright red fill with Cocoa 100 text: confirm buttons of destructive admin actions on blue modals (`variant="dangerBright"`) |
 
 Contrast ratios (WCAG): `fg` on `page` 12.3:1 · `muted` on `page` 4.7:1 and on `surface` 6.3:1 · `ink` on gold 6.9:1 · cream on blue 11.4:1 · `ink` on `field` 13:1 · `field-muted` on `field` 5.2:1.
 A blue fill differs from the dark surfaces by hue only, which is why selected items also get the light `selected-line` border.
+The two solid reds sit outside the Figma ramps: `danger` is a light tone made for text on dark backgrounds, so it can't carry a filled button.
 
 ### Scopes
 
@@ -126,15 +129,23 @@ For the same reason the theme is not `inline`: utilities have to read `var(--col
 
 ## Component recipes
 
-- **Selected item** (nav link, admin menu, date strip, time slot, seat): `border border-selected-line bg-selected text-on-selected`. Give unselected siblings `border border-transparent` so nothing shifts when the selection moves
-- **Tabs**: `components/ui/Tabs.jsx` (cream track, blue selected tab)
-- **Status**: `StatusBadge` (pill with a dot) for booking, payment and movie statuses; `Chip` for short labels (`tone="accent"` is the gold info chip, the other tones are status colors)
-- **Card**: `.card` (surface with a `card-line` border). Cards that are links or buttons add `hover:border-accent`
+- **Header nav link (current page)**: `border border-accent text-accent` on a transparent background (gold outline), with `border-transparent` on the other links
+- **Selected item** (movie date strip, admin queue list, admin seat-layout editor): `border border-selected-line bg-selected text-on-selected`. Give unselected siblings `border border-transparent` so nothing shifts when the selection moves. Pages drawn from the newer wireframes override it: the admin sidebar uses `border-cream-70 bg-cream-80 text-cream-10`, the time slots in the showtime form use `bg-cocoa-100 text-cream-10` on their cream panel, and the customer seat map uses green (see Seat map)
+- **Tabs**: `components/ui/Tabs.jsx` (cream track, blue selected tab by default). `activeClassName` changes the selected tab: My bookings uses `bg-cocoa-100 text-cream-20`; the refunds and reports pages use `bg-cocoa-100 text-cream-10` on a `border border-gold-50 bg-gold-20` track (`className`)
+- **Status**: `StatusBadge` (pill with a dot) for booking, payment and movie statuses; its `tone` prop forces a tone, as on a cancelled booking card (red "cancelled", plus a green "refunded" badge once the money is back). `Chip` for short labels (`tone="accent"` is the gold info chip, the other tones are status colors)
+- **Showtime info chips** (theatre, date, time): outlined gold spans, `rounded-md border border-accent px-1.5 py-0.5 text-accent`, on the booking card, seat selection, change seats and the admin payment and refund panels. The payment summary and the movie detail page still use `Chip tone="accent"`
+- **Card**: `.card` (surface with a `card-line` border). Cards that are links or buttons add `hover:border-accent`. Booking cards, the PromptPay panel, the payment status cards and the account forms use a dark gold-bordered card instead: `rounded-xl border border-gold-40 bg-cocoa-100`
 - **Inputs**: `Input`, `Select`, `Textarea`, `PasswordInput` (all `.input-base`). They are cream with a light `color-scheme`, so date pickers and select arrows stay visible. Icons placed on an input use `text-field-muted`
-- **Buttons**: `Button` — `primary` is gold with `ink` text, `secondary` is outlined with `line-strong`, `ghost` highlights with `bg-fg/8` so it works on any surface
-- **Seat map**: selected seats are blue; the zone rings come from `components/seatmap/zoneRing.js`, and no zone uses blue
+- **Gold forms**: the login, register, forgot/reset password and profile cards restyle the inputs inside them from the card itself: `[&_.input-base]:border-gold-50 [&_.input-base]:bg-gold-20 [&_.text-muted]:text-cream-30 [&_label>span:first-child]:text-body-1 [&_label>span:first-child]:text-fg!`. The admin modal forms (movie, theatre, showtime, user) use only the gold input border and the label part. Inputs elsewhere stay cream
+- **Buttons**: `Button` — `primary` is gold with `ink` text, `secondary` is outlined with `line-strong`, `ghost` highlights with `bg-fg/8` so it works on any surface. `navy` (Blue 90 with a gold border) is for secondary actions on the payment and account pages (save QR, send slip, save); `cream` (Cream 30 with a gold border, dark text) opens tickets and receipts; `dangerSolid` and `dangerBright` use the solid reds above
+- **Pagination**: the current page is gold (`border-accent bg-accent text-cocoa-100`); other pages and the arrows are `border-cocoa-80 bg-cocoa-100 text-cream-10`
+- **Select menu** (`SelectMenu`): a cream list (`bg-cream-30`, `border-gold-50`, dark text); the selected option is `bg-cocoa-100 text-cream-10` and the keyboard/hover option `bg-cream-40`
+- **Modal**: the `.theme-blue` panel has a `border-gold-40` frame; the sticky header is `bg-blue-100/95` with a `border-gold-50` divider; the footer has no divider
+- **Seat map** (customer, `SeatMap`): available seats are filled blue by zone (`zoneFill` in `components/seatmap/zoneRing.js`: Normal Blue 40, Premium Blue 60, Sofa Blue 100, Cream 10 numbers). Selected seats are a green outline (`border-2 border-success`, slightly scaled up). On the change-seats page, the customer's original seats that aren't selected are dashed green (`border-dashed border-success bg-success/15`), the same tone as selected seats. Taken seats are `bg-danger/70` with an X. The legend has no separate "available" swatch, because the zone swatches are the available colors. The admin seat-layout editor still uses the `zoneRing` borders with blue selected seats, so no zone ring uses blue
+- **Logo**: `client/public/logo.png`, used in the header and the receipt header (each beside the brand name), in the E-Ticket and as the favicon. Beside the name it has `alt=""`, so screen readers don't read the name twice
 - **Icons**: decorative icons (section headers, empty states) are gold; small icons inside a line of text take the text color
-- **E-Ticket** (`TicketPage`): one `.theme-paper` card per seat, in three rows: QR, stub (theatre and seat), movie. The stub's notches are `bg-page` circles that the card's `overflow-hidden` cuts in half, so they read as holes. The card is a `grid-rows-subgrid` of the page grid, which puts the seat arrows beside the card in the stub's row: they line up with the notches at any stub height, and they sit outside the paper scope, so they use the dark-theme tokens. The saved PNG is framed in the page color, so the rounded corners and notches blend into the frame
+- **Brand icons** (the social links on the contact page, `text-gold-50`): `components/ui/SocialIcons.jsx` draws them as inline SVG, because lucide has no LINE, TikTok or X mark and has deprecated its other brand icons. The f, Instagram and YouTube shapes come from lucide (ISC), the LINE, TikTok and X marks from Simple Icons (CC0)
+- **E-Ticket** (`TicketPage`): one ticket per seat. A navy frame (`bg-blue-80`) with gold top and bottom bars (`border-y-8 border-gold-50`) and a "Ticket" label holds the logo in a paper circle that overlaps the top edge of an inner `.theme-paper` card. The card shows the QR (140px, level H), a light-blue theatre and seat box (`bg-blue-20` with a `border-blue-70` border), the movie, then date, time, amount paid and payment reference. The seat arrows are gold chevrons beside the ticket from `sm` up, and below it on phones. The ref is on the navy frame, so the saved PNG is the whole ticket, drawn on a page-color margin (`utils/saveImage.js`)
 
 ## Rules
 

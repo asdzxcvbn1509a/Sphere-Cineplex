@@ -17,7 +17,7 @@ const templates = {
     bodyTh: `คืนเงิน ${ctx.amount} บาท ของการจอง ${ctx.code} เรียบร้อยแล้ว กรุณาตรวจสอบยอดในบัญชีของคุณ`,
     bodyEn: `We refunded ${ctx.amount} THB for booking ${ctx.code}. Please check your bank account.`,
   }),
-  // closed = การจองปิดไปแล้ว (รอบเริ่มฉาย หรือเป็นสลิปที่ส่งหลังหมดเวลา) จึงไม่ได้ให้จ่ายใหม่
+  // closed = รอบเริ่มฉายไปแล้ว การจองจึงปิดเลย ไม่ได้ให้จ่ายใหม่
   PAYMENT_REJECTED: (ctx) =>
     ctx.closed
       ? {
@@ -32,12 +32,6 @@ const templates = {
           bodyTh: `การจอง ${ctx.code} ยังไม่สำเร็จ (${ctx.reason}) กรุณาชำระเงินและส่งสลิปใหม่อีกครั้ง`,
           bodyEn: `Booking ${ctx.code} was not approved (${ctx.reason}). Please pay and upload the slip again.`,
         },
-  LATE_PAYMENT_REFUND: (ctx) => ({
-    titleTh: 'ได้รับเงินแล้ว — จะโอนคืนให้',
-    titleEn: 'Payment received — refund on the way',
-    bodyTh: `เราได้รับเงิน ${ctx.amount} บาท ของการจอง ${ctx.code} แล้ว แต่ที่นั่งถูกปล่อยไปก่อนสลิปมาถึง จึงจะโอนเงินคืนให้ กรุณาแจ้งบัญชีรับเงินคืนที่หน้า "การจองของฉัน"`,
-    bodyEn: `We received ${ctx.amount} THB for booking ${ctx.code}, but the seats were released before your slip arrived, so we will refund you. Please add your bank account on the "My bookings" page.`,
-  }),
   BOOKING_CANCELLED: (ctx) => ({
     titleTh: 'ยกเลิกการจองแล้ว',
     titleEn: 'Booking cancelled',
@@ -77,7 +71,7 @@ const templates = {
         : `Booking ${ctx.code} moved ${moveEn}.${extraEn} Your e-ticket QR stays the same.`,
     };
   },
-  // closed = คำขอปิดไปแล้ว (รอบเริ่มฉาย หรือเป็นสลิปที่ส่งหลังหมดเวลา) จึงไม่ได้ให้โอนใหม่
+  // closed = รอบเริ่มฉายไปแล้ว คำขอจึงปิดเลย ไม่ได้ให้โอนใหม่
   SEAT_CHANGE_REJECTED: (ctx) => ({
     titleTh: 'สลิปส่วนต่างไม่ผ่านการตรวจสอบ',
     titleEn: 'Seat change slip was rejected',
@@ -93,12 +87,6 @@ const templates = {
     titleEn: 'Seat change expired',
     bodyTh: `คำขอเปลี่ยนที่นั่งของการจอง ${ctx.code} หมดเวลาโอนส่วนต่าง ที่นั่งเดิมยังเป็นของคุณตามเดิม`,
     bodyEn: `The seat change for booking ${ctx.code} expired before the difference was paid. You keep your original seats.`,
-  }),
-  SEAT_CHANGE_LATE_REFUND: (ctx) => ({
-    titleTh: 'ได้รับส่วนต่างแล้ว — จะโอนคืนให้',
-    titleEn: 'Difference received — refund on the way',
-    bodyTh: `เราได้รับเงินส่วนต่าง ${ctx.amount} บาท ของการจอง ${ctx.code} แต่ที่นั่งใหม่ถูกปล่อยไปก่อนสลิปมาถึง จึงจะโอนคืนให้ ที่นั่งเดิมยังเป็นของคุณ กรุณาแจ้งบัญชีรับเงินคืนที่หน้า "การจองของฉัน"`,
-    bodyEn: `We received the ${ctx.amount} THB difference for booking ${ctx.code}, but the new seats were released before your slip arrived, so we will refund you. You keep your original seats. Please add your bank account on the "My bookings" page.`,
   }),
   SHOWTIME_CANCELLED: (ctx) => ({
     titleTh: 'รอบฉายถูกยกเลิก',
@@ -147,6 +135,14 @@ export const markRead = async (userId, notificationId) => {
     where: { id: notificationId, userId, readAt: null },
     data: { readAt: new Date() },
   });
+};
+
+/**
+ * ลบแจ้งเตือนของตัวเอง — แจ้งเตือนเป็นแค่ข้อความบอกเหตุการณ์ ข้อมูลจริงอยู่ที่การจอง/การชำระเงิน ลบทิ้งได้เลย
+ * userId อยู่ใน WHERE กันลบของคนอื่น · ไม่มี/ไม่ใช่ของตัวเอง/ลบไปแล้ว ถือว่าสำเร็จ (กดซ้ำจากสองแท็บไม่ error)
+ */
+export const deleteNotification = async (userId, notificationId) => {
+  await prisma.notification.deleteMany({ where: { id: notificationId, userId } });
 };
 
 export const markAllRead = async (userId) => {
