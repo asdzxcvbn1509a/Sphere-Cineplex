@@ -46,6 +46,7 @@ CineBook — movie theatre seat booking for a Thai audience: React SPA (`client/
 - An empty or non-JSON body binds as `{}` and is validated normally (the old `req.body ?? {}`), not a 415
 - The access token lives in memory only; the refresh cookie `trs_refresh` (path `/api/auth`, `SameSite=lax`, `Secure` in Production) requires the browser to call `/api` on the web app's own origin
 - With `PROXY_SECRET` set, every route except `/api/health` needs the `x-proxy-secret` header — keep it empty unless a proxy in front adds it
+- `CineBook.Web.csproj` turns off Server GC and concurrent GC to keep memory low on App Service Free F1, where going over 1 GB stops the whole site (403) until the next hour. Keep them off; the startup line `เครื่อง:` shows the GC mode and memory in use
 - `client/src/pages/SeatSelectionPage.jsx` and `ChangeSeatsPage.jsx` hard-code `MAX_SEATS` / `HOLD_MINUTES` to match the server's defaults
 - The fit-to-screen admin lists (bookings, showtimes, movies, theatres, users; `components/admin/fitLayout.js` + `hooks/useFitPageSize.js`) compute rows per page from a `ROW_HEIGHT` constant in each page. Keep it equal to the rows' `xl:h-*` class, and keep every `xl` cell to a fixed number of lines (`xl:truncate`, `line-clamp`), or rows overflow the box
 - `docs/` is gitignored except its top-level `*.md` files

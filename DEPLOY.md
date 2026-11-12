@@ -23,7 +23,7 @@ UptimeRobot ──every 5 min──► /api/health   (F1 has no Always On; the a
 
 | Resource | Plan | Cost |
 |---|---|---|
-| App Service plan | Free F1 | Free, no time limit (60 CPU minutes per day, no Always On, no custom-domain TLS) |
+| App Service plan | Free F1 | Free, no time limit, within quotas: CPU 3 minutes per 5 minutes and 60 minutes per day, 1 GB of memory, 165 MB of outbound data per day (see [F1 quotas](#free-f1-quotas)). No Always On, no custom-domain TLS |
 | Azure Database for PostgreSQL | Flexible Server, Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 hours/month) — afterwards it is billed to your credit, so delete or downsize it before then |
 | Storage account | Standard LRS | A few baht a month from the student credit |
 
@@ -101,9 +101,11 @@ Any of the deploy methods in step 6 works for the first deploy. After it, open *
     http://localhost:8080/api/health  (Production)
     อนุญาต origin: https://<app>.azurewebsites.net
     ที่เก็บสลิป: Azure Blob Storage (container slips)
+    เครื่อง: <n> CPU · Workstation GC · ใช้ <n> MB จาก <n> MB
 ```
 
 - No `❌ ตั้งค่า environment ไม่ถูกต้อง` ("invalid environment configuration") — if there is, the next lines name the variable to fix
+- The `เครื่อง:` ("machine:") line shows how many CPUs and how much memory the app sees, and how much memory it uses right after starting. It should say `Workstation GC` (set in `CineBook.Web.csproj`) and use roughly 100–200 MB, far below the F1 limit of 1 GB (see [F1 quotas](#free-f1-quotas))
 - No `⚠️` lines you didn't expect. The ones you may see on purpose: the sample `PROMPTPAY_ID` and the missing `SMTP_HOST`
 - The first start creates the tables (`DB_MIGRATE_ON_START=true`); it can take a minute on F1
 
@@ -180,7 +182,21 @@ The Free F1 plan has no **Always On**: after about 20 minutes without requests t
 
 Create a free monitor at [UptimeRobot](https://uptimerobot.com) (or cron-job.org): type **HTTP(s)**, URL `https://<app>.azurewebsites.net/api/health`, interval **5 minutes**. `/api/health` doesn't touch the database, so the pings cost almost nothing
 
-Keep an eye on **App Service → Quotas**: F1 allows 60 CPU minutes per day. If it runs out, the app is stopped until the quota resets; scale the plan up to B1 (paid) for a real launch
+### Free F1 quotas
+
+| Quota | Limit | Resets |
+|---|---|---|
+| CPU (Short) | 3 CPU minutes per 5 minutes | every 5 minutes |
+| CPU (Day) | 60 CPU minutes per day | at 00:00 UTC (07:00 in Thailand) |
+| Memory | 1,024 MB for the whole plan | at the start of every hour |
+| Data Out | 165 MB of responses per day | at 00:00 UTC (07:00 in Thailand) |
+
+When any of them runs out, Azure stops the whole site until that quota resets: the pages, the API and the SCM site (deploys, Log stream) all answer **403 "This web app is stopped"**, and **Overview → Status** shows **Quota exceeded**. **App Service plan → Quotas** shows which quota ran out and when it resets
+
+- Restarting doesn't help, and deploys fail with 403 until the quota resets
+- To get the site back at once, **App Service plan → Scale up → B1**: Basic has no quotas (about US$13 a month from the student credit, charged only while the plan is on B1). Deploy or investigate, then scale back down to F1
+- The memory chart under **Metrics** can stay empty on F1; the `เครื่อง:` line in the Log stream (step 5) shows how much memory the app uses instead
+- For a real launch, stay on B1 or higher — it also has **Always On**, so the monitor above isn't needed
 
 ## 11. Post-deploy checks
 
@@ -233,5 +249,5 @@ Generate new JWT secrets anyway — everyone logs in again, which is fine
 | Users get `LOGIN_RATE_LIMITED` or `REGISTER_RATE_LIMITED` after only a few attempts | `TRUST_PROXY` doesn't match `proxyHops`, so every visitor shares one IP (step 7) |
 | Refreshing logs you out | The site isn't on HTTPS (the cookie is `Secure`), or `CLIENT_ORIGIN` doesn't match the site URL |
 | The workflow fails at **Deploy** with an authentication error | The publish profile secret is wrong or was reset — download it again (step 6) and check **SCM Basic Auth Publishing Credentials** is On |
-| The site answers 403 "This web app is stopped" | The F1 CPU quota for the day ran out (**Quotas**); it comes back the next day |
+| The site (and the SCM site) answers 403 "This web app is stopped" | Check **Overview → Status**. **Quota exceeded**: an F1 quota ran out — [F1 quotas](#free-f1-quotas) tells which one and how to get the site back. **Stopped**: someone pressed Stop — press **Start**. If the subscription itself is disabled, the student credit ran out or expired (see [Cost](#cost)) |
 | The first request after a while takes many seconds | The app was asleep — set up the monitor in step 10 |

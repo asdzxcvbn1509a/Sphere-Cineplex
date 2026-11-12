@@ -163,7 +163,10 @@ public static class StartupBanner
         foreach (var wildcard in new[] { "://*", "://+", "://[::]", "://0.0.0.0" }) address = address.Replace(wildcard, "://localhost");
         Console.WriteLine($"    {address}/api/health  ({config.EnvironmentName})");
         Console.WriteLine($"    อนุญาต origin: {config.ClientOrigin}");
-        Console.WriteLine($"    ที่เก็บสลิป: {storage.Description}\n");
+        Console.WriteLine($"    ที่เก็บสลิป: {storage.Description}");
+        // กราฟหน่วยความจำของ App Service แพ็กเกจฟรีอาจว่างเปล่า — บรรทัดนี้ใน Log stream บอกแทนว่าเครื่องที่ได้มีกี่คอร์
+        // เพดานหน่วยความจำที่ .NET เห็น และแอปใช้ไปเท่าไรหลังเปิดเครื่อง (F1 เกิน 1 GB = ถูกหยุดทั้งเว็บ ดู CineBook.Web.csproj)
+        Console.WriteLine($"    {MachineSummary()}\n");
 
         if (!config.IsProduction) return;
         if (!storage.IsPersistentInProduction)
@@ -191,5 +194,15 @@ public static class StartupBanner
             // ASP.NET Core จะอ่าน X-Forwarded-For ซ้ำอีกรอบ ไอพีที่ได้ผิดจาก TRUST_PROXY — ตั้งเป็น false ใน App Settings
             Console.Error.WriteLine("⚠️  ASPNETCORE_FORWARDEDHEADERS_ENABLED=true ทำให้ไอพีถูกอ่านซ้ำ — ตั้งเป็น false แล้วใช้ TRUST_PROXY แทน\n");
         }
+    }
+
+    /// <summary>เช่น "เครื่อง: 2 CPU · Workstation GC · ใช้ 95 MB จาก 1,024 MB"</summary>
+    private static string MachineSummary()
+    {
+        const long mb = 1024 * 1024;
+        var gc = System.Runtime.GCSettings.IsServerGC ? "Server" : "Workstation";
+        // เพดานที่ GC เห็น = หน่วยความจำของเครื่อง หรือของ container ถ้าโฮสต์จำกัดไว้
+        var limit = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / mb;
+        return $"เครื่อง: {Environment.ProcessorCount} CPU · {gc} GC · ใช้ {Environment.WorkingSet / mb:N0} MB จาก {limit:N0} MB";
     }
 }

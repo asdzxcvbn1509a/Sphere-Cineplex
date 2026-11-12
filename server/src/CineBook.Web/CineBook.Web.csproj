@@ -4,6 +4,15 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      App Service แพ็กเกจ F1 ให้หน่วยความจำ 1 GB ต่อชั่วโมงทั้ง plan — เกินเมื่อไร Azure หยุดทั้งเว็บ (403) จนถึงต้นชั่วโมงถัดไป
+      Server GC ที่เป็นค่าเริ่มต้นของเว็บแอปทำมาให้เครื่องหลายคอร์ที่ไม่ใช้ร่วมกับใคร ปล่อยให้ heap โตกว่าและแปรตามจำนวนคอร์ที่เห็น
+      ซึ่งเครื่องที่ F1 แชร์กันคาดเดาไม่ได้ — แอปนี้คนใช้น้อย Workstation GC แบบไม่ทำงานคู่ขนานจึงพอ
+      (วัดบนเครื่อง 8 คอร์ หลังรับคำขอ ~400 ครั้ง: working set 176 MB เทียบกับ 206 MB ของ Server GC)
+      บรรทัด "เครื่อง:" ตอนเปิดเครื่องบอกโหมด GC และหน่วยความจำที่ใช้ (StartupBanner)
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>
