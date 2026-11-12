@@ -106,6 +106,19 @@ public sealed class PlatformTests
     }
 
     [Fact]
+    public void DATABASE_URLที่รหัสผ่านไม่ได้เข้ารหัส_ข้อความบอกวิธีแก้()
+    {
+        // รหัสผ่านของ Azure ที่มี @ ทำให้ .NET แยก host ไม่ได้ — แอปบน Azure ล้มวนด้วยข้อความนี้มาแล้ว
+        var (config, errors) = AppConfigLoader.Load(
+            new Dictionary<string, string> { ["DATABASE_URL"] = "postgresql://admin:P@ss@db.example.com:5432/cinebook?sslmode=require" },
+            "Production", AppContext.BaseDirectory);
+        Assert.Null(config);
+        var error = Assert.Single(errors, e => e.StartsWith("DATABASE_URL", StringComparison.Ordinal));
+        Assert.Contains("%40", error);
+        Assert.Contains("Host=", error);
+    }
+
+    [Fact]
     public void Cuidยาว25ตัว_ขึ้นต้นด้วยc_และไม่ซ้ำ()
     {
         var ids = Enumerable.Range(0, 2000).Select(_ => Cuid.New()).ToList();

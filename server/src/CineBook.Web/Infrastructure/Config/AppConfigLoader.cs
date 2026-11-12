@@ -64,7 +64,12 @@ public static class AppConfigLoader
             }
             catch (Exception ex) when (ex is FormatException or ArgumentException or UriFormatException)
             {
-                reader.Fail("DATABASE_URL", $"อ่าน connection string ไม่ได้ ({ex.Message})");
+                // รหัสผ่านที่ Azure บังคับให้มีอักขระพิเศษคือสาเหตุที่เจอบ่อยสุด — ในรูปแบบ URI ตัว @ / ? # ทำให้แยก host ผิด
+                // ข้อความจาก .NET ("hostname could not be parsed") ไม่บอกเรื่องนี้ จึงต่อท้ายวิธีแก้ไว้ให้เห็นใน Log stream เลย
+                var hint = databaseUrl.Contains("://", StringComparison.Ordinal)
+                    ? " — ถ้ารหัสผ่านมี @ : / ? # % ต้องเข้ารหัสแบบ URL ก่อน (เช่น @ → %40, # → %23) หรือใช้รูปแบบ Host=…;Database=…;Username=…;Password=…"
+                    : "";
+                reader.Fail("DATABASE_URL", $"อ่าน connection string ไม่ได้ ({ex.Message}){hint}");
             }
         }
 

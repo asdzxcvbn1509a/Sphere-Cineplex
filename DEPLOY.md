@@ -59,6 +59,12 @@ postgresql://<admin>:<password>@cinebook-db.postgres.database.azure.com:5432/cin
 
 `sslmode=require` is mandatory on Azure; `connection_limit=5` keeps the app's pool small for the B1ms server
 
+If the password contains any of `@ : / ? # %`, URL-encode those characters (`@` → `%40`, `:` → `%3A`, `/` → `%2F`, `?` → `%3F`, `#` → `%23`, `%` → `%25`). Otherwise the app can't read the URL, stops at start-up, and App Service restarts it over and over. Or use the key=value form, which needs no encoding (wrap the password in `'…'` if it contains `;`):
+
+```
+Host=cinebook-db.postgres.database.azure.com;Port=5432;Database=cinebook;Username=<admin>;Password=<password>;SSL Mode=Require;Maximum Pool Size=5
+```
+
 ## 3. Slip storage: Azure Blob Storage
 
 1. Portal → **Storage accounts** → **Create** → resource group `cinebook-rg`, a globally unique name (e.g. `cinebookslips123`), the same region, **Standard**, redundancy **LRS** → **Review + create**
@@ -194,6 +200,7 @@ Create a free monitor at [UptimeRobot](https://uptimerobot.com) (or cron-job.org
 When any of them runs out, Azure stops the whole site until that quota resets: the pages, the API and the SCM site (deploys, Log stream) all answer **403 "This web app is stopped"**, and **Overview → Status** shows **Quota exceeded**. **App Service plan → Quotas** shows which quota ran out and when it resets
 
 - Restarting doesn't help, and deploys fail with 403 until the quota resets
+- An app that fails at start-up is restarted again and again, which uses up the memory quota within minutes. When **Quota exceeded** follows a deploy or a settings change, look for `❌` lines in the Log stream once the quota resets (or in **Diagnose and solve problems → Application Logs** meanwhile)
 - To get the site back at once, **App Service plan → Scale up → B1**: Basic has no quotas (about US$13 a month from the student credit, charged only while the plan is on B1). Deploy or investigate, then scale back down to F1
 - The memory chart under **Metrics** can stay empty on F1; the `เครื่อง:` line in the Log stream (step 5) shows how much memory the app uses instead
 - For a real launch, stay on B1 or higher — it also has **Always On**, so the monitor above isn't needed
@@ -241,6 +248,7 @@ Generate new JWT secrets anyway — everyone logs in again, which is fine
 | Symptom | Cause and fix |
 |---|---|
 | The site shows "Application Error" and Log stream shows `ตั้งค่า environment ไม่ถูกต้อง` | The next lines name the bad variable. Fix it in **Environment variables** and apply |
+| Log stream shows `DATABASE_URL: อ่าน connection string ไม่ได้ (Invalid URI …)` and the site answers 503 | The database password has `@ : / ? # %` in it — URL-encode them or use the key=value form (step 2). On F1 the endless restarts also use up the memory quota, so the site soon turns into 403 "Quota exceeded" |
 | Log stream shows `JWT_ACCESS_SECRET … ค่าตัวอย่าง` (sample value) | The secrets are still the ones from `.env.example`; set new random values |
 | The app fails to start with a database error mentioning SSL or `pg_hba.conf` | `DATABASE_URL` lacks `?sslmode=require`, or the server's **Networking** doesn't allow Azure services |
 | `relation "Booking" does not exist` | The tables were never created — set `DB_MIGRATE_ON_START=true` and restart |
