@@ -10,23 +10,17 @@
 ## Unit tests
 
 ```bash
-cd server && npm test
+cd server && dotnet test --filter Category=Unit
 ```
 
-Node's built-in test runner over `server/src/**/*.test.js`. No database is needed, but `server/.env` must exist because some modules read the configuration when they load
+xUnit tests in `server/tests/CineBook.Tests/Unit/`. No database and no `.env` needed
 
 | File | Covers |
 |---|---|
-| `utils/promptpay.test.js` | PromptPay payload: CRC16 and the EMVCo structure |
-| `utils/pricing.test.js` | Per-zone prices derived from the base price |
-| `utils/seatChange.test.js` | Seat-change pricing (kept seats, same zone, new zone, id ordering, invalid selections) |
-| `utils/trustProxy.test.js` | Parsing `TRUST_PROXY` |
-| `utils/proxySecret.test.js` | Comparing the `x-proxy-secret` header with `PROXY_SECRET` (nothing passes while it's unset) |
-| `utils/loginIdentifier.test.js` | Login lookup and rate-limit key: every format of the same phone number, email case |
-| `utils/bahtText.test.js` | Amounts in words (Thai and English) |
-| `utils/receipt.test.js` | Receipt numbers, receipt lines and the receipt shape |
-| `utils/bookingDisplayStatus.test.js` | Admin booking badges: every value, rule order (open items beat finished ones), the filter excluding earlier rules |
-| `emails/receipt.test.js` | Receipt email content |
+| `UtilsTests.cs` | Per-zone prices derived from the base price, seat-change pricing (kept seats, same zone, new zone, id ordering, invalid selections), parsing `TRUST_PROXY`, comparing the `x-proxy-secret` header with `PROXY_SECRET`, login lookup and rate-limit key (every format of the same phone number, email case) |
+| `MoneyAndReceiptTests.cs` | Amounts in words (Thai and English), the PromptPay payload (CRC16 and the EMVCo structure), receipt numbers, receipt lines and the receipt shape, receipt email content |
+| `BookingDisplayStatusTests.cs` | Admin booking badges: every value, rule order (open items beat finished ones), and the database filter matching the badge for every case |
+| `PlatformTests.cs` | Compatibility with data and tokens made by the earlier Express version: JWTs signed by `jsonwebtoken`, bcryptjs hashes, Thai/English date text and Bangkok day ranges, `ms`-style durations, `DATABASE_URL` parsing, cuid ids |
 
 ## Integration tests
 
@@ -34,46 +28,50 @@ Run against a real PostgreSQL database, because the cases that matter — two pe
 
 ```bash
 cd server
-cp .env.test.example .env.test   # set <PASSWORD> to match your local PostgreSQL (Windows: copy)
-npm run test:int                 # the first run creates the theatre_reservation_test database and migrates it automatically
+cp .env.test.example .env.test                     # set <PASSWORD> to match your local PostgreSQL (Windows: copy)
+dotnet test --filter Category=Integration          # the first run creates the cinebook_test database and migrates it
 ```
 
-> The tests **wipe every table** before each case, so the test helpers refuse to run if the database name doesn't end in `_test`
-> or if `SMTP_HOST` is set (to avoid wiping the dev database by accident and sending real email during tests)
+> The tests **wipe every table** before each case, so the test helpers refuse to run if the database name doesn't end in `_test`,
+> if `SMTP_HOST` is set, or if `AZURE_STORAGE_CONNECTION_STRING` is set (to avoid wiping a real database, sending real email or writing to real storage)
+>
+> The tests read **only** `server/.env.test` (never `server/.env`), so every machine runs them with the same settings
 >
 > Don't keep an API server running against the `_test` database while the tests run — its background jobs would act on the test data
 
-Files run one at a time (`--test-concurrency=1`); cases inside a file fire truly concurrent requests where that's the point
+All integration classes share one app (`ApiFactory`, a `WebApplicationFactory<Program>` with `RUN_JOBS=false`) in one xUnit collection, so they run one class at a time; cases fire truly concurrent operations where that's the point, each with its own DI scope (its own `DbContext`)
 
 | File | Covers |
 |---|---|
-| `admin-bookings.test.js` | Admin booking list `displayStatus`: one booking per badge built through the real services, each filter returns exactly the bookings with that badge, several badges at once (comma-separated over HTTP) return their union, `status` keeps its old meaning, filters combine, 422 for unknown values |
-| `auth.test.js` | Refresh token rotation, reuse detection, multi-tab refresh races, one reset link used by two requests at once |
-| `bookings.test.js` | Concurrent bookings of the same seat and of overlapping seat sets, seats from another theatre, the expiry job, double cancellation |
-| `holds.test.js` | Seat hold limits (`PENDING_BOOKING_EXISTS`, `TOO_MANY_PENDING_BOOKINGS`) |
-| `overview.test.js` | Admin overview: yesterday's revenue counted only up to the same time of day, refund rows telling a seat-change difference from a cancellation |
-| `payments.test.js` | Concurrent approve / reject / cancel, recording a refund twice, slip queue order (`sort`) |
-| `refunds.test.js` | Refund queue order (`sort`, both tabs), the refund account holder name (optional for older clients), editing a recorded refund (slip replacement, file clean-up), who may open payment and refund slips |
-| `receipts.test.js` | Receipt numbering (sequential, concurrent, rolled back with a failed transaction), frozen payer names, who may open a receipt, refund stamps, admin search by receipt number |
-| `seat-changes.test.js` | Same/cheaper/pricier seat changes, quotas and deadlines, concurrent changes, cancelling after a change, no difference slip after expiry (including the expiry job racing an upload), admin moves, HTTP |
-| `showtimes.test.js` | Cancelling a whole showtime, customer refund accounts, delete guards, editing booked showtimes, inactive seats, reminders |
-| `slip-deadline.test.js` | No slip after the payment deadline (409 `HOLD_EXPIRED`, file removed), a slip a few seconds late before the job runs, the expiry job racing a slip upload (exactly one wins), rejecting after the showtime starts |
-| `http.test.js` | Real HTTP: security headers, `PROXY_SECRET` checks and `/api/health` statuses, slip file checks and upload limits, missing slip files, pagination, query booleans, token revocation, `/auth/refresh` responses, login and sign-up rate limits, changing the email |
+| `AdminBookingTests.cs` | Admin booking list `displayStatus`: one booking per badge built through the real services, each filter returns exactly the bookings with that badge, several badges at once (comma-separated over HTTP) return their union, `status` keeps its old meaning, filters combine, 422 for unknown values · admin overview: yesterday's revenue counted only up to the same time of day, refund rows telling a seat-change difference from a cancellation |
+| `AuthTests.cs` | Refresh token rotation, reuse detection, multi-tab refresh races, one reset link used by two requests at once |
+| `BookingTests.cs` | Concurrent bookings of the same seat and of overlapping seat sets, seats from another theatre, the expiry job, double cancellation, seat hold limits (`PENDING_BOOKING_EXISTS`, `TOO_MANY_PENDING_BOOKINGS`) |
+| `PaymentTests.cs` | Concurrent approve / reject / cancel, recording a refund twice, slip queue order (`sort`) · no slip after the payment deadline (409 `HOLD_EXPIRED`, file removed), a slip a few seconds late before the job runs, the expiry job racing a slip upload (exactly one wins), rejecting after the showtime starts |
+| `RefundTests.cs` | Refund queue order (`sort`, both tabs), the refund account holder name (optional for older clients), editing a recorded refund (slip replacement, file clean-up), who may open payment and refund slips |
+| `ReceiptTests.cs` | Receipt numbering (sequential, concurrent, rolled back with a failed transaction), frozen payer names, who may open a receipt, refund stamps, admin search by receipt number, `GET /api/bookings/:id/receipt` permissions |
+| `SeatChangeTests.cs` | Same/cheaper/pricier seat changes, quotas and deadlines, concurrent changes, cancelling after a change, no difference slip after expiry (including the expiry job racing an upload), admin moves, HTTP |
+| `ShowtimeTests.cs` | Cancelling a whole showtime, customer refund accounts, delete guards, editing booked showtimes, inactive seats, reminders (two jobs at once send one) |
+| `HttpAuthTests.cs` | Real HTTP: security headers, `PROXY_SECRET` checks and `/api/health` statuses, `ROUTE_NOT_FOUND`, token revocation, `/auth/refresh` responses, login and sign-up rate limits, changing the email |
+| `HttpBookingTests.cs` | Real HTTP: slip file checks and upload limits, the slip upload rate limit, opening slips and missing slip files, pagination, query booleans, deleting notifications, empty/non-JSON bodies validated as `{}`, a refund note sent as JSON |
 
-Test data comes from `server/test/helpers/fixtures.js` (`createUser`, `createShowtimeFixture`, `book`, `createPaidBooking`, `makeSlipFile`, `apiErrorWith`, …)
+Test data comes from `tests/CineBook.Tests/Helpers/Fixtures.cs` (`CreateUser`, `CreateShowtimeFixture`, `Book`, `CreatePaidBooking`, `MakeSlipFile`, `AllSettled`, `ExpectApiError`, …)
+
+Run everything (unit + integration) with `dotnet test` from `server/`
 
 ## Checking the web app in a browser
 
-The web app has no automated tests; `cd client && npm run build` catches compile errors. To click through it without touching your development data, run everything against the `_test` database:
+The web app has no automated tests; `cd client && npm run build` catches compile errors. To click through it without touching your development data, run everything against a `_test` database. In PowerShell, from `server/`:
 
-```bash
-cd server
-node --env-file=.env.test prisma/seed.js   # seed theatre_reservation_test (integration tests wipe it again)
-node --env-file=.env.test src/index.js     # API on :4000 with NODE_ENV=test, slips in uploads-test/
-cd ../client && npm start                  # web app on :5173
+```powershell
+# point the API at a separate database (the integration tests use cinebook_test and wipe it — pick another *_test name to keep the data)
+$env:DATABASE_URL = "postgresql://postgres:<PASSWORD>@localhost:5432/cinebook_browser_test"
+$env:DB_MIGRATE_ON_START = "true"; $env:UPLOAD_DIR = "uploads-test"
+dotnet run --project src/CineBook.Web -- seed          # migrate + seed it
+dotnet watch --project src/CineBook.Web                # API on :4000 (Development)
+cd ../client; npm start                                # web app on :5173
 ```
 
-Log in with the [demo accounts](../README.md#demo-accounts) (`Password123`). Stop the API before running the integration tests again
+Values already in the environment win over `server/.env`, so the API uses that database until you close the terminal (or `Remove-Item Env:DATABASE_URL, Env:DB_MIGRATE_ON_START, Env:UPLOAD_DIR`). Log in with the [demo accounts](../README.md#demo-accounts) (`Password123`)
 
 ## Manual test checklist
 

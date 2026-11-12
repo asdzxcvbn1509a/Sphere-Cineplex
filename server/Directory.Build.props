@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- enum ของ C# ตั้งชื่อเป็น PENDING_PAYMENT ให้ตรงกับ label ของ PostgreSQL และ JSON เดิม จึงปิดคำเตือนเรื่องชื่อ -->
+    <NoWarn>$(NoWarn);CA1707;IDE1006</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

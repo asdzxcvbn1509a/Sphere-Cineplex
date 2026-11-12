@@ -1,6 +1,6 @@
 # API reference
 
-Every endpoint of the CineBook API (68 in total). The source of truth is `server/src/routes/*.js` (paths and zod schemas), `server/src/controllers/` (response envelopes) and `server/src/services/` (rules and error codes)
+Every endpoint of the CineBook API (68 in total). The source of truth is `server/src/CineBook.Web/Controllers/Api/` (paths and response envelopes), `Models/Requests/` (request shapes and validators) and `Services/` (rules and error codes). The API contract is the same as the earlier Express version's, so older clients keep working
 Ready-to-run request examples are in [server/api.http](../server/api.http) (VS Code REST Client)
 
 - [Conventions](#conventions)
@@ -18,11 +18,11 @@ Ready-to-run request examples are in [server/api.http](../server/api.http) (VS C
 |---|---|
 | Local API | `http://localhost:4000/api` |
 | Local web app (Vite proxy) | `http://localhost:5173/api` |
-| Production | `https://<web app domain>/api` — Vercel forwards `/api/*` to Render (see [DEPLOY.md](../DEPLOY.md)) |
+| Production | `https://<app>.azurewebsites.net/api` — the same App Service serves the web app and the API (see [DEPLOY.md](../DEPLOY.md)) |
 
 Browsers should always call the API on the web app's own origin; the refresh cookie is `SameSite=lax` and isn't sent cross-site
 
-When the API has `PROXY_SECRET` set (production), every request except `GET /api/health` must carry the matching `x-proxy-secret` header, which Vercel adds when it forwards `/api/*`. Anything else — such as a request sent straight to the Render URL — gets 403 `DIRECT_ACCESS_FORBIDDEN` before any route runs
+When the API has `PROXY_SECRET` set, every request except `GET /api/health` must carry the matching `x-proxy-secret` header (added by a proxy or CDN in front of the app). Anything else gets 403 `DIRECT_ACCESS_FORBIDDEN` before any route runs. It is empty on App Service, where browsers reach the app directly
 
 ### Authentication
 
@@ -54,7 +54,7 @@ When the API has `PROXY_SECRET` set (production), every request except `GET /api
   ```
 
   `code` is the stable contract; `message` is Thai and meant for display; `details` is optional extra data
-- Validation failures: 422 `VALIDATION_ERROR` with `details: [{ field, message }]`
+- Validation failures: 422 `VALIDATION_ERROR` with `details: [{ field, message }]` (`field` is a dotted path such as `seatIds.0`). An empty or non-JSON body is validated as `{}`; a JSON body that can't be parsed or has the wrong types also gets 422
 - Two writes colliding on the same rows return 409 (`BOOKING_STATE_CHANGED`, `PAYMENT_NOT_PENDING`, `WRITE_CONFLICT`, …) — refresh and retry; nothing was half-written
 - In development, 5xx errors also include `stack`
 
@@ -78,7 +78,7 @@ Limited requests get **429** with the code below. Limits come from [configuratio
 | `POST /bookings/:id/seat-changes` | 10 per 10 minutes — successful requests only | account | `SEAT_CHANGE_RATE_LIMITED` |
 | `POST /payments/:bookingId/slip`, `POST /seat-changes/:id/slip` (one shared count) | 20 per hour — every request | account | `SLIP_RATE_LIMITED` |
 
-Responses carry the `RateLimit` and `RateLimit-Policy` headers (IETF draft 7). The client IP comes from `TRUST_PROXY` — see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy)
+Responses carry the `RateLimit` and `RateLimit-Policy` headers (IETF draft 7). The client IP comes from `TRUST_PROXY` — see [DEPLOY.md](../DEPLOY.md#7-check-trust_proxy)
 
 ### Data conventions
 
@@ -145,12 +145,12 @@ Seats are labels (`"C5"`). `diffAmount` > 0 = the customer pays more, < 0 = refu
 
 #### `GET /api/health` — Public
 
-Liveness check that doesn't touch the database, and the only route open without `x-proxy-secret` when `PROXY_SECRET` is set. Returns `{ ok: true, service, time, ip, proxyHops, proxySecret }` — `ip` and `proxyHops` are used to set `TRUST_PROXY`, and `proxySecret` shows how this request's `x-proxy-secret` header compares (see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy)):
+Liveness check that doesn't touch the database (also the target of the keep-awake ping), and the only route open without `x-proxy-secret` when `PROXY_SECRET` is set. Returns `{ ok: true, service, time, ip, proxyHops, proxySecret }` — `ip` and `proxyHops` are used to set `TRUST_PROXY`, and `proxySecret` shows how this request's `x-proxy-secret` header compares (see [DEPLOY.md](../DEPLOY.md)):
 
 | `proxySecret` | Meaning |
 |---|---|
-| `missing` | No header — the request didn't come through Vercel |
-| `unresolved` | The header is the literal `$PROXY_SECRET`: the Vercel project has no `PROXY_SECRET` variable (or wasn't redeployed) |
+| `missing` | No header — the request didn't come through a proxy that adds it |
+| `unresolved` | The header is a literal placeholder such as `$PROXY_SECRET`: the proxy's variable isn't set |
 | `unchecked` | A header arrived, but the API has no `PROXY_SECRET` to compare it with |
 | `valid` · `invalid` | The header matches · doesn't match the API's `PROXY_SECRET` |
 
@@ -204,7 +204,7 @@ Liveness check that doesn't touch the database, and the only route open without 
 
 #### `POST /api/auth/forgot-password`
 - Body: `email`, `lang` (`th` | `en`, the email's language)
-- **200** `{ ok: true, ttlMinutes }` whether or not the email has an account. `devResetUrl` is added only when `NODE_ENV=development` and SMTP isn't configured
+- **200** `{ ok: true, ttlMinutes }` whether or not the email has an account. `devResetUrl` is added only when `ASPNETCORE_ENVIRONMENT=Development` and SMTP isn't configured
 - Errors: 429 `RESET_RATE_LIMITED`
 
 #### `POST /api/auth/reset-password/check`
@@ -492,7 +492,7 @@ Every route below requires role `ADMIN`
   | 7 | `REFUNDED` | A refund has been transferred — a cancelled booking's money, or a paid booking's seat-change difference |
   | 8–10 | `PAID` · `CANCELLED` · `EXPIRED` | None of the above |
 
-  The rules live in `server/src/utils/bookingDisplayStatus.js`. The web app's status filter sends a group of badges in one request: to pay (`PENDING_PAYMENT`, `TOPUP_PENDING_PAYMENT`) · in progress (`PENDING_VERIFICATION`, `TOPUP_PENDING_VERIFICATION`, the two `*_REFUND_PENDING`) · completed (`PAID`, `REFUNDED`) · cancelled (`CANCELLED`, `EXPIRED`)
+  The rules live in `server/src/CineBook.Web/Utils/BookingDisplayStatus.cs`. The web app's status filter sends a group of badges in one request: to pay (`PENDING_PAYMENT`, `TOPUP_PENDING_PAYMENT`) · in progress (`PENDING_VERIFICATION`, `TOPUP_PENDING_VERIFICATION`, the two `*_REFUND_PENDING`) · completed (`PAID`, `REFUNDED`) · cancelled (`CANCELLED`, `EXPIRED`)
 
 #### `POST /api/admin/bookings/:id/cancel`
 - Body: `reason` (≤200)

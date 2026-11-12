@@ -18,49 +18,57 @@ For setup see the [README](../README.md); for endpoints see the [API reference](
 ## System overview
 
 ```
-Browser (React SPA) ──/api/*──► Express API ──Prisma──► PostgreSQL
-                                     │
-                                     ├── slip storage: disk (dev) or Supabase Storage (production)
-                                     ├── SMTP (password reset links, receipts) — printed to the console when unset
-                                     └── background jobs (expired holds, showtime reminders)
+Browser ──HTTPS──► ASP.NET Core 10 MVC app (one App Service)
+                     ├── /api/*  → Controllers → Services ──EF Core──► PostgreSQL
+                     ├── other paths → HomeController → wwwroot/index.html (React build)
+                     ├── slip storage: disk (dev) or Azure Blob Storage (production)
+                     ├── SMTP (password reset links, receipts) — printed to the console when unset
+                     └── background jobs (expired holds and seat changes, showtime reminders)
 ```
 
-- `client/` and `server/` are separate npm projects; there is no root workspace
-- The web app always calls the API on its own origin (`/api/...`): Vite proxies it in development and Vercel rewrites it in production, so the `SameSite=lax` refresh cookie is always sent (see [DEPLOY.md](../DEPLOY.md))
+- `client/` is an npm project and `server/` a .NET solution (`CineBook.slnx`); there is no root workspace. `dotnet publish` builds the web app into the server's `wwwroot`, so production is a single app
+- The web app always calls the API on its own origin (`/api/...`): Vite proxies it in development and the same app serves both in production, so the `SameSite=lax` refresh cookie is always sent (see [DEPLOY.md](../DEPLOY.md))
 - All money is stored as whole baht (integers) and all times are stored in UTC; the UI shows Thai time (UTC+7)
+- The server was ported from an Express 5 + Prisma version with the same API contract (paths, codes, Thai messages, response shapes) and the same database schema, so the web app and existing databases didn't change
 
 ## Server layers
 
 ```
-routes/        URL → middleware chain → controller; zod schemas for body/query live here
-controllers/   read req, call one service, shape the HTTP response — never touch Prisma
-services/      business rules + database access (the only layer that uses Prisma)
-utils/         pure helpers (pricing, seat-change pricing, PromptPay payload, dates, receipts, access errors…)
-lib/           Prisma client, slip storage driver
-middleware/    authenticate, requireRole, validate, upload (+ file-content check), errorHandler
-jobs/          interval jobs started by src/index.js
-emails/        outgoing email content, kept separate from the sender (utils/mailer.js)
+server/src/CineBook.Web/
+  Controllers/Api/   attribute routes; read the request, call one service, return the response envelope — never touch AppDbContext
+  Models/Requests/   request DTOs + FluentValidation validators (checked by the global ValidationFilter)
+  Models/Responses/  response records (camelCase JSON)
+  Models/Entities/   EF Core entities, named exactly like the tables and columns
+  Services/          business rules + database access (the only layer that uses AppDbContext)
+  Data/              AppDbContext, migrations, Sql.cs (row locks, ON CONFLICT counter, ordered seat inserts)
+  Utils/             pure helpers (pricing, seat-change pricing, PromptPay payload, dates, receipts, access errors…)
+  Infrastructure/    config, errors, auth (JWT + Bearer handler), rate limiting, uploads, slip storage, email, security headers, JSON
+  Jobs/              BackgroundService that runs the interval jobs
+  Emails/            outgoing email content, kept separate from the sender (Infrastructure/Email)
+  Seed/              sample data (`-- seed`)
 ```
 
 | Concern | Where |
 |---|---|
-| Request validation | `validate({ body, query })` in each route file. A failed parse becomes 422 `VALIDATION_ERROR` with `details: [{ field, message }]` |
-| Errors | Services throw `ApiError` (`utils/ApiError.js`) with a stable `code`; `middleware/errorHandler.js` turns it into `{ error: { code, message, details } }`. Prisma unique violations, missing rows and PostgreSQL deadlocks are mapped to 409 / 404 / 409 `WRITE_CONFLICT` |
-| Authentication | `middleware/authenticate.js` verifies the Bearer token and re-reads the user on every request, so role changes and `tokenVersion` revocations apply immediately |
+| Request validation | One validator per request class (`Models/Requests`, `RequestValidator<T>`). `ValidationFilter` normalizes the values (trim, lowercase email, phone digits — the old zod transforms) and runs the validator; a failure becomes 422 `VALIDATION_ERROR` with `details: [{ field, message }]`. An empty or non-JSON body is validated as `{}` |
+| Errors | Services throw `ApiException` (`Infrastructure/Errors`) with a stable `code`; `ApiExceptionMiddleware` turns it into `{ error: { code, message, details } }`. Unique violations, missing rows and PostgreSQL deadlocks/serialization failures are mapped to 409 `DUPLICATE` / 404 `NOT_FOUND` / 409 `WRITE_CONFLICT`; unknown `/api` paths (or methods) get 404 `ROUTE_NOT_FOUND` |
+| Authentication | `BearerAuthenticationHandler` verifies the HS256 token and re-reads the user on every request, so role changes and `tokenVersion` revocations apply immediately; `[Authorize(Roles = "ADMIN")]` answers 403 `ROLE_REQUIRED` |
+| Rate limits | `[RateLimit("policy")]` filters with in-memory fixed-window counters (`Infrastructure/RateLimiting`), running before validation like the old middleware, with the same `RateLimit` / `RateLimit-Policy` headers |
 | Error messages | Server messages are Thai and are shown as-is by the web app; `code` is the stable contract |
 
 ## Shared server modules
 
-The booking, payment and seat-change services share these modules. None of them imports `bookings.js`, `payments.js` or `seatChanges.js`, which keeps the import graph free of cycles
+The booking, payment and seat-change services share these pieces. None of them depends on `BookingService`, `PaymentService` or `SeatChangeService`, which keeps the dependency graph free of cycles
 
 | Module | What it holds |
 |---|---|
-| `services/locks.js` | The system-wide lock order, `lockShowtime(tx, id)` (`FOR SHARE`), `lockBooking(tx, id)` (`FOR UPDATE`), seat-conflict detection (`isSeatConflict`, `seatTakenError`) and the shared 409 errors `BOOKING_STATE_CHANGED` / `PAYMENT_NOT_PENDING` |
-| `services/slips.js` | Everything a hold-with-slip has in common, for both a booking (ticket payment) and a seat change (difference payment): `holdSecondsLeft`, `canUploadSlip` (slips only while awaiting payment), `queueSlipForReview` (the compare-and-set that moves a holder to `PENDING_VERIFICATION`; when the expiry job wins the race the upload gets 409 `HOLD_EXPIRED`), `discardSlipOnError` (removes an uploaded file when the request fails) and the payment verdict builders |
-| `services/seatChangeRules.js` | Seat-change rules and response shapes used by bookings (booking card, cancel guard), seat changes and payments (queue summaries). No database access |
-| `utils/bookingAccess.js` | `BOOKING_NOT_FOUND`, `SEAT_CHANGE_NOT_FOUND`, `NOT_BOOKING_OWNER` and `canAccessBooking(requester, ownerId)` (owner or admin) |
-| `utils/pagination.js` | `paginationQuery` for route schemas and `findPage()`, which runs `findMany` + `count` in parallel for the admin lists |
-| `utils/seatChange.js` | Pure seat-change pricing (`planSeatChange`). The web app keeps a copy of the same rules in `client/src/utils/seatChange.js` to preview the difference — change both together |
+| `Services/Locks.cs` | The system-wide lock order, `LockShowtimeAsync(db, id)` (`FOR SHARE`), `LockBookingAsync(db, id)` (`FOR UPDATE`), seat-conflict detection (`IsSeatConflict`, `SeatTakenErrorAsync`) and the shared 409 errors `BOOKING_STATE_CHANGED` / `PAYMENT_NOT_PENDING` |
+| `Services/SlipService.cs` | Everything a hold-with-slip has in common, for both a booking (ticket payment) and a seat change (difference payment): `HoldSecondsLeft`, `CanUploadSlip` (slips only while awaiting payment), `QueueSlipForReviewAsync` (the compare-and-set that moves a holder to `PENDING_VERIFICATION`; when the expiry job wins the race the upload gets 409 `HOLD_EXPIRED`) and `DiscardSlipOnErrorAsync` (removes an uploaded file when the request fails) |
+| `Services/SeatChangeRules.cs` | Seat-change rules and response shapes used by bookings (booking card, cancel guard), seat changes and payments (queue summaries). No database access |
+| `Utils/BookingAccess.cs` | `BOOKING_NOT_FOUND`, `SEAT_CHANGE_NOT_FOUND`, `NOT_BOOKING_OWNER` and `CanAccessBooking(requester, ownerId)` (owner or admin) |
+| `Utils/Pagination.cs` | `FindPageAsync()`, which reads one page plus the total count for the admin lists |
+| `Utils/SeatChangePlanner.cs` | Pure seat-change pricing. The web app keeps a copy of the same rules in `client/src/utils/seatChange.js` to preview the difference — change both together |
+| `Data/Sql.cs` | The few statements LINQ can't express: row locks, the receipt counter (`INSERT … ON CONFLICT … RETURNING`) and `BookingSeat` inserts in seat-id order (EF would reorder them by primary key) |
 
 ## Client structure
 
@@ -81,15 +89,15 @@ i18n/         th.json and en.json — every key must exist in both
 
 ## Background jobs
 
-Started by `src/index.js` (`jobs/index.js`). Each job skips a tick while the previous run is still going, and errors are logged without stopping the process
+`Jobs/BackgroundJobs.cs` (a `BackgroundService`, registered unless `RUN_JOBS=false`). Each job runs once at startup and then on a `PeriodicTimer`, never overlaps itself, opens a fresh DI scope (its own `DbContext`) every run, and logs errors without stopping
 
 | Job | Interval | What it does |
 |---|---|---|
 | Release expired holds | 30 s | `PENDING_PAYMENT` bookings past `holdExpiresAt` become `EXPIRED`, their seats are released and the customer is notified |
 | Release expired seat changes | 30 s | Seat-change requests still waiting for the difference payment past their hold become `EXPIRED`; only the new seats are released |
-| Showtime reminders | 60 s | Notifies paid bookings about one hour before the showtime (never for cancelled showtimes, never twice) |
+| Showtime reminders | 60 s | Notifies paid bookings about one hour before the showtime (never for cancelled showtimes, never twice — the reminder is claimed with a compare-and-set first) |
 
-On a host that sleeps when idle (Render's free plan) these jobs pause too — see [DEPLOY.md](../DEPLOY.md#8-keep-the-server-awake-render-free-plan)
+On a plan that sleeps when idle (App Service Free F1) these jobs pause too — see [DEPLOY.md](../DEPLOY.md)
 
 ---
 
@@ -139,7 +147,7 @@ The countdown on the payment page is computed from the `holdSecondsLeft` the ser
 
 ### Preventing double booking (race condition)
 
-The `BookingSeat` table has `@@unique([showtimeId, seatId])` — PostgreSQL itself guarantees that a seat in a showtime can belong to only one booking. If two users confirm the same seat at the same time, the slower one gets HTTP 409 `SEAT_TAKEN` along with the list of seats that were taken first. This is not a `SELECT` check followed by an `INSERT`, which leaves a gap for another request to slip in
+The `BookingSeat` table has a unique index on (`showtimeId`, `seatId`) — PostgreSQL itself guarantees that a seat in a showtime can belong to only one booking. If two users confirm the same seat at the same time, the slower one gets HTTP 409 `SEAT_TAKEN` along with the list of seats that were taken first. This is not a `SELECT` check followed by an `INSERT`, which leaves a gap for another request to slip in
 
 When a booking is cancelled or expires, its `BookingSeat` rows are **deleted** to release the seats. The seat details shown in booking history are kept separately in `Booking.seatSnapshot`
 
@@ -157,12 +165,12 @@ If another operation grabs the status change first in the same split second, the
 | Submitting a seat change twice at once (two tabs) | The slower request deletes seats based on the old set, then books its new set on top — leaving held seats that nobody pays for (a seat change always locks the booking row and checks the seats are still the same set first) |
 
 Every operation locks in the same order — `Showtime` (shared) → `Booking` → `SeatChange` → `BookingSeat` → `Payment` → `ReceiptCounter` — and writes seats sorted by id. With one order across the whole system, deadlocks can't happen
-(The order and the row-lock helpers live in `server/src/services/locks.js`)
+(The order and the row-lock helpers live in `server/src/CineBook.Web/Services/Locks.cs`; seat rows go in with one ordered `INSERT` from `Data/Sql.cs`, because EF Core sorts its inserts by primary key)
 (The receipt number counter `ReceiptCounter` is always locked last, and nothing locks the counter before anything else)
 (If PostgreSQL still has to pick a loser, the user gets 409 `WRITE_CONFLICT` to retry, not a 500)
 Creating a booking holds a shared lock on the showtime row (`FOR SHARE`) while it writes, so a booking that arrives while an admin is cancelling the showtime can't slip through
 
-Every one of these cases is covered by integration tests that fire truly concurrent requests at PostgreSQL (`server/test/integration/`)
+Every one of these cases is covered by integration tests that fire truly concurrent requests at PostgreSQL (`server/tests/CineBook.Tests/Integration/`)
 
 ### Seat hold limits
 
@@ -215,12 +223,12 @@ Users can recover their account themselves: `/forgot-password` → enter the ema
 | A new password that fails the rules doesn't burn the link | Nobody would put up with requesting a whole new link because they typed a password that was too short once |
 | Link requests are limited per (IP + email) | Stops the system from being used to flood someone else's inbox · It isn't per email alone, because an attacker could use up the quota so the real owner can't request a link — locking them out of recovering their own account |
 
-The `token` is sent in the **body, not the URL path**, when calling the API, because `morgan` logs the method + path of every request
+The `token` is sent in the **body, not the URL path**, when calling the API, because request logs record the method + path of every request
 The link in the email itself uses `?token=`, the way most services do
 
-**Sending email** uses `nodemailer` with the SMTP server configured in `.env`
-If `SMTP_HOST` isn't set yet and `NODE_ENV=development`, the system **prints the email, link included, to the server console instead** and also returns the link for the web page to show,
-so the whole flow can be tried without a mail server. Both are tied to `NODE_ENV`, so even if SMTP is forgotten in production, the link never leaks — not through the API, and not into the logs either:
+**Sending email** uses MailKit with the SMTP server configured in `.env`
+If `SMTP_HOST` isn't set yet and `ASPNETCORE_ENVIRONMENT=Development`, the system **prints the email, link included, to the server console instead** and also returns the link for the web page to show,
+so the whole flow can be tried without a mail server. Both are tied to the environment, so even if SMTP is forgotten in production, the link never leaks — not through the API, and not into the logs either:
 production only logs one line saying an email to a masked recipient was skipped, because a reset link in the logs would let anyone who can read them take over that account
 
 > If the user can't access their email either, an admin can set a temporary password on the [User management](#user-management) page as a fallback
@@ -243,7 +251,7 @@ Once it's set, that account is logged out of every device immediately, in case t
 | Deleting an account with booking history | `Booking` is tied to `User` with cascade, so deleting the account would silently take its sales out of the reports with it |
 | Setting your own password from this page | That requires confirming the current password first, so it has to be done on the profile page |
 
-Role changes take effect in the API **immediately**, without waiting for the token to expire, because the `authenticate` middleware
+Role changes take effect in the API **immediately**, without waiting for the token to expire, because the Bearer authentication handler
 re-reads the role from the database on every request instead of trusting the value embedded in the JWT
 (On the affected user's own screen, the admin menu appears/disappears after a page refresh, but even if the menu lingers, nothing in it can be used)
 
@@ -257,50 +265,48 @@ re-reads the role from the database on every request instead of trusting the val
   a token rotated less than 10 seconds ago gets 409 `REFRESH_RACE` to retry instead — no new session is issued for the old token, so a stolen token still gains nothing
 - **No red errors in the console when logged out** — the web app calls `/api/auth/refresh` on every load to restore the session (it can't see the httpOnly cookie itself)
   With no cookie, the response is 204 instead of 401. A cookie that's no longer valid (e.g. after re-seeding the database) gets a single 401 and is deleted, so the bad cookie isn't sent again next time
-- **After a password change/reset, old access tokens stop working immediately** instead of waiting out their 15 minutes — `User.tokenVersion` is embedded in the token and incremented on every password change (`authenticate` already reads the user row on every request, so the comparison costs next to nothing)
+- **After a password change/reset, old access tokens stop working immediately** instead of waiting out their 15 minutes — `User.tokenVersion` is embedded in the token and incremented on every password change (the authentication handler already reads the user row on every request, so the comparison costs next to nothing)
   The device that changed the password gets a new access token right in the response, so it never runs into a 401 first
 - **Access tokens are refreshed ahead of time** — the request interceptor refreshes 30 seconds before the real expiry, measuring the token's lifetime (`exp − iat`) from the moment it was received rather than using the device clock
   So normal use never hits 401 `TOKEN_EXPIRED`; 401 → refresh → retry remains as a fallback (e.g. a password changed from another tab)
 - **Changing the email needs the current password**, like changing the password. The email is how an account is recovered, so otherwise a stolen access token could point the account at the attacker's inbox and take it over for good through "forgot password". A successful change also voids reset links already sent to the old address
 - Access tokens are signed and verified only with HS256 (the token's header can't choose the algorithm), and their payload holds no personal data — just the user id, role and `tokenVersion`
-- `TRUST_PROXY` decides which proxies to trust `X-Forwarded-For` from (default `loopback`) — it used to be hard-coded to 1, so if the API was reachable directly, anyone could spoof their IP to dodge rate limits
-- **The API only accepts requests that came through the web app** once `PROXY_SECRET` is set: Vercel adds the secret in an `x-proxy-secret` header, and anything without it gets 403 `DIRECT_ACCESS_FORBIDDEN` (except `/api/health`)
-  Requests through Vercel pass one more proxy than requests sent straight to Render, so no single `TRUST_PROXY` value fits both paths — with the direct path closed, `TRUST_PROXY` can match the Vercel path exactly and nobody can spoof `X-Forwarded-For` (see [DEPLOY.md](../DEPLOY.md#7-lock-the-api-to-vercel-and-match-trust_proxy))
-- The web app's pages carry their own security headers from `client/vercel.json`: a Content-Security-Policy (scripts and styles only from the site and Google Fonts), `X-Frame-Options: DENY` / `frame-ancestors 'none'` so no other site can frame the admin pages and trick a click on "approve", `nosniff` and a `Referrer-Policy`
-- Upload requests are capped before anything is stored: one file, at most 5 text fields of 4 KB, and 20 slip uploads per account per hour — multer keeps the whole request in memory before the service can check who owns the booking
-- Slip files are checked by their **actual contents** (JPG/PNG/WEBP magic bytes), not just the Content-Type the sender claims. The check runs while the file is still in memory, so files that fail are never written to storage at all. Every response also carries security headers from `helmet` (including `X-Content-Type-Options: nosniff`)
+- `TRUST_PROXY` decides which proxies to trust `X-Forwarded-For` from (default `loopback`; App Service has exactly one front end, so `1`). It used to be hard-coded to 1, so if the API was reachable directly, anyone could spoof their IP to dodge rate limits. ASP.NET Core's own `ASPNETCORE_FORWARDEDHEADERS_ENABLED` must stay `false` so the header isn't read twice
+- **`PROXY_SECRET`** (optional) makes the API accept only requests carrying it in an `x-proxy-secret` header — for a setup where a proxy or CDN in front adds it and the direct path must be closed. Anything without it gets 403 `DIRECT_ACCESS_FORBIDDEN` (except `/api/health`). On App Service visitors reach the app directly, so it stays empty there
+- The web app's pages carry their own security headers (`SecurityHeadersMiddleware`): a Content-Security-Policy (scripts and styles only from the site and Google Fonts), `X-Frame-Options: DENY` / `frame-ancestors 'none'` so no other site can frame the admin pages and trick a click on "approve", `nosniff`, a `Referrer-Policy` and HSTS
+- Upload requests are capped before anything is stored: one file, at most 5 text fields of 4 KB, 6 parts, and 20 slip uploads per account per hour. `SlipUploadReader` reads the multipart body itself, after the rate limit — MVC's form binding is switched off so nothing reads the body earlier
+- Slip files are checked by their **actual contents** (JPG/PNG/WEBP magic bytes), not just the Content-Type the sender claims. The check runs while the file is still in memory, so files that fail are never written to storage at all. Every API response also carries the security headers `helmet` used to send (including `X-Content-Type-Options: nosniff`)
 - Slip images aren't served as static files — they must be fetched through `GET /api/payments/:bookingId/slip` (the slip of the customer's transfer) or `/refund-slip` (the slip of the admin's refund transfer), which only allow the booking's owner or an Admin (`?payment=` = the slip of a seat change difference payment, which must belong to that booking)
 - Uploads are kept in separate piles by uploader: `payments/` for customers and `refunds/` for admins (folders under `uploads/slips/` or prefixes in the bucket, depending on the [slip storage](#slip-storage)), so audits and cleanups never grab from the wrong pile. File names are freshly randomized every time and can only be read from the pile of their own kind
 - Passwords are stored only as bcrypt hashes — the real password is never stored or logged — and must be at least 8 characters long with both letters and digits
 - A failed login always gets the same message, whether the account doesn't exist or the password is wrong, and even when no account is found the system still compares against a throwaway hash so response times are similar — so attackers can't work out which emails have accounts
 - **Failed** logins are limited per (IP + account); successful ones aren't counted, so normal users never get blocked, and hammering someone else's account can't lock out the real owner on a different IP
-  The account part is normalized exactly like the login lookup (`utils/loginIdentifier.js`), so typing the same phone number as `081-234-5678`, `0812345678` or `+66812345678` doesn't earn a fresh quota
+  The account part is normalized exactly like the login lookup (`Utils/LoginIdentifier.cs`), so typing the same phone number as `081-234-5678`, `0812345678` or `+66812345678` doesn't earn a fresh quota
 - The number of accounts that can be registered per IP is limited, counting only **successful** sign-ups (all of these are adjustable in `.env`). **Failed** sign-ups have their own limit (30 per 15 minutes per IP), because the sign-up form answers `EMAIL_TAKEN` / `PHONE_TAKEN` and would otherwise let a script check unlimited emails and phone numbers
 
 ### Slip storage
 
-Slip files can be stored in 2 ways, chosen by whether `SUPABASE_URL` is set (the code is in `server/src/lib/slipStorage.js`)
+Slip files can be stored in 2 ways, chosen by whether `AZURE_STORAGE_CONNECTION_STRING` is set (`Infrastructure/Storage/SlipStorage.cs`)
 
-| | `SUPABASE_URL` not set | `SUPABASE_URL` + `SUPABASE_SECRET_KEY` set |
+| | `AZURE_STORAGE_CONNECTION_STRING` not set | set |
 |---|---|---|
-| Stored in | Disk at `server/uploads/slips/` | Supabase Storage (private bucket) |
+| Stored in | Disk at `server/uploads/slips/` | Azure Blob Storage (private container, `payments/` and `refunds/` prefixes) |
 | Suited for | Development and running tests | Production |
 
 - In both modes the DB stores only the file name, so switching storage needs no schema change
-- In both modes slip images can only be opened through the permission-checked API (with Supabase, the server fetches the file from the bucket and passes it on), so no direct link to a file ever leaks out
-- **Hosts without a persistent disk (e.g. Render) must use Supabase**: the disk is wiped on every deploy/restart, so slips vanish while the DB still refers to them
-  If `NODE_ENV=production` but slips still go to disk, the server warns at startup, and opening a slip whose file is gone returns 404 `SLIP_FILE_MISSING`
+- In both modes slip images can only be opened through the permission-checked API (with Azure, the server reads the blob and passes it on with `Cache-Control: private, no-store`), so no direct link to a file ever leaks out
+- Neither mode overwrites an existing file, and a name containing a path is refused
+- **App Service must use Azure Blob**: the app's files are replaced on every deploy, so slips on its disk vanish while the DB still refers to them
+  If the app runs in Production but slips still go to disk, the server warns at startup, and opening a slip whose file is gone returns 404 `SLIP_FILE_MISSING`
 
-Setting up Supabase Storage:
+Setting up Azure Blob Storage:
 
-1. Supabase Dashboard → **Storage** → **New bucket**, name it `slips` (or whatever `SUPABASE_SLIP_BUCKET` is set to) and **turn off Public bucket**
-   For an extra layer of protection, set the file size limit to `5 MB` and the allowed MIME types to `image/jpeg, image/png, image/webp`
-2. No RLS policy is needed: the API uses the secret key, which bypasses RLS, and the public keys (publishable/anon) have no policy granting access, so they can't read anything in the bucket
-3. Take the Project URL and secret key (`sb_secret_…`, or the legacy service_role) from Project Settings and set them as `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API side (e.g. Render's Environment)
-   **Never put the secret key on the client side** (Vercel or `VITE_*` variables), because it would be bundled and shipped to the browser
-4. Start the server and check that the `ที่เก็บสลิป:` ("Slip storage:") line in the log shows `Supabase Storage (bucket slips)`
+1. Azure portal → **Storage accounts** → Create (Standard, LRS) in the same region as the app
+2. In the account → **Containers** → **+ Container**, name it `slips` (or whatever `AZURE_SLIP_CONTAINER` is set to) with access level **Private**
+3. **Access keys** → copy a **Connection string** and set it as `AZURE_STORAGE_CONNECTION_STRING` in the App Service settings only — it grants full access to the account
+4. Start the app and check that the `ที่เก็บสลิป:` ("Slip storage:") line in the log stream shows `Azure Blob Storage (container slips)`
 
-Existing slips on disk aren't moved to the bucket automatically. When migrating a database that already has slips, upload the files in `uploads/slips/payments/` and `refunds/` to the prefixes with the same names yourself
+Existing slips aren't moved automatically. When migrating a database that already has slips, copy the files in `uploads/slips/payments/` and `refunds/` (or the old Supabase bucket) to the `payments/` and `refunds/` prefixes of the container
 
 ### When bookings can't be cancelled
 
@@ -391,7 +397,7 @@ and it doesn't wait for SMTP — an admin working through the slip queue doesn't
 It uses bilingual "ไทย / English" labels in a single version, because the system doesn't store the language the customer picked, and without SMTP configured it's printed to the console, like the password reset email
 
 It's a plain **receipt**: VAT isn't broken out, and it isn't a tax invoice — the issuer name and address are set with `RECEIPT_ISSUER_NAME` / `RECEIPT_ISSUER_ADDRESS`
-Payments made before this feature existed were numbered retroactively by the `receipts` migration, in order of actual payment time
+Payments made before this feature existed were numbered retroactively by the `receipts` migration of the earlier Prisma version, in order of actual payment time
 
 ### Seat changes
 
@@ -406,10 +412,10 @@ The seat change page starts with the current seats all selected (dashed outline)
 
 Not transferring in time, a rejected slip, or the customer cancelling the request = the move just doesn't happen; the current seats aren't lost
 A rejected slip gets a new `REJECTED_RETRY_MINUTES` window to transfer (unless the showtime has started), and once the request has expired no difference slip is accepted (409 `HOLD_EXPIRED`), just like ticket payments
-(Ticket payments and difference payments go through the same slip-submission code in `server/src/services/slips.js`)
+(Ticket payments and difference payments go through the same slip-submission code in `Services/SlipService.cs`)
 
 **Pricing** — seats in zones the booking already has are priced at what was paid, while new zones use the showtime's current price. So moving within the same zone is always free, even if an admin changes the showtime's prices later
-The web app shows the difference before confirming, using the same rules (`client/src/utils/seatChange.js`), but the actual amount is calculated by the server (`server/src/utils/seatChange.js`)
+The web app shows the difference before confirming, using the same rules (`client/src/utils/seatChange.js`), but the actual amount is calculated by the server (`Utils/SeatChangePlanner.cs`)
 
 | Rule | Reason |
 |---|---|

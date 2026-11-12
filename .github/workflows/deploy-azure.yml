@@ -1,0 +1,55 @@
+# build ทั้งระบบ (API + หน้าเว็บ React) แล้ว deploy ไป Azure App Service — ดูขั้นตอนตั้งค่าใน DEPLOY.md ข้อ 6
+# ต้องมี secret AZURE_WEBAPP_PUBLISH_PROFILE (publish profile ของแอป) และ variable AZURE_WEBAPP_NAME (ชื่อแอป)
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# deploy ทีละครั้ง — push ซ้อนกันจะรอคิว ไม่ยกเลิกรอบที่กำลังขึ้นอยู่กลางทาง
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      # ยังไม่ได้ตั้ง secret/variable (เช่น merge ก่อนสร้างแอปบน Azure) — build + test ตามปกติแต่ข้ามขั้น deploy
+      CAN_DEPLOY: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' && vars.AZURE_WEBAPP_NAME != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # integration test ต้องใช้ PostgreSQL จริง จึงรันเฉพาะ unit test ก่อน deploy
+      - name: Unit tests
+        run: dotnet test server/tests/CineBook.Tests --filter Category=Unit
+
+      # target PublishClient ใน CineBook.Web.csproj รัน npm ci + vite build แล้วใส่ client/dist ลง wwwroot
+      - name: Publish
+        run: dotnet publish server/src/CineBook.Web -c Release -o "${{ runner.temp }}/app"
+
+      - name: Deploy
+        if: env.CAN_DEPLOY == 'true'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ${{ runner.temp }}/app
+
+      - name: Deploy skipped
+        if: env.CAN_DEPLOY != 'true'
+        run: echo "::notice::ข้ามการ deploy — ตั้ง secret AZURE_WEBAPP_PUBLISH_PROFILE และ variable AZURE_WEBAPP_NAME ก่อน (DEPLOY.md ข้อ 6)"

@@ -1,304 +1,237 @@
-# 🚀 Deploy: Vercel + Render + Supabase
+# 🚀 Deploy: Azure for Students
 
-A step-by-step guide to going live. Every service works on its free plan. Follow steps 1 → 10 in order
+One **Azure App Service** runs the whole system: the ASP.NET Core app answers `/api/*` and serves the built React app for every other path. The data lives in **Azure Database for PostgreSQL** and the payment slips in **Azure Blob Storage**
 
 ## Overview
 
 ```
-Browser ──► Vercel ─────────────────────► Render ──────────► Supabase
-            web app (client/)             API (server/)      Postgres + Storage (slips)
-            forwards /api/* to Render
+Browser ──HTTPS──► App Service (Linux, Free F1, .NET 10)  https://<app>.azurewebsites.net
+                     ├── /api/*        ASP.NET Core API
+                     ├── everything else  wwwroot/index.html (React build)
+                     ├──► Azure Database for PostgreSQL – Flexible Server (Burstable B1ms)
+                     ├──► Azure Blob Storage (private container "slips")
+                     ├──► SMTP (Gmail app password on port 587, or another provider) — optional
+                     └── background jobs: expire unpaid holds and seat changes, showtime reminders
+UptimeRobot ──every 5 min──► /api/health   (F1 has no Always On; the app sleeps after ~20 idle minutes)
 ```
 
-- The web app calls the API at `/api/...` on its own domain, and Vercel forwards those requests to Render as configured in `client/vercel.json`
-  **Don't change the web app to call the Render URL directly**: the refresh token lives in a `SameSite=lax` cookie, and across domains the browser won't send it, so users get logged out on every refresh
-- Vercel adds a secret header (`x-proxy-secret`, from the `PROXY_SECRET` variable) to every request it forwards. Once the same `PROXY_SECRET` is set on Render, the API rejects requests that didn't come through Vercel (403 `DIRECT_ACCESS_FORBIDDEN`), except `/api/health` — see [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy)
-- `client/vercel.json` also sends security headers with the web app (`Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`). API responses get theirs from `helmet`
-- `client/vercel.json` also caches everything under `/assets/` for a year (`immutable`). Vite puts a content hash in those file names, so every build ships new names, while `index.html` is still revalidated on every visit and always points at the current files
-- The API is configured through `render.yaml` (Render Blueprint): build, start and health check
-- Pick the **Singapore** region for both Render and Supabase. The API makes several database round trips per request, so if they sit on different continents every page will be slow
+- The web app and the API share one origin, so the refresh cookie (`SameSite=lax`, `Secure`) just works and no proxy or rewrite is needed
+- `dotnet publish` builds `client/` into the app's `wwwroot`, so one publish is the whole deployment
+- The steps use the Azure portal. Keep every resource in **one region and one resource group**
 
-> Vercel's Hobby plan (free) is for personal, non-commercial use only. To sell real tickets you need the Pro plan
+### Cost
+
+| Resource | Plan | Cost |
+|---|---|---|
+| App Service plan | Free F1 | Free, no time limit (60 CPU minutes per day, no Always On, no custom-domain TLS) |
+| Azure Database for PostgreSQL | Flexible Server, Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 hours/month) — afterwards it is billed to your credit, so delete or downsize it before then |
+| Storage account | Standard LRS | A few baht a month from the student credit |
+
+Azure for Students gives a yearly credit and must be renewed every year. **When the credit runs out the whole subscription is disabled**, including the free services — check **Cost Management** now and then
 
 ## Prerequisites
 
-- GitHub, Supabase, Render and Vercel accounts (all of them let you sign up with your GitHub account)
-- The project already running on your own machine, following the [README](README.md#install-and-run)
+- An Azure for Students subscription (sign up with your university email at <https://azure.microsoft.com/free/students>)
+- The code on GitHub (the workflow in step 6 deploys from the `main` branch)
+- .NET SDK 10, Node.js 20+ and `psql` on your machine (for seeding and checks)
 
----
+## 1. Resource group
 
-## 1. Push the code to GitHub
+Portal → **Resource groups** → **Create** → name it e.g. `cinebook-rg` → pick a region close to your users, such as **Southeast Asia**. Student subscriptions often have a policy that allows only some regions; if a later step says the region isn't allowed, start again in one the error message lists
 
-Render and Vercel pull the code from GitHub, so everything the system needs must be committed
+## 2. Database: Azure Database for PostgreSQL – Flexible Server
 
-1. Check for uncommitted files:
+1. Portal → **Create a resource** → **Azure Database for PostgreSQL – Flexible Server** → **Create**
+2. **Basics**
+   - Resource group `cinebook-rg`, server name e.g. `cinebook-db` (becomes `cinebook-db.postgres.database.azure.com`), the same region
+   - PostgreSQL version: the newest offered (16 or later)
+   - Workload type: **Development** → **Configure server** → **Burstable, B1ms**, storage **32 GiB**, high availability **off**
+   - Authentication: **PostgreSQL authentication only**; set an admin username and a strong password (avoid `@` `:` `/` `?` `#` in it, or URL-encode them later)
+3. **Networking**: **Public access**, tick **Allow public access from any Azure service within Azure to this server**, and **+ Add current client IP address** (for seeding from your machine)
+4. **Review + create**, wait a few minutes
+5. Open the server → **Databases** → **+ Add** → name `cinebook`
 
-   ```bash
-   git status
-   ```
+The connection string for the app (`DATABASE_URL`):
 
-   Every folder in `server/prisma/migrations/` must be committed, because Render creates the tables from migrations only. If one is missing, the tables will be incomplete and the API will break at runtime
-
-2. Commit everything:
-
-   ```bash
-   git add -A
-   git commit -m "Prepare for deployment"
-   ```
-
-3. Create a new repo on GitHub (it can be private) and push:
-
-   ```bash
-   git remote add origin https://github.com/<username>/<repo-name>.git
-   git push -u origin main
-   ```
-
-4. Open the repo on GitHub and check that `server/.env` and `server/.env.test` were **not** pushed (`.gitignore` already excludes them, but double-check: they contain the database password and JWT secrets)
-
-## 2. Supabase: database and slip storage
-
-### 2.1 Create a project
-
-1. [supabase.com](https://supabase.com) → **New project**
-2. **Region:** Southeast Asia (Singapore)
-3. **Database password:** set one and note it down (used in step 2.2)
-4. **Turn off the Data API** if the create-project page offers the option. If the project already exists, turn it off at Project Settings → Data API
-   - This app connects to the database directly through Prisma and doesn't use Supabase's REST API
-   - The tables Prisma creates don't have RLS enabled, so if the Data API stays on, they may be reachable through it
-   - Storage, which holds the slips, is a separate service and isn't affected when the Data API is off
-
-### 2.2 Connection string → `DATABASE_URL`
-
-1. Click the **Connect** button at the top of the project page and choose **Session pooler**
-   **Don't use Direct connection**: it's IPv6, which Render can't reach (the build fails with `P1001`)
-2. Copy the URI, which looks roughly like this:
-
-   ```
-   postgresql://postgres.<project-ref>:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
-   ```
-
-3. Replace `[YOUR-PASSWORD]` with the password from step 2.1. If it contains special characters such as `@ # / ? % :`, URL-encode them first (e.g. `@` → `%40`, `#` → `%23`)
-4. Append `?connection_limit=5` to keep Prisma's connection count within the free-plan pooler quota
-
-The result is your `DATABASE_URL`. Keep it for steps 3 and 4
-
-### 2.3 Bucket for slips
-
-Follow the [Slip storage](docs/architecture.md#slip-storage) section of the architecture notes: Storage → **New bucket**, name it `slips` and **turn off Public bucket**
-
-### 2.4 Storage connection values
-
-| Value | Where to find it | Used as |
-|---|---|---|
-| Project URL | `https://<project-ref>.supabase.co`, where `<project-ref>` is the ID in the dashboard URL (`supabase.com/dashboard/project/<project-ref>`) | `SUPABASE_URL` |
-| Secret key | Project Settings → API Keys → secret key (`sb_secret_…`), or `service_role` in the legacy tab | `SUPABASE_SECRET_KEY` |
-
-> The secret key bypasses every permission in the database and Storage. Put it on Render only — **never in Vercel or in client-side code**
-
-## 3. Render: API
-
-1. [render.com](https://render.com) → **New** → **Blueprint** → connect GitHub and pick this repo
-   Render reads `render.yaml` at the repo root and creates a web service named `theatre-reservation-api` (Singapore region, free plan, build/start commands and health check all preset)
-2. Render asks for the values that aren't in the file:
-
-   | Variable | Value |
-   |---|---|
-   | `DATABASE_URL` | The value from step 2.2 |
-   | `SUPABASE_URL` | The value from step 2.4 |
-   | `SUPABASE_SECRET_KEY` | The value from step 2.4 |
-   | `CLIENT_ORIGIN` | The web app URL you'll get from Vercel, e.g. `https://<repo-name>.vercel.app`. If you're not sure yet, enter it anyway and fix it in step 6 |
-   | `PROMPTPAY_ID` | The phone number or national ID number linked to **your own** PromptPay. The QR on the payment page is generated from it — if someone scans and pays, the money really goes to this number |
-   | `PROXY_SECRET` | Leave it empty for now — it's set in [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy), after Vercel is sending it |
-
-   You don't need to fill in:
-   - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`: Render generates them
-   - `NODE_ENV` / `TRUST_PROXY`: already set in `render.yaml`
-
-3. Click **Apply** and wait for the build (about 3–5 minutes the first time). The build step runs `prisma migrate deploy`, which creates every table on Supabase
-4. Open the **Logs** tab. You should see this line (the server logs in Thai; it means "Slip storage: Supabase Storage (bucket slips)"):
-
-   ```
-   ที่เก็บสลิป: Supabase Storage (bucket slips)
-   ```
-
-   If you see the warning `⚠️  ยังเก็บสลิปลงดิสก์` ("still storing slips on disk"), `SUPABASE_URL` / `SUPABASE_SECRET_KEY` aren't set yet
-5. Note the service URL at the top of the page, e.g. `https://theatre-reservation-api.onrender.com` (if that name is taken, Render adds a suffix), then open `<Render URL>/api/health` — it must return `"ok": true`
-
-## 4. Load sample data (seed)
-
-Do this once, after step 3 (the tables must already exist). Run it from **your own machine**, pointed at the Supabase database
-
-> ⚠️ The seed **wipes every table** before creating the sample data. Only run it while there are no real users yet (for what a re-run does, see step 12)
-
-PowerShell (Windows):
-
-```powershell
-cd server
-$env:DATABASE_URL = '<DATABASE_URL from step 2.2>'
-$env:SUPABASE_URL = '<Project URL from step 2.4>'
-$env:SUPABASE_SECRET_KEY = '<Secret key from step 2.4>'
-$env:SEED_PASSWORD = '<new demo account password>'
-npm run db:seed
-Remove-Item Env:DATABASE_URL, Env:SUPABASE_URL, Env:SUPABASE_SECRET_KEY, Env:SEED_PASSWORD
+```
+postgresql://<admin>:<password>@cinebook-db.postgres.database.azure.com:5432/cinebook?sslmode=require&connection_limit=5
 ```
 
-macOS / Linux:
+`sslmode=require` is mandatory on Azure; `connection_limit=5` keeps the app's pool small for the B1ms server
+
+## 3. Slip storage: Azure Blob Storage
+
+1. Portal → **Storage accounts** → **Create** → resource group `cinebook-rg`, a globally unique name (e.g. `cinebookslips123`), the same region, **Standard**, redundancy **LRS** → **Review + create**
+2. Open it → **Containers** → **+ Container** → name `slips`, anonymous access **Private**
+3. **Security + networking → Access keys** → **Show** → copy **Connection string** of key1. This is `AZURE_STORAGE_CONNECTION_STRING` — it grants full access to the account, so it goes only into the App Service settings (step 4) and your own terminal when seeding
+
+## 4. App Service
+
+1. Portal → **Create a resource** → **Web App**
+   - Resource group `cinebook-rg`, name e.g. `cinebook` (the site becomes `https://cinebook.azurewebsites.net`)
+   - Publish: **Code** · Runtime stack: **.NET 10 (LTS)** · Operating system: **Linux** · the same region
+   - Pricing plan: create a new Linux plan and choose **Free F1**
+   - **Review + create**
+2. Open the app → **Settings → Configuration → General settings**: **HTTPS Only** = On, **SCM Basic Auth Publishing Credentials** = On (needed for the publish profile in step 6) → **Save**
+3. **Settings → Environment variables → App settings** → add each of these → **Apply**:
+
+| Name | Value |
+|---|---|
+| `DATABASE_URL` | the connection string from step 2 |
+| `AZURE_STORAGE_CONNECTION_STRING` | the connection string from step 3 |
+| `JWT_ACCESS_SECRET` | a new random value: `[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))` (PowerShell) or `openssl rand -hex 32` |
+| `JWT_REFRESH_SECRET` | another new random value |
+| `CLIENT_ORIGIN` | `https://<app>.azurewebsites.net` (no trailing `/`) |
+| `PROMPTPAY_ID` | your PromptPay number (keep the sample `0812345678` only for a demo nobody pays into) |
+| `TRUST_PROXY` | `1` — App Service has one front end in front of the app (check it in step 7) |
+| `DB_MIGRATE_ON_START` | `true` — creates the tables on the first start and applies new migrations on later deploys |
+| `ASPNETCORE_FORWARDEDHEADERS_ENABLED` | `false` — the app reads `X-Forwarded-For` itself according to `TRUST_PROXY` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | optional, see step 9 |
+
+Leave `ASPNETCORE_ENVIRONMENT` unset (the app then runs in Production) and `PROXY_SECRET` empty. Every other variable has a sensible default — see [Configuration](docs/configuration.md)
+
+App Service sets the port itself (`ASPNETCORE_HTTP_PORTS=8080`), and the app listens on it automatically
+
+## 5. First deploy and check
+
+Any of the deploy methods in step 6 works for the first deploy. After it, open **Monitoring → Log stream** and restart the app once (**Overview → Restart**). The start-up lines should show:
+
+```
+🎬  Theatre Reservation API
+    http://localhost:8080/api/health  (Production)
+    อนุญาต origin: https://<app>.azurewebsites.net
+    ที่เก็บสลิป: Azure Blob Storage (container slips)
+```
+
+- No `❌ ตั้งค่า environment ไม่ถูกต้อง` ("invalid environment configuration") — if there is, the next lines name the variable to fix
+- No `⚠️` lines you didn't expect. The ones you may see on purpose: the sample `PROMPTPAY_ID` and the missing `SMTP_HOST`
+- The first start creates the tables (`DB_MIGRATE_ON_START=true`); it can take a minute on F1
+
+## 6. Deploying from GitHub (recommended)
+
+The repository contains `.github/workflows/deploy-azure.yml`. On every push to `main` (or a manual run) it installs Node and .NET, runs `dotnet publish` (which builds the web app into `wwwroot`) and deploys the result
+
+1. App Service → **Overview** → **Download publish profile** (if the button is greyed out, step 4.2 wasn't saved)
+2. GitHub → the repository → **Settings → Secrets and variables → Actions**
+   - **Secrets** → **New repository secret** → name `AZURE_WEBAPP_PUBLISH_PROFILE`, value = the whole content of the downloaded file
+   - **Variables** → **New repository variable** → name `AZURE_WEBAPP_NAME`, value = the app name (e.g. `cinebook`)
+3. **Actions** → **Deploy to Azure App Service** → **Run workflow** (or push to `main`)
+
+The publish profile avoids creating a service principal, which university tenants usually don't allow. Keep it secret: it can deploy anything to the app. If it leaks, **Reset publish profile** on the app's Overview page and update the secret
+
+Without GitHub — publish locally and upload the folder:
 
 ```bash
 cd server
-DATABASE_URL='<DATABASE_URL from step 2.2>' SUPABASE_URL='<Project URL from step 2.4>' \
-  SUPABASE_SECRET_KEY='<Secret key from step 2.4>' SEED_PASSWORD='<new password>' npm run db:seed
+dotnet publish src/CineBook.Web -c Release -o publish
 ```
 
-- Values set with `$env:` only apply to that terminal window. `server/.env` still points at your local database
-- **Don't forget `Remove-Item`**. If you do, the next command in the same window (e.g. `npm run db:reset`) will run against the production database
-- `SUPABASE_URL` / `SUPABASE_SECRET_KEY` let the seed upload its sample slip images (about 470 small PNGs) to the bucket the live API reads
-  - Without them the images land in your local `server/uploads`, and every slip on the live admin pages shows "No slip". The seed prints a warning at the end when that happens
-  - If you named the bucket something other than `slips` in step 2.3, set `SUPABASE_SLIP_BUCKET` too
-- `SEED_PASSWORD` replaces the `Password123` written in the README. Without it, anyone can log in as the admin
-  - The resulting accounts are `admin@cinebook.test` and `staff@cinebook.test` (admins), `somchai@example.test` and 15 more `@example.test` customers, all with this password
-  - Make it 8+ characters with both letters and digits
-- Use single quotes `'...'` as in the example. If the password contains `$`, double quotes will mangle it
+then in VS Code with the **Azure App Service** extension: right-click the `publish` folder → **Deploy to Web App…** → pick the app. (Or zip the folder's contents and run `az webapp deploy --resource-group cinebook-rg --name <app> --src-path app.zip --type zip`)
 
-## 5. Vercel: web app
+## 7. Check `TRUST_PROXY`
 
-1. Edit `client/vercel.json` and replace `YOUR-RENDER-SERVICE.onrender.com` with the Render domain from step 3.5:
+Open `https://<app>.azurewebsites.net/api/health` from your own browser:
 
-   ```json
-   "destination": "https://theatre-reservation-api.onrender.com/api/:path*"
-   ```
+- `proxyHops` should be `1` and `ip` should be your public IP address
+- If `proxyHops` is different, set `TRUST_PROXY` to that number. If `ip` is a private Azure address while `proxyHops` is 1, `TRUST_PROXY` is still `loopback` — set it to `1`
 
-   Then commit and push:
+Rate limits (logins, sign-ups, slip uploads) count per client IP, so a wrong value either lumps every visitor together or lets anyone spoof an IP to dodge the limits
 
-   ```bash
-   git commit -am "Point Vercel /api rewrite to Render"
-   git push
-   ```
+## 8. Load the sample data (seed)
 
-   The file deliberately ships with a placeholder so the web app doesn't work until you change it. If you guessed the service name and that name belonged to someone else, every request — passwords and cookies included — would be sent to their server
+Run the seed **once**, from your machine, against the Azure database and storage. In PowerShell, from `server/`:
 
-2. [vercel.com](https://vercel.com) → **Add New** → **Project** → import this repo
-3. **Root Directory:** click Edit and choose `client`
-   - The framework is detected as Vite automatically; no need to change Build or Output
-   - No Environment Variables are needed yet — `PROXY_SECRET` is added in [step 7](#7-lock-the-api-to-vercel-and-match-trust_proxy). Never give it a `VITE_` prefix: those are bundled into the JavaScript every visitor downloads
-4. Click **Deploy** to get the web app URL, e.g. `https://<project>.vercel.app` (see the actual name under Settings → Domains)
+```powershell
+$env:DATABASE_URL = "postgresql://<admin>:<password>@cinebook-db.postgres.database.azure.com:5432/cinebook?sslmode=require"
+$env:AZURE_STORAGE_CONNECTION_STRING = "<connection string from step 3>"
+$env:SEED_PASSWORD = "<a password for the demo accounts>"
+$env:DB_MIGRATE_ON_START = "true"
+dotnet run --project src/CineBook.Web -- seed
+Remove-Item Env:DATABASE_URL, Env:AZURE_STORAGE_CONNECTION_STRING, Env:SEED_PASSWORD, Env:DB_MIGRATE_ON_START
+```
 
-## 6. Correct `CLIENT_ORIGIN`
+- Values in the environment win over `server/.env`, so this run uses Azure while your local settings stay as they are
+- **Always set `SEED_PASSWORD`** — the default `Password123` is published in the README, and anyone could log in as an admin with it
+- Your IP must be in the database's firewall rules (step 2.3); if your IP changed, add it again under the server's **Networking**
+- The sample slips go to the `slips` container. If you forgot `AZURE_STORAGE_CONNECTION_STRING`, they land on your disk instead and the seed warns about it — set it and run the seed again
 
-If the Vercel URL differs from what you entered in step 3:
-1. Render → service → **Environment** → set `CLIENT_ORIGIN` to the real URL (no trailing `/`)
-2. Click Save and Render restarts on its own
-
-This value is used to build the links in emails (password reset links and receipts). If it's wrong, those links lead to the wrong place
-
-## 7. Lock the API to Vercel and match `TRUST_PROXY`
-
-The rate limits on login, sign-up and password reset count per user IP, which the API reads from `X-Forwarded-For` by trusting `TRUST_PROXY` proxies in front of it. Requests through Vercel pass one more proxy than requests sent straight to the Render URL, so one number can only be right for one of the two paths:
-- **Too low for the Vercel path** — everyone using the web app is counted as Vercel's IP. A few wrong passwords lock that account for everyone, and the sign-up and password-reset quotas are shared by the whole site
-- **Right for Vercel while the Render URL stays open** — requests sent straight to Render can put a fake IP in `X-Forwarded-For` and dodge every rate limit
-
-So `TRUST_PROXY` is set for the Vercel path (`4` in `render.yaml`), and `PROXY_SECRET` closes the direct path:
-
-1. Generate a secret:
-
-   ```bash
-   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-   ```
-
-2. Vercel → project → **Settings** → **Environment Variables** → add `PROXY_SECRET` with that value for **Production** and **Preview**, then redeploy (Deployments → ⋯ → Redeploy). Variables only reach deployments made after they're set
-3. Open `https://<Vercel URL>/api/health` — `proxySecret` must be `unchecked`: Vercel is sending the header and the API isn't checking it yet
-   - `unresolved` — Vercel can't find the variable: check its name, and that you redeployed
-   - `missing` — the request didn't go through `client/vercel.json`: check the Root Directory (step 5)
-4. Render → service → **Environment** → add `PROXY_SECRET` with **the same value**. Render restarts on its own
-5. Check again:
-   - `https://<Vercel URL>/api/health` → `proxySecret` must be `valid`, and the web app must work as before
-   - `https://<Render URL>/api/movies` → 403 `DIRECT_ACCESS_FORBIDDEN`: direct requests are closed
-   - `https://<Render URL>/api/health` → still 200, because Render's health check and the pinger in step 8 call it directly
-
-   If the web app shows errors right after step 4, the two values differ. Fix the value, or delete `PROXY_SECRET` on Render to turn the check off again
-6. In `https://<Vercel URL>/api/health` (**it must be opened through the Vercel URL**), check `proxyHops`. If it isn't `4`, set `TRUST_PROXY` in `render.yaml` to that value, then commit and push
-   Change it in the file, because the file is the source of truth for this value. If you only change it in the dashboard, it may be overwritten on the next Blueprint sync
-7. The `ip` value must match the IP shown by [api64.ipify.org](https://api64.ipify.org) — not one of Vercel's IPs
-
-> While `PROXY_SECRET` is set, a `TRUST_PROXY` slightly higher than needed does no harm (every accepted request came through Vercel, which overwrites `X-Forwarded-For`), but one that's too low puts everyone back on Vercel's IP. Re-check `proxyHops` if login lockouts are reported
-
-## 8. Keep the server awake (Render free plan)
-
-The free Render plan goes to sleep after 15 minutes without requests and takes about 1 minute to wake up. While it's asleep:
-- The first visitor has a long wait (Vercel waits at most 120 seconds)
-- Background jobs stop: seats whose payment window has run out aren't released, and pre-showtime reminders aren't sent
-- If nobody touches the database for 7 days, Supabase's free plan pauses the project
-
-Fix this by setting up an automatic pinger with [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org) (both free):
-- URL: `https://<Render URL>/api/health` (calling Render directly is fine; it doesn't need to go through Vercel)
-- Interval: every 10 minutes
-
-Render's free hours (750 hours/month) are enough to keep one service up all month, but not if the same account has other free services
-On a paid Render plan you can skip this step
+The seed **wipes every table**. Never run it once there are real users. Re-running it is how you reset the demo when the sample showtimes run out (they cover 10 days back to 7 days ahead of the run): accounts, bookings and receipts all start over, and slips uploaded by real users stay in the container until you delete the `payments/` and `refunds/` folders yourself
 
 ## 9. Email (optional)
 
-Until `SMTP_HOST` is set, the system doesn't send real email, so users receive neither password reset links nor receipts. In production it only logs one line per skipped email (`ยังไม่ได้ตั้ง SMTP_HOST` — "SMTP_HOST isn't set yet") with a masked recipient and never the message itself, because a reset link in the logs would let anyone who can read them take over that account. The server also warns about this at startup
-Until email works, customers who forget their password need an admin to set a temporary one at `/admin/users`
+Without SMTP nothing is emailed: forgot-password links and receipts are not sent (production logs only a one-line notice). Azure blocks outbound port 25 only, so a normal provider on port 587 works. With Gmail:
 
-Render's free plan **blocks ports 25, 465 and 587**, so Gmail won't work. Use [Brevo](https://www.brevo.com) (300 emails a day free) instead, which accepts port 2525:
+1. Turn on 2-Step Verification for the Google account, then create an **App password** (Google Account → Security → App passwords)
+2. App settings:
 
-1. Sign up for Brevo and verify the sender email you'll use (Senders)
-2. On the SMTP & API page → create an SMTP key, and note down the SMTP login and the key
-3. Render → Environment → add these variables:
+| Name | Value |
+|---|---|
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | your Gmail address |
+| `SMTP_PASS` | the 16-character app password |
+| `MAIL_FROM` | `CineBook <your Gmail address>` — must be the same address as `SMTP_USER` |
 
-   | Variable | Value |
-   |---|---|
-   | `SMTP_HOST` | `smtp-relay.brevo.com` |
-   | `SMTP_PORT` | `2525` |
-   | `SMTP_SECURE` | `false` |
-   | `SMTP_USER` | SMTP login from Brevo |
-   | `SMTP_PASS` | SMTP key from Brevo |
-   | `MAIL_FROM` | `CineBook <verified sender email>` |
+Leave `SMTP_SECURE` unset (port 587 uses STARTTLS). Any other SMTP provider (Brevo, SendGrid, …) works the same way
 
-On a paid Render plan you can use Gmail (port 587 + App Password) as described in `server/.env.example`
+## 10. Keep the app awake
 
-## 10. Post-deploy checks
+The Free F1 plan has no **Always On**: after about 20 minutes without requests the app is unloaded, the next visitor waits for a cold start, and the background jobs stop while it sleeps (unpaid holds then expire only when the app wakes up)
 
-- [ ] `<Render URL>/api/health` and `<Vercel URL>/api/health` both return `"ok": true`
-- [ ] Log in on the web app and refresh — you must still be logged in (if you're logged out, see step 13)
-- [ ] Open `<Vercel URL>/my-bookings` directly and refresh — you must not get a 404 page
-- [ ] Book seats and upload a slip — a new file must appear under `payments/` in Supabase → Storage → `slips`
-- [ ] Log in as the admin — you must be able to open that slip, and approving it must produce a receipt
-- [ ] `<Vercel URL>/api/health` shows `"proxySecret": "valid"` and `<Render URL>/api/movies` returns 403 (step 7)
-- [ ] Render's Logs show no `⚠️` warnings (the SMTP and PromptPay warnings are expected only if you chose to skip step 9 or run a demo with the sample number)
+Create a free monitor at [UptimeRobot](https://uptimerobot.com) (or cron-job.org): type **HTTP(s)**, URL `https://<app>.azurewebsites.net/api/health`, interval **5 minutes**. `/api/health` doesn't touch the database, so the pings cost almost nothing
 
----
+Keep an eye on **App Service → Quotas**: F1 allows 60 CPU minutes per day. If it runs out, the app is stopped until the quota resets; scale the plan up to B1 (paid) for a real launch
 
-## 11. Future updates
+## 11. Post-deploy checks
 
-- Push to `main` and both sides deploy automatically (Render only rebuilds when files in `server/` change)
-- Whenever you change `schema.prisma`, always create the migration locally first with `npm run db:migrate` and commit the migration folder too. Render runs new migrations during the build
-- Don't change the table structure of the production database by hand (e.g. through Supabase's Table Editor), because the next migration will clash with your changes
+- [ ] `https://<app>.azurewebsites.net/api/health` answers `ok: true`, and `proxyHops`/`ip` are right (step 7)
+- [ ] The home page loads; refreshing a deep link such as `/my-bookings` or `/admin/payments` shows the page (not a 404)
+- [ ] Log in, refresh the page — you are still logged in (the refresh cookie works)
+- [ ] Book seats and upload a slip → a new blob appears under `payments/` in the `slips` container
+- [ ] As an admin, open the slip in the review queue and approve it → the receipt opens (and arrives by email if SMTP is set)
+- [ ] Opening a slip URL without logging in is refused — slips are only served through the API
+- [ ] **Log stream** shows no `⚠️` lines you didn't expect and no `fail:` lines
 
-## 12. Reset the demo (re-run the seed)
+## 12. Future updates
 
-You can re-run the command from step 4 at any time, e.g. when the sample showtimes run out (the seed creates showtimes from 10 days before to 7 days after the day it runs), but every run is a complete restart of the system:
+- Push to `main` → the workflow deploys. New EF Core migrations run on the next start (`DB_MIGRATE_ON_START=true`)
+- Create migrations locally (`dotnet ef migrations add <Name> --project src/CineBook.Web --output-dir Data/Migrations`) and commit them
+- Don't change the production schema by hand (e.g. in the portal's query editor) — the next migration would clash with it
 
-- Self-registered users, bookings, payments, receipts and notifications are **all gone**, and everyone is logged out
-- The demo account password becomes the `SEED_PASSWORD` set for that run (if unset, it reverts to `Password123`)
-- Receipt numbers start again from 000001
-- The seed's own sample slips (`seed-pay-*.png`, `seed-ref-*.png`) are overwritten, but slips that real users uploaded stay in the bucket. To empty it, go to Supabase → Storage → `slips` and delete the `payments` and `refunds` folders
+## 13. Moving data from the earlier Vercel + Render + Supabase deployment (optional)
 
-**Never run it once there are real users**, and never put the seed in Render's build or start command
+The default is to start fresh with the seed. To keep the old production data instead:
 
-## 13. Troubleshooting
+1. With the old version still running, clear slips that were sent after their deadline and are still waiting for review — the new version hides them from the queue. This query must return 0 rows (approve or reject the remaining ones first):
+
+   ```sql
+   SELECT p.id, p.kind, p.amount, b.code, b.status AS booking_status, s.status AS seat_change_status
+   FROM "Payment" p
+   JOIN "Booking" b ON b.id = p."bookingId"
+   LEFT JOIN "SeatChange" s ON s.id = p."seatChangeId"
+   WHERE p.status = 'PENDING_VERIFICATION'
+     AND ((p.kind = 'BOOKING' AND b.status <> 'PENDING_VERIFICATION')
+       OR (p.kind = 'SEAT_CHANGE_TOPUP' AND s.status <> 'PENDING_VERIFICATION'));
+   ```
+
+2. Dump the data only: `pg_dump --data-only --no-owner --exclude-table=_prisma_migrations "<old DATABASE_URL>" > data.sql`
+3. Let the new app start once with an empty database so the migration creates the tables, then load the dump with `psql "<Azure DATABASE_URL>" -f data.sql`. The schema is identical, so no conversion is needed
+4. Copy the slip files from the Supabase bucket `slips` to the Azure container `slips`, keeping the `payments/` and `refunds/` prefixes (download them from Supabase Storage, then upload with Azure Storage Explorer or `az storage blob upload-batch`)
+
+Generate new JWT secrets anyway — everyone logs in again, which is fine
+
+## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| Render build fails with `P1001: Can't reach database server` | You're using the Direct (IPv6) connection string — switch to Session pooler (step 2.2). Or the Supabase project is paused |
-| Build fails with `prisma: not found` | The build command lacks `--include=dev`. Use the command from `render.yaml` |
-| Logs show `max clients reached` | `DATABASE_URL` is missing the `?connection_limit=5` suffix |
-| The server won't start and Logs show `ตั้งค่า environment ไม่ถูกต้อง` ("invalid environment configuration") | The next line names the bad variable. Fix it in Render → Environment |
-| Deep links or refreshes give a Vercel 404 | Root Directory isn't set to `client`, or `client/vercel.json` is missing |
-| Refreshing logs you out | Requests aren't going through Vercel (e.g. the code was changed to call the Render URL directly), so the cookie isn't sent |
-| Every request errors and Vercel's Logs show `ROUTER_EXTERNAL_TARGET_ERROR` | The URL in `client/vercel.json` is wrong, or Render took longer than 120 seconds to wake up (try again, or do step 8) |
-| Logs show `⚠️  ยังเก็บสลิปลงดิสก์` ("still storing slips on disk"), or opening a slip gives 404 `SLIP_FILE_MISSING` | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` aren't set. Slips uploaded during that time were stored on Render's disk and are already gone |
-| Supabase says the project is paused | 7 days without activity. Click Restore on the project page, then do step 8 to keep it from happening again |
-| Every API call fails with 403 `DIRECT_ACCESS_FORBIDDEN` | `PROXY_SECRET` differs between Vercel and Render, or Vercel wasn't redeployed after setting it. `<Vercel URL>/api/health` names the problem in `proxySecret` (step 7) |
-| Users get `LOGIN_RATE_LIMITED` or `REGISTER_RATE_LIMITED` after only a few attempts | `TRUST_PROXY` is lower than the real number of proxies, so everyone shares Vercel's IP. Compare it with `proxyHops` (step 7) |
+| The site shows "Application Error" and Log stream shows `ตั้งค่า environment ไม่ถูกต้อง` | The next lines name the bad variable. Fix it in **Environment variables** and apply |
+| Log stream shows `JWT_ACCESS_SECRET … ค่าตัวอย่าง` (sample value) | The secrets are still the ones from `.env.example`; set new random values |
+| The app fails to start with a database error mentioning SSL or `pg_hba.conf` | `DATABASE_URL` lacks `?sslmode=require`, or the server's **Networking** doesn't allow Azure services |
+| `relation "Booking" does not exist` | The tables were never created — set `DB_MIGRATE_ON_START=true` and restart |
+| Log stream shows `⚠️ ยังเก็บสลิปลงดิสก์` ("still storing slips on disk"), or opening a slip gives 404 `SLIP_FILE_MISSING` | `AZURE_STORAGE_CONNECTION_STRING` isn't set. Slips uploaded meanwhile went to the app's disk and are lost on the next deploy |
+| Log stream shows `⚠️ ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` | Set it to `false` (step 4) |
+| Users get `LOGIN_RATE_LIMITED` or `REGISTER_RATE_LIMITED` after only a few attempts | `TRUST_PROXY` doesn't match `proxyHops`, so every visitor shares one IP (step 7) |
+| Refreshing logs you out | The site isn't on HTTPS (the cookie is `Secure`), or `CLIENT_ORIGIN` doesn't match the site URL |
+| The workflow fails at **Deploy** with an authentication error | The publish profile secret is wrong or was reset — download it again (step 6) and check **SCM Basic Auth Publishing Credentials** is On |
+| The site answers 403 "This web app is stopped" | The F1 CPU quota for the day ran out (**Quotas**); it comes back the next day |
+| The first request after a while takes many seconds | The app was asleep — set up the monitor in step 10 |

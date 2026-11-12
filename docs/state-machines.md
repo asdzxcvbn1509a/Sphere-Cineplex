@@ -1,6 +1,6 @@
 # State machines
 
-Every status change below is a compare-and-set update in `server/src/services/` (the expected status is part of the `WHERE`), so two actions racing for the same row can't both win — see [Concurrent status changes](architecture.md#concurrent-status-changes).
+Every status change below is a compare-and-set update in `server/src/CineBook.Web/Services/` (`ExecuteUpdateAsync` with the expected status in the `Where`), so two actions racing for the same row can't both win — see [Concurrent status changes](architecture.md#concurrent-status-changes).
 Durations come from [configuration](configuration.md): `SEAT_HOLD_MINUTES` (10), `REJECTED_RETRY_MINUTES` (10), `CANCEL_CUTOFF_HOURS` (3), `SEAT_CHANGE_CUTOFF_MINUTES` (30)
 There is no transfer after the deadline: a slip is accepted only while a booking or seat change is `PENDING_PAYMENT`. Once it is `EXPIRED`, `POST …/slip` returns 409 `HOLD_EXPIRED`, which tells the customer to contact staff with the booking code
 

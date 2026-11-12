@@ -12,6 +12,13 @@ build/
 server/uploads/
 server/uploads-test/
 
+# .NET build output
+bin/
+obj/
+TestResults/
+*.user
+.vs/
+
 # python (docs/mvc-slides)
 __pycache__/
 *.pyc

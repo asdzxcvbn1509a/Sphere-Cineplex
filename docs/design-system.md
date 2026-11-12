@@ -152,7 +152,7 @@ For the same reason the theme is not `inline`: utilities have to read `var(--col
 - Components use semantic tokens. Palette utilities are for roles the tokens don't cover
 - No hex colors in JSX, and no Tailwind default color or size utilities
 - Every state change must be visible: outlines of controls and selected items reach at least 3:1 against their background
-- The email templates (`server/src/emails/`) can't use the CSS tokens, so they repeat the palette values inline; keep them in step
+- The email templates (`server/src/CineBook.Web/Emails/`) can't use the CSS tokens, so they repeat the palette values inline; keep them in step
 
 ## Changing the design system
 
